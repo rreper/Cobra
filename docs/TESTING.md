@@ -31,7 +31,7 @@ executable `build/tests/test_<name>` linked against `cobra_dep`, `gtest_main` an
 protocol is `gtest`, so individual test names show up in `build/meson-logs/testlog.txt` and in
 `testlog.junit.xml`.
 
-Current status: **14 suites, 153 tests, all green** (2026-10-03). A test run takes well under a second.
+Current status: **15 suites, 162 tests, all green** (2026-10-03). A test run takes well under a second.
 
 ## 2. Test support helpers
 
@@ -70,6 +70,7 @@ no config).
 | `controller` | 13 | `test_single_threaded_controller.py` (all) + mediator behaviour | mediator routing/buffering/publishing/broadcast/logging/UI gate; `ExitEvent`; controller wiring order, validation, `ready_to_shutdown`, error exit code; dummy controller end to end; config round trips |
 | `inertial` | 5 | `test_inertial_plugin.py` (all) + mechanization checks | plugin contract (ranges, reset, continuous vs best solutions, forces/rates, sensor errors); stationary mechanization drift bound; error-model correction; helper closed forms; ring eviction/interpolation |
 | `initialization` | 5 | `test_manual_initialization_plugin.py`, `inertial_alignment/test_static_align_initialization_plugin.py`, `inertial_alignment/test_manual_heading_align_initialization_plugin.py` | manual solution fields; static and manual-heading alignment on 120 s of synthetic data (level, yaw -pi/2, diagonal covariances); gyro-compass recovers a known attitude; PVA-message initialization with start time and sigma override |
+| `preprocessors` | 9 | `test_preprocessor_plugin.py` (all) + time bias | plugin indices/config errors; downsampler counting; IMU rotation (input untouched); time adjuster synthesis within/outside tolerance; baro→altitude value/variance/channel rename/sigma override; time bias; outage window with INFO logs |
 | `orchestration` | 12 | `test_orchestration.py` (standard cases) | init with real fusion/EKF/state-modeling plugins and mock inertial/initializer; config round trip; one channel → many processors; VSB-chain aux; outage propagation; alignment after N messages; `request_solutions` in all forms; end-to-end position update with feedback |
 
 Python tests that correspond to components not yet ported are listed in §9.
@@ -189,7 +190,6 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 
 | Python test | Component to port first | Planned C++ suite |
 |---|---|---|
-| `test_preprocessor_plugin.py` | `StandardPreprocessorPlugin` | `preprocessors` |
 | `test_transport_plugin.py` | LCM transports | `transport` |
 | `test_orchestration.py` (tutorial cases, `test_process_pntos_message_before_aligned`) | tutorial plugins, static alignment | `orchestration` (second fixture) |
 | `test_configutils.py` | — (no generic config utils in C++) | covered by per-config round-trip tests; add any missing cases to the owning suite |

@@ -33,6 +33,7 @@ cobra_sources = files(
   'cobra/inertial/StandardInertialPlugin.cpp',
   'cobra/initialization/Alignment.cpp',
   'cobra/initialization/InitializationPlugins.cpp',
+  'cobra/preprocessing/StandardPreprocessorPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

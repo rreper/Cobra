@@ -4,50 +4,65 @@
 
 namespace pntos::cobra::utils {
 
+#define PNTOS_FOR_EACH_TIMED_TYPE(X) \
+  X(MeasurementImu) \
+  X(MeasurementPosition) \
+  X(MeasurementPositionVelocityAttitude) \
+  X(MeasurementVelocity) \
+  X(MeasurementAltitude) \
+  X(MeasurementBarometer) \
+  X(MeasurementDirection3DToPoints) \
+  X(MeasurementAccumulatedDistanceTraveled) \
+  X(MeasurementAngularVelocity) \
+  X(MeasurementAngularVelocity1D) \
+  X(MeasurementAttitude2D) \
+  X(MeasurementAttitude3D) \
+  X(MeasurementDeltaPosition) \
+  X(MeasurementDeltaRange) \
+  X(MeasurementDeltaRangeToPoint) \
+  X(MeasurementDirection2DToPoints) \
+  X(MeasurementDirectionOfMotion2D) \
+  X(MeasurementDirectionOfMotion3D) \
+  X(MeasurementFrequencyDifference) \
+  X(MeasurementHeading) \
+  X(MeasurementImage) \
+  X(MeasurementMagneticField) \
+  X(MeasurementMagneticFieldMagnitude) \
+  X(MeasurementPositionAttitude) \
+  X(MeasurementRangeRateToPoint) \
+  X(MeasurementRangeToPoint) \
+  X(MeasurementSatnav) \
+  X(MeasurementSatnavSubframe) \
+  X(MeasurementSatnavWithSvData) \
+  X(MeasurementSpecificForce1D) \
+  X(MeasurementSpeed) \
+  X(MeasurementTdoa1Tx2Rx) \
+  X(MeasurementTdoa2Tx1Rx) \
+  X(MeasurementTemperature) \
+  X(MeasurementTime) \
+  X(MeasurementTimeDifference) \
+  X(MeasurementTimeFrequencyDifference)
+
 std::optional<api::Timestamp> time_of_validity(const api::AspnBase& msg) {
-#define PNTOS_TOV_CASE(T)                                                                 \
-  if (auto* p = dynamic_cast<const aspn23_eigen::T*>(&msg)) {                             \
-    return api::Timestamp(p->get_time_of_validity().get_elapsed_nsec());                  \
+#define PNTOS_TOV_CASE(T)                                                         \
+  if (auto* p = dynamic_cast<const aspn23_eigen::T*>(&msg)) {                     \
+    return api::Timestamp(p->get_time_of_validity().get_elapsed_nsec());          \
   }
-  PNTOS_TOV_CASE(MeasurementImu)
-  PNTOS_TOV_CASE(MeasurementPosition)
-  PNTOS_TOV_CASE(MeasurementPositionVelocityAttitude)
-  PNTOS_TOV_CASE(MeasurementVelocity)
-  PNTOS_TOV_CASE(MeasurementAltitude)
-  PNTOS_TOV_CASE(MeasurementBarometer)
-  PNTOS_TOV_CASE(MeasurementDirection3DToPoints)
-  PNTOS_TOV_CASE(MeasurementAccumulatedDistanceTraveled)
-  PNTOS_TOV_CASE(MeasurementAngularVelocity)
-  PNTOS_TOV_CASE(MeasurementAngularVelocity1D)
-  PNTOS_TOV_CASE(MeasurementAttitude2D)
-  PNTOS_TOV_CASE(MeasurementAttitude3D)
-  PNTOS_TOV_CASE(MeasurementDeltaPosition)
-  PNTOS_TOV_CASE(MeasurementDeltaRange)
-  PNTOS_TOV_CASE(MeasurementDeltaRangeToPoint)
-  PNTOS_TOV_CASE(MeasurementDirection2DToPoints)
-  PNTOS_TOV_CASE(MeasurementDirectionOfMotion2D)
-  PNTOS_TOV_CASE(MeasurementDirectionOfMotion3D)
-  PNTOS_TOV_CASE(MeasurementFrequencyDifference)
-  PNTOS_TOV_CASE(MeasurementHeading)
-  PNTOS_TOV_CASE(MeasurementImage)
-  PNTOS_TOV_CASE(MeasurementMagneticField)
-  PNTOS_TOV_CASE(MeasurementMagneticFieldMagnitude)
-  PNTOS_TOV_CASE(MeasurementPositionAttitude)
-  PNTOS_TOV_CASE(MeasurementRangeRateToPoint)
-  PNTOS_TOV_CASE(MeasurementRangeToPoint)
-  PNTOS_TOV_CASE(MeasurementSatnav)
-  PNTOS_TOV_CASE(MeasurementSatnavSubframe)
-  PNTOS_TOV_CASE(MeasurementSatnavWithSvData)
-  PNTOS_TOV_CASE(MeasurementSpecificForce1D)
-  PNTOS_TOV_CASE(MeasurementSpeed)
-  PNTOS_TOV_CASE(MeasurementTdoa1Tx2Rx)
-  PNTOS_TOV_CASE(MeasurementTdoa2Tx1Rx)
-  PNTOS_TOV_CASE(MeasurementTemperature)
-  PNTOS_TOV_CASE(MeasurementTime)
-  PNTOS_TOV_CASE(MeasurementTimeDifference)
-  PNTOS_TOV_CASE(MeasurementTimeFrequencyDifference)
+  PNTOS_FOR_EACH_TIMED_TYPE(PNTOS_TOV_CASE)
 #undef PNTOS_TOV_CASE
   return std::nullopt;
+}
+
+std::shared_ptr<api::AspnBase> with_time_of_validity(const api::AspnBase& msg, api::Timestamp tov) {
+#define PNTOS_SET_TOV_CASE(T)                                                     \
+  if (auto* p = dynamic_cast<const aspn23_eigen::T*>(&msg)) {                     \
+    auto copy = std::make_shared<aspn23_eigen::T>(*p);                            \
+    copy->set_time_of_validity(tov.to_aspn());                                    \
+    return copy;                                                                  \
+  }
+  PNTOS_FOR_EACH_TIMED_TYPE(PNTOS_SET_TOV_CASE)
+#undef PNTOS_SET_TOV_CASE
+  return nullptr;
 }
 
 std::optional<nav::Vector4> quaternion(const PVA& pva) {

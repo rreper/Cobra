@@ -13,6 +13,7 @@ test_sources = {
   'orchestration': files('test_orchestration.cpp'),
   'inertial': files('test_inertial.cpp'),
   'initialization': files('test_initialization.cpp'),
+  'preprocessors': files('test_preprocessors.cpp'),
 }
 
 foreach name, srcs : test_sources

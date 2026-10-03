@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Preprocessors ported (15/15 suites green)
+
+- `StandardPreprocessorPlugin` with the six preprocessors; `utils::with_time_of_validity` added so timestamp
+  rewrites work on any timed ASPN type without mutating the original message.
+- Tests: `preprocessors` (9), ported from `test_preprocessor_plugin.py`. **15/15 suites, 162 tests green.**
+- Next: LCM log transport, then the apps (`dummy/minimal`, `standard/pos_ins`) and acceptance on the example log.
+
 ## 2026-10-03 — Inertial mechanization and alignment ported into Eigen (14/14 suites green)
 
 - Decision: port NavToolkit's mechanization/alignment (~2,300 lines) into Eigen instead of adding NavToolkit

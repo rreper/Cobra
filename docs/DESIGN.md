@@ -97,6 +97,7 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   state_modeling/             blocks, measurement processors, VSBs, provider plugin
   inertial/                   Mechanization, BufferedImu, StandardInertialPlugin  namespace pntos::cobra::inertial
   initialization/             Alignment (ImuModel, static/manual-heading), InitializationPlugins
+  preprocessing/              StandardPreprocessorPlugin (six preprocessors)
   dummy/                      the dummy plugins
   utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins
 src/                          mirrors include/ one-to-one
@@ -130,6 +131,7 @@ Python module → C++ header mapping for the pieces that exist:
 | `navtk.navutils` (the parts Cobra uses) | `utils/navutils.hpp` |
 | `standard_plugins/StandardInertialPlugin.py` + navtk `BufferedImu`/mechanization | `inertial/StandardInertialPlugin.hpp`, `inertial/BufferedImu.hpp`, `inertial/Mechanization.hpp` |
 | `tutorial_plugins/TutorialInitializationPlugin.py`, `standard_plugins/{StaticAlign,ManualHeadingAlign,PvaMessage}InitializationPlugin.py` + navtk alignment | `initialization/InitializationPlugins.hpp`, `initialization/Alignment.hpp` |
+| `standard_plugins/preprocessor/*` | `preprocessing/StandardPreprocessorPlugin.hpp` |
 | `dummy_plugins/*` | `dummy/DummyPlugins.hpp` |
 
 ## 4. Type and idiom mapping Python → C++
@@ -505,11 +507,12 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 9 | `SolutionCache` with typed entries instead of a generic cache | Type safety; same invalidation rules. |
 | 10 | Nested config lists read back as base types | No introspection; providers re-read their own groups (as the Python providers do anyway). |
 | 11 | MSL altitude measurements are rejected until a geoid model is wired in | navtk's geoid lookup is not ported yet (§9). |
+| 13 | Preprocessors return modified copies instead of mutating the message in place | Messages are immutable shared objects in the port. |
 | 12 | `has_virtual_state_block` returns true only for nodes known to the manager (roots included, as Python) | identical; listed because the API doc says otherwise (§12 #5). |
 
 ## 9. Roadmap: what remains and how to do it
 
-Ordered so that the `pos_ins` app becomes runnable as early as possible. 9.1 and 9.2 are done; 9.3 is next. Each item names the Python
+Ordered so that the `pos_ins` app becomes runnable as early as possible. 9.1–9.3 are done; 9.4 (LCM transport) is next. Each item names the Python
 source to port, the planned C++ location, and the tests to port.
 
 ### 9.1 Inertial mechanization — DONE (ported into Eigen, no NavToolkit dependency)
@@ -547,14 +550,14 @@ quaternion is C_sensor_to_nav, so `AlignmentStrategy::request_solution` transpos
 covariance is the 15×15 Pinson block; rows/cols 0–8 become the PVA covariance, 9–14 the bias covariance.
 The numerical RPY Jacobian uses NavToolkit's relative perturbation (`x_i * 0.01`, or `0.01` where `x_i == 0`).
 
-### 9.3 Preprocessors
+### 9.3 Preprocessors — DONE
 
-- **Python:** `standard_plugins/preprocessors/*.py`, `tests/test_preprocessor_plugin.py`.
-- **C++:** `include/pntos/cobra/preprocessing/StandardPreprocessorPlugin.hpp`. Six preprocessors
-  (`ImuRotation`, `TimeAdjuster`, `TimeBias`, `Downsampler`, `Outage`, `BarometerToAltitude`); configs
-  already exist in `configs.hpp`. Identifier order must be the Python order:
-  `['imu_rotator', 'time_adjuster', 'time_bias', 'downsampler', 'outage', 'baro_converter']` — check
-  `StandardPreprocessorPlugin.preprocessor_identifiers` before relying on this.
+`preprocessing/StandardPreprocessorPlugin.hpp`: `DownsamplerPreprocessor`, `ImuRotationPreprocessor`,
+`TimeAdjusterPreprocessor`, `BarometerToAltitudePreprocessor` (ISA formula from navanalysis, inlined),
+`TimeBiasPreprocessor`, `OutagePreprocessor`, and the plugin with the Python identifier order
+`downsampler, imu_rotator, time_adjuster, baro_converter, time_bias, outage`. Deviation: the Python versions
+mutate the incoming message in place; the port returns a modified copy (`utils::with_time_of_validity` rewrites
+a timestamp on any timed ASPN type). A downsampling factor of 0 passes everything (Python would divide by zero).
 
 ### 9.4 LCM transport
 

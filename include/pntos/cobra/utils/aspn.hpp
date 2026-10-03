@@ -18,6 +18,8 @@ using PVA = aspn23_eigen::MeasurementPositionVelocityAttitude;
 /// Time of validity for the ASPN measurement types Cobra handles; nullopt for metadata types.
 std::optional<api::Timestamp> time_of_validity(const api::AspnBase& msg);
 inline bool has_tov(const api::AspnBase& msg) { return time_of_validity(msg).has_value(); }
+/// Deep copy of `msg` with a new time of validity; nullptr if the type has no time of validity.
+std::shared_ptr<api::AspnBase> with_time_of_validity(const api::AspnBase& msg, api::Timestamp tov);
 
 /// A field that ASPN marks optional is "absent" when NaN.
 inline bool present(double v) { return !std::isnan(v); }
