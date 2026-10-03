@@ -7,6 +7,7 @@
 
 #include <pntos/api/api.hpp>
 #include <pntos/cobra/controller/StandardMessageStreamConfig.hpp>
+#include <pntos/cobra/utils/effective_time.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -83,9 +84,11 @@ struct MediatorContext {
   std::recursive_mutex mutex;              ///< serialises process_pntos_message across transports
   std::vector<api::Message> messages;      ///< sequenced buffer, sorted by time of validity
   std::optional<api::Timestamp> last_solution_time;
+  /// Set by the orchestration while it processes an immediate message (see utils/effective_time.hpp).
+  std::optional<api::Timestamp> effective_tov;
 };
 
-class StandardMediator final : public api::Mediator {
+class StandardMediator final : public api::Mediator, public EffectiveTimeSink {
  public:
   StandardMediator(std::shared_ptr<MediatorContext> ctx, std::string attached_plugin_identifier,
                    api::PluginType attached_plugin_type);
@@ -101,6 +104,7 @@ class StandardMediator final : public api::Mediator {
                               const std::optional<std::string>& destination_identifier = std::nullopt) override;
   void log_message(api::LoggingLevel level, const std::string& message) override;
   api::Registry& registry() override;
+  void set_effective_time_of_validity(api::Timestamp tov) override { ctx_->effective_tov = tov; }
 
   const std::shared_ptr<MediatorContext>& context() const { return ctx_; }
 

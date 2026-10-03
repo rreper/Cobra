@@ -2,6 +2,25 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — All 12 log-replay apps ported and passing; legacy Pinson-Q is the app default
+
+- **Default flipped to the Python-compatible Pinson-Q rotation** (`--legacy-q`; `--corrected-q` restores the
+  from-a-copy rotation). Rationale: the goal is parity with Python; the corrected mode needs a yaw gyro
+  random-walk retune before it can be the default (DESIGN.md §9.6).
+- **Remaining plugins ported**: tutorial state model / orchestration / UI summary plugin (`tutorial/`), the
+  diagnostic log plugin with a dependency-free HDF5 writer (`diagnostics/`, `utils/hdf5.hpp`, files verified
+  with h5py: `estimate (5181, 18)`, `sigma`, `state_labels (1, 18)`, `time`), and the extras zero-velocity
+  preprocessor (`extras/`). New apps: `pos_ins_record_states`, `tutorial_pos_ins`, `tutorial_pos_vel_ins`,
+  `pos_ins_zerovel2d`. New configs: `ZeroVelocity2dGeneratorConfig`, `TutorialOrchestrationConfig`,
+  `UiLogPlottingConfig`. `Pinson15NedBlock` gained `tutorial_model`.
+- **outage_sim gap closed (307 → 305.5 m = Python).** Epoch-by-epoch comparison against a Python run showed
+  the filters identical to 1 cm throughout the 600 s outage; only the 1 Hz solution grid differed in phase
+  (up to 0.4 s), because Python's mediator reads the IMU timestamp after the time adjuster has replaced it.
+  `utils/effective_time.hpp` lets the orchestration report that time; the mediator uses it. Former deviation
+  #14 is resolved and every app now produces Python's epoch count (2570 / 2593).
+- **Acceptance (legacy mode): 12/12 PASS**, corrected mode 3/12 (tilt limits). 19 suites, 186 tests green.
+- Not portable here: `pos_ins_network` (network LCM), `pos_ins_ros`, `pos_ins_ui`.
+
 ## 2026-10-03 — Yaw investigation closed, seven more apps, two-mode acceptance
 
 - **Root cause of the yaw gap found and proven.** Parity harnesses showed every numerical component (nav helpers,

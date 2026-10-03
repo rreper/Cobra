@@ -71,7 +71,10 @@ class StandardOrchestrationPlugin final : public api::OrchestrationPlugin {
   void apply_inertial_feedback();
   void perform_measurement_update(const api::Message& message, const std::string& target_mp);
   void send_message_as_aux_data(const api::Message& message);
-  std::optional<std::vector<api::Message>> preprocess_message(const api::Message& message);
+  /// Runs the preprocessor chain. `effective_tov` (optional) receives the time the original message
+  /// would carry after Python's in-place preprocessing (utils/effective_time.hpp).
+  std::optional<std::vector<api::Message>> preprocess_message(const api::Message& message,
+                                                              std::optional<api::Timestamp>* effective_tov = nullptr);
 
   std::string identifier_;
   api::Mediator* mediator_ = nullptr;

@@ -40,6 +40,12 @@ cobra_sources = files(
   'cobra/transport/LcmLog.cpp',
   'cobra/transport/LcmConversions.cpp',
   'cobra/transport/LcmLogTransportPlugin.cpp',
+  'cobra/utils/hdf5.cpp',
+  'cobra/diagnostics/DiagnosticLogPlugin.cpp',
+  'cobra/extras/AdvancedPreprocessorPlugin.cpp',
+  'cobra/tutorial/TutorialStateModelingPlugin.cpp',
+  'cobra/tutorial/TutorialOrchestrationPlugin.cpp',
+  'cobra/tutorial/UiLogPlottingPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

@@ -667,6 +667,20 @@ PNTOS_PP_IMPL(
       c.start_time = r.require<double>("start_time");
       c.end_time = r.require<double>("end_time");
     })
+PNTOS_PP_IMPL(
+    ZeroVelocity2dGeneratorConfig,
+    {
+      w.scalar("trigger_dt_sec", trigger_dt_sec);
+      w.scalar("lateral_vel_sigma", lateral_vel_sigma);
+      w.scalar("vertical_vel_sigma", vertical_vel_sigma);
+      w.scalar("output_channel", output_channel);
+    },
+    {
+      c.trigger_dt_sec = r.optional<double>("trigger_dt_sec").value_or(0.0);
+      c.lateral_vel_sigma = r.require<double>("lateral_vel_sigma");
+      c.vertical_vel_sigma = r.require<double>("vertical_vel_sigma");
+      c.output_channel = r.require<std::string>("output_channel");
+    })
 #undef PNTOS_PP_IMPL
 
 // ----------------------------------------------------------------------------- alignment configs
@@ -915,6 +929,49 @@ std::optional<LcmTransportConfig> LcmTransportConfig::from_registry(api::Mediato
   c.group_ = group;
   c.url = r.optional<std::string>("url").value_or("tcpq://");
   c.subscribe_to = r.optional<std::string>("subscribe_to").value_or("^((?!pntos).)*$");
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+}  // namespace pntos::cobra
+
+// ----------------------------------------------------------------------------- tutorial / UI configs
+
+namespace pntos::cobra {
+
+void TutorialOrchestrationConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("position_channel", position_channel);
+  w.scalar("velocity_channel", velocity_channel);
+}
+
+std::optional<TutorialOrchestrationConfig> TutorialOrchestrationConfig::from_registry(api::Mediator& m,
+                                                                                      const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  TutorialOrchestrationConfig c;
+  c.group_ = group;
+  c.position_channel = r.require<std::string>("position_channel");
+  c.velocity_channel = r.optional<std::string>("velocity_channel").value_or("unused");
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+void UiLogPlottingConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("logfile", logfile);
+  w.scalar("solution_channel", solution_channel);
+  w.scalar("truth_channel", truth_channel);
+}
+
+std::optional<UiLogPlottingConfig> UiLogPlottingConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  UiLogPlottingConfig c;
+  c.group_ = group;
+  c.logfile = r.require<std::string>("logfile");
+  c.solution_channel = r.require<std::string>("solution_channel");
+  c.truth_channel = r.require<std::string>("truth_channel");
   if (!r.ok()) return std::nullopt;
   return c;
 }

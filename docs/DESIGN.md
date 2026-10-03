@@ -99,13 +99,16 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   initialization/             Alignment (ImuModel, static/manual-heading), InitializationPlugins
   preprocessing/              StandardPreprocessorPlugin (six preprocessors)
   transport/                  LcmLog (reader/writer), LcmConversions, LcmLogTransportPlugin  namespace pntos::cobra::lcm
+  tutorial/                   TutorialStateModelingPlugin, TutorialOrchestrationPlugin, UiLogPlottingPlugin, TutorialPlugins.hpp
+  diagnostics/                DiagnosticLogPlugin (records the `diagnostics` registry group to HDF5)
+  extras/                     AdvancedPreprocessorPlugin (ZeroVelocity2dGenerator)
   dummy/                      the dummy plugins
-  utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins
+  utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins, hdf5 (writer), effective_time
 src/                          mirrors include/ one-to-one
 tests/                        test_<suite>.cpp + test_support.hpp
-apps/                         dummy/minimal, standard/pos_ins
+apps/                         dummy/minimal, standard/* (9 apps), tutorial/* (2), extras/pos_ins_zerovel2d
 third_party/                  vendored header-only code (lcm_coretypes.h, lcm-gen ASPN classes), see NOTICE.md
-tools/                        compare_to_truth.py (needs the Cobra venv)
+tools/                        run_acceptance.py, test_matrix.py, compare_to_truth.py, parity tools (see TESTING.md §8a)
 docs/                         this file, TESTING.md, PROGRESS.md, COBRA_ANALYSIS.md
 Cobra/                        the Python original (submodule)
 ```
@@ -136,7 +139,12 @@ Python module → C++ header mapping for the pieces that exist:
 | `tutorial_plugins/TutorialInitializationPlugin.py`, `standard_plugins/{StaticAlign,ManualHeadingAlign,PvaMessage}InitializationPlugin.py` + navtk alignment | `initialization/InitializationPlugins.hpp`, `initialization/Alignment.hpp` |
 | `standard_plugins/preprocessor/*` | `preprocessing/StandardPreprocessorPlugin.hpp` |
 | `standard_plugins/LcmLogTransportPlugin.py`, `utils/lcm_utils.py`, `aspn23_lcm_conversions` | `transport/LcmLogTransportPlugin.hpp`, `transport/LcmLog.hpp`, `transport/LcmConversions.hpp` |
-| `pntos-cobra-apps/.../standard/pos_ins.py`, `dummy/minimal.py` | `apps/standard/pos_ins.cpp`, `apps/dummy/minimal.cpp` |
+| `pntos-cobra-apps/.../standard/*.py`, `dummy/minimal.py` | `apps/standard/*.cpp` (shared `app_common.hpp`), `apps/dummy/minimal.cpp` |
+| `pntos-cobra-apps/.../tutorial/{pos_ins,pos_vel_ins}.py` | `apps/tutorial/{pos_ins,pos_vel_ins}.cpp` (shared `tutorial_common.hpp`) |
+| `pntos-cobra-apps/.../extras/pos_ins_zerovel2d.py` | `apps/extras/pos_ins_zerovel2d.cpp` |
+| `tutorial_plugins/state_modeling/*`, `tutorial_plugins/TutorialPos{,Vel}OrchestrationPlugin.py`, `UiLogPlottingPlugin.py`, `TutorialLcmLogTransportPlugin.py` | `tutorial/TutorialStateModelingPlugin.hpp`, `tutorial/TutorialOrchestrationPlugin.hpp`, `tutorial/UiLogPlottingPlugin.hpp`, `tutorial/TutorialPlugins.hpp` (transport alias) |
+| `standard_plugins/DiagnosticLogPlugin.py`, `utils/hdf5.py` | `diagnostics/DiagnosticLogPlugin.hpp`, `utils/hdf5.hpp` |
+| `extras/plugins/preprocessor/*`, `extras/config/PreprocessorConfig.py` | `extras/AdvancedPreprocessorPlugin.hpp`, `ZeroVelocity2dGeneratorConfig` in `config/configs.hpp` |
 | `dummy_plugins/*` | `dummy/DummyPlugins.hpp` |
 
 ## 4. Type and idiom mapping Python → C++
@@ -495,13 +503,73 @@ flowchart TD
 - `request_solutions` accepts exactly one time; out-of-range times are replaced by the latest inertial
   time (DEBUG log) as in Python.
 
+### 7.10 Tutorial plugins (`tutorial/`)
+
+The tutorial apps use a deliberately simpler stack than the standard one, ported one-to-one:
+
+- `TutorialPosInsStateModelProvider` / `TutorialPosInsStateModelingPlugin`: blocks `["pinson15", "fogm"]`,
+  processors `["pinson_velocity", "pinson_with_ned_fogm_position"]`, no virtual blocks. The Pinson block is
+  `Pinson15NedBlock` with `tutorial_model = true` (no Schwartz gravity-gradient terms in F, no `scale_phi`),
+  reading a bare `ImuConfig` from the group; the FOGM block is the standard `FogmBlock`. The tutorial velocity
+  processor is a fixed 3×15 `H = [0 I 0 0 0]`; the tutorial position processor's tilt columns are the Python
+  numpy broadcast of `C·l` into every row (kept verbatim; it is the tutorial's linearisation, not the standard
+  lever-arm skew). The plugin's `legacy_q_rotation` constructor flag selects the Python-compatible process-noise
+  rotation because the tutorial has no `PinsonStateBlockConfig` to carry it.
+- `TutorialOrchestrationPlugin` (`TutorialPosOrchestrationPlugin`, `TutorialPosVelOrchestrationPlugin`): manual
+  initial solution (`TutorialInitializationPlugin`), IMU → time adjuster → IMU rotator → inertial; position /
+  velocity → time bias → aux to processor and Pinson → one `propagate` to the measurement time → `update` →
+  full feedback (reset inertial to the corrected solution, subtract bias estimates, zero the Pinson states).
+  No alignment phase, no `max_prop_interval` chunking, no solution cache, no outage propagation. Plugins are
+  picked by kind (`sort_plugins`) rather than by the list position the Python relies on.
+- `UiLogPlottingPlugin`: the Python plugin opens matplotlib windows at shutdown. Without a plotting library the
+  port performs the analysis instead: it reads the solution and truth PVAs back from the output log, logs the RMS
+  NED position / velocity / RPY errors and writes them per epoch to `<log dir>/<log stem>/pva_errors.csv` (the
+  directory the Python plugin saves its figures to).
+- `TutorialLcmLogTransportPlugin` is an alias of `LcmLogTransportPlugin` (identical once
+  `channels_to_process` is unset).
+
+### 7.11 Diagnostic log and the HDF5 writer (`diagnostics/`, `utils/hdf5.hpp`)
+
+`DiagnosticLogPlugin` registers a group-wide notify on the `diagnostics` registry group and appends every
+notified value to a per-key list; at shutdown it writes the lists with `utils::save_to_hdf5_file`.
+`StandardFusionEngine` fills the group (`state_labels` once, then `time`, `estimate`, `sigma` after every
+propagate and/or update, `FusionEngineConfig::save_x_and_p_after_{prop,update}`); peek-ahead clones are
+excluded, matching the Python where the deep-copied engine writes to a deep-copied registry.
+
+There is no libhdf5 on the build machine and the port adds no dependencies, so `utils::Hdf5Writer` writes
+the format directly: a version-0 superblock, a root group (local heap, one B-tree node, one symbol table node
+with sorted entries) and one contiguous dataset per key with version-1 object headers (dataspace, datatype,
+layout messages). Supported types: int64, float64, uint8 and fixed-length ASCII strings; a registry `Matrix`
+with one column is written as a numpy 1-D array (`(N, n)`), other matrices as `(N, rows, cols)`. Files are
+read back by h5py in `tools/run_acceptance.py` (`check_hdf5`) and in the `diagnostics` test run.
+
+### 7.12 Extras preprocessor (`extras/`)
+
+`ZeroVelocity2dGenerator` emits, next to the triggering message, a sensor-frame `MeasurementVelocity` with
+`x` absent (NaN, Python `None`), `y = z = 0` and a 2×2 covariance from the lateral / vertical sigmas, at most
+once per `trigger_dt_sec`; `PinsonBodyVelocityMeasurementProcessor` already handles the missing axis by
+masking. `AdvancedPreprocessorPlugin` provides it under the identifier `zero_velocity2d_generator`
+(`ZeroVelocity2dGeneratorConfig`), and `StandardOrchestrationPlugin` finds it through the normal
+preprocessor-config lookup across all preprocessor plugins, exactly as the Python `PreprocessorManager` does.
+
+### 7.13 Effective message time (`utils/effective_time.hpp`)
+
+Python preprocessors mutate the message object, and `StandardMediator.process_pntos_message` reads the time of
+validity of an *immediate* message after the orchestration has processed it, so the Python 1 Hz solution grid
+and buffer release run on the time-adjusted IMU timestamps. With immutable messages (deviation 13) the port
+reproduces that through `EffectiveTimeSink`: the orchestration reports the time the first preprocessed output
+carries (`report_effective_time`), `StandardMediator` stores it in `MediatorContext::effective_tov`, and the
+mediator uses it in place of the raw time for that message. This is what makes the epoch count (2570) and
+the outage_sim statistics identical to Python; without it the solution grid drifted by up to 0.4 s over the
+run (former deviation 14).
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
 
 | # | Deviation | Why |
 |---|---|---|
-| 1 | Pinson15 process-noise matrix is rotated from a copy, not in place (default); `PinsonStateBlockConfig::legacy_q_rotation = true` reproduces Python | Python bug (`COBRA_ANALYSIS.md` §12 #1). The bug inflates yaw process noise, and the Python integration limits were tuned with it; legacy mode reproduces Python's results to three digits, the corrected mode fails the pos_ins tilt limit by 4 %. Tests `QIsNotMutatedAcrossCalls`, `LegacyQRotationReproducesThePythonMutation`. |
+| 1 | Pinson15 process-noise matrix is rotated from a copy when `PinsonStateBlockConfig::legacy_q_rotation = false`; the apps default to `true` (Python-compatible, `--corrected-q` switches) | Python bug (`COBRA_ANALYSIS.md` §12 #1). The bug inflates yaw process noise, and the Python integration limits were tuned with it; legacy mode reproduces Python's results to three digits, the corrected mode fails the pos_ins tilt limit by 4 %. Tests `QIsNotMutatedAcrossCalls`, `LegacyQRotationReproducesThePythonMutation`. |
 | 2 | Fusion engine `update` uses the virtual block width for a VSB-targeted processor | Python bug (§12 #14). Test `UpdateThroughRealAndVirtualBlocks`. |
 | 3 | EKF uses Joseph form + LDLT by default | Numerical robustness; `set_joseph_form(false)` restores Python's arithmetic for parity tests. |
 | 4 | Shape errors throw instead of raising inside numpy | C++ idiom; same observable effect (crash on programmer error). |
@@ -513,7 +581,9 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 10 | Nested config lists read back as base types | No introspection; providers re-read their own groups (as the Python providers do anyway). |
 | 11 | MSL altitude measurements are rejected until a geoid model is wired in | navtk's geoid lookup is not ported yet (§9). |
 | 13 | Preprocessors return modified copies instead of mutating the message in place | Messages are immutable shared objects in the port. |
-| 14 | The mediator's buffer-release and publish logic uses the raw message timestamp | Follows from 13. Python's mediator sees the preprocessor-adjusted time for immediate messages (`COBRA_ANALYSIS.md` §12 #15), which shifts its 1 Hz solution grid by two IMU samples and changes the epoch count (2570 vs 2572 on the example log). Not a filter difference: at shared epochs the solutions agree to 0.03° yaw. |
+| 14 | *(resolved)* The mediator now uses the orchestration-reported effective time of immediate messages (§7.13) instead of the raw timestamp | Reproduces the Python side effect of in-place preprocessing (`COBRA_ANALYSIS.md` §12 #15) without mutable messages; epoch counts and the outage_sim statistics now match Python exactly. |
+| 15 | `UiLogPlottingPlugin` writes an error summary and a per-epoch CSV instead of opening matplotlib figures | No plotting library in the port (§7.10). |
+| 16 | HDF5 diagnostic log: `bool` values are written as `uint8` without the `'bool'` attribute, `Message` values are skipped with a WARN | Python stores pickles; attributes are not needed by the plot tool. |
 | 12 | `has_virtual_state_block` returns true only for nodes known to the manager (roots included, as Python) | identical; listed because the API doc says otherwise (§12 #5). |
 
 ## 9. Roadmap: what remains and how to do it
@@ -578,48 +648,48 @@ converted (e.g. `measurement_direction_3d_to_points`) are logged as WARN and ski
 `*_from`/`*_to` functions in `LcmConversions.cpp` to support more. The network `LcmTransportPlugin` is not
 ported (it needs liblcm's UDP/TCP providers); its config exists for registry compatibility.
 
-### 9.5 Apps and acceptance — DONE for pos_ins
+### 9.5 Apps and acceptance — DONE for all 12 log-replay apps
 
-`apps/dummy/minimal.cpp` and `apps/standard/pos_ins.cpp` (same configuration values as the Python app; the
-input log defaults to the dataset inside the Cobra venv, output to `pntos_output.log`). `tools/compare_to_truth.py`
-(run with the Cobra venv) computes NED position / velocity / RPY RMS of a solution log against the
-`/sensor/ins-d/pva` truth channel. Result on the 43-minute example log, C++ vs the Python baseline from
-`COBRA_ANALYSIS.md` §2:
+`apps/` holds every Python integration app that does not need a network transport, ROS or the UI server:
+nine standard apps (`pos_ins`, `pos_vel_ins`, `posvel_ins`, `pos_ins_leverarm`, `pos_ins_bodyvel`,
+`outage_sim`, `pos_ins_vsb`, `direction_to_points`, `pos_ins_record_states`), the two tutorial apps
+(`tutorial_pos_ins`, `tutorial_pos_vel_ins`) and the extras app (`pos_ins_zerovel2d`), plus `dummy/minimal`.
+All take `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q]`; the input defaults to the
+dataset inside the Cobra venv. **The apps default to the Python-compatible Pinson-Q mode** (`--legacy-q`),
+because the goal is to reproduce the Python results; `--corrected-q` applies the configured sigmas as written.
 
-| | Python (`COBRA_ANALYSIS.md` §2 script) | Python (`tools/compare_to_truth.py`) | C++ (`tools/compare_to_truth.py`) |
+`tools/run_acceptance.py` (Cobra venv) replays every app in both modes and applies the Python integration-test
+checks (per-axis std and max limits, 1/2/3σ coverage, epoch count ±5, NaNs, start/end within 3 s, and for
+`pos_ins_record_states` an h5py read-back of the diagnostics file); it writes `docs/acceptance.json`, which
+`tools/test_matrix.py` renders into `docs/TEST_MATRIX.md` §4. Result (2026-10-03, example log):
+
+| Mode | Apps passing the Python limits | Epochs | Notes |
 |---|---|---|---|
-| Position RMS N / E / D [m] | 0.92 / 1.24 / 1.67 | 0.921 / 1.235 / 1.667 | 0.917 / 1.233 / 1.668 |
-| Position max abs N / E / D [m] | 2.86 / 2.87 / 3.76 | 2.86 / 2.87 / 3.76 | 2.73 / 2.85 / 3.75 |
-| Velocity RMS N / E / D [m/s] | 0.084 / 0.093 / 0.043 | 0.0837 / 0.0930 / 0.0431 | 0.0850 / 0.0939 / 0.0423 |
-| Attitude RMS roll / pitch / yaw [deg] | 0.074 / 0.092 / 0.811 | 0.089 / 0.078 / 0.810 | 0.090 / 0.079 / 0.847 |
-| Epochs | 2570 | 2570 | 2572 |
-| Wall / CPU time | 42 s / 37.8 s (loaded machine) | 22.6 s / 32.2 s | 2.1 s / 1.8 s |
-| Peak RSS | — | 196 MB | 8 MB |
+| legacy (default) | **12 / 12** | 2570 (tutorial 2593) = Python | pos_ins yaw std 0.805°, outage_sim pos std 305.5 m — identical to the Python run to the printed digits |
+| corrected (`--corrected-q`) | 3 / 12 (leverarm, outage_sim, tutorial_pos_ins) | same | fails only tilt (and for the velocity apps, velocity) limits that were set with the inflated yaw noise |
 
-Position agrees to 0.4 %, velocity to 2 %, roll/pitch to 1 %; yaw RMS is 4.6 % higher in C++. **Resolved
-(2026-10-03):** step-by-step tracing (`PNTOS_TRACE_FILE`, see below) showed identical propagate/update sequences
-and identical inputs, with the first divergence inside the second Pinson propagation: the port rotates a fresh
-copy of the process-noise matrix while Python re-rotates its stored one (deviation #1). With
-`--legacy-q` the C++ pos_ins reproduces Python to three significant digits in every metric (yaw std 0.805°,
-68.1 % within 1σ) and passes the Python limits; the corrected mode has yaw std 0.845° and 64.9 % within 1σ. The
-Joseph form, the inertial layer, the alignment and all processors were verified identical to Python by
-`tools/parity_check.py` and `tools/inertial_parity_check.py` (machine precision). The remaining 20 ms offset of
-the 1 Hz solution grid is deviation #14 and does not affect the filter. `tools/run_acceptance.py` runs every app
-in both modes and `docs/TEST_MATRIX.md` shows both columns.
+Timing: 1.4–5.5 s wall per app on the 43-minute log against 22–40 s for Python; `pos_ins` peak RSS 8 MB vs
+196 MB.
+
+History of the gap-closing (kept because the tools are reusable): position agreed to 0.4 % from the first run,
+yaw RMS was 4.6 % high. Parity harnesses (`tools/parity_check.py`, `tools/inertial_parity_check.py`) proved
+every numerical component identical to Python/navtk at machine precision; a propagate/update trace
+(`PNTOS_TRACE_FILE`, `tools/trace_python_pos_ins.py`) showed identical step sequences and the first divergence
+inside the second Pinson propagation — deviation #1 (Python re-rotates its stored process-noise matrix). The
+last residual, `outage_sim` at 307 m vs Python's 305.5 m, was an epoch-by-epoch comparison away: the filters
+agreed to 1 cm throughout the outage and only the 1 Hz solution grid differed in phase (§7.13, former
+deviation #14).
 
 Diagnostics hooks kept in the code: `PNTOS_TRACE_FILE=<path>` makes `StandardFusionEngine` write one line per
 propagate/update (plus `<path>.aux` with the Pinson aux inputs from the orchestration); `PNTOS_TRACE_FULL=1` adds
-the full state and covariance diagonal. `tools/trace_python_pos_ins.py` produces the same trace from the Python
-app for side-by-side comparison.
-
-The remaining twelve apps of the integration matrix (`COBRA_ANALYSIS.md` §14)
-need their plugins ported first (velocity, body-velocity, direction-to-points processors already exist; the
-UI, diagnostics and tutorial plugins do not).
+the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Geoid model (MSL altitude), UI plugin and registry views, diagnostic/HDF5 log plugin, ROS transport,
-Buscat controller, tutorial plugins, the C ABI shim.
+Geoid model (MSL altitude), the UI server plugin and registry views (`pos_ins_ui` app), network LCM transport
+(`pos_ins_network`, needs liblcm or a UDP multicast implementation), ROS transport, Buscat controller, the
+C ABI shim. If the corrected Pinson-Q mode is ever to become the default, re-tune the yaw gyro random-walk sigma
+(the configured value is optimistic: 65 % instead of 68 % of yaw errors inside 1σ) and the tilt limits.
 
 ## 10. Recipes
 

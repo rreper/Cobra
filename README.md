@@ -25,7 +25,7 @@ include/pntos/api/      the pntOS plugin API in C++ (mirrors pntOS-C headers / C
 include/pntos/cobra/    public headers of the Cobra plugin implementations
 src/                    implementation
 tests/                  GoogleTest unit tests (ported from Cobra's pytest suite) + golden vectors
-apps/                   runnable apps (dummy/minimal, standard/pos_ins, ...)
+apps/                   runnable apps: dummy/minimal, standard/* (9), tutorial/* (2), extras/pos_ins_zerovel2d
 docs/                   analysis, progress log, diagrams
 subprojects/            meson wraps: eigen, gtest, aspn-generated, pntos-c, (navtoolkit)
 Cobra/                  the Python original, as a submodule, used for golden-vector generation
@@ -49,13 +49,22 @@ All dependencies are fetched as meson subprojects on first `setup`; nothing need
 2. Port the class and its Python test side by side (`docs/TESTING.md` §6), keeping names identical.
 3. `meson test -C build` must stay green; add a dated entry to `docs/PROGRESS.md`; commit and push.
 
-## Running the pos_ins app
+## Running the apps
 
 ```bash
 .venv/bin/meson compile -C build
 ./build/apps/pos_ins out.log                      # input defaults to the Cobra example dataset in Cobra/.venv
+./build/apps/pos_ins out.log in.log --corrected-q # Pinson Q rotated from a copy (default: --legacy-q, Python-compatible)
+./build/apps/pos_ins_record_states out.log        # also writes out.hdf5 (filter states after every propagate/update)
+./build/apps/tutorial_pos_ins out.log             # tutorial stack; logs RMS errors vs truth and writes out/pva_errors.csv
 Cobra/.venv/bin/python tools/compare_to_truth.py out.log   # NED position / velocity / RPY RMS vs truth
+Cobra/.venv/bin/python tools/run_acceptance.py             # all 12 apps, both modes, Python integration limits
 ```
+
+Apps: `pos_ins`, `pos_vel_ins`, `posvel_ins`, `pos_ins_leverarm`, `pos_ins_bodyvel`, `outage_sim`, `pos_ins_vsb`,
+`direction_to_points`, `pos_ins_record_states`, `tutorial_pos_ins`, `tutorial_pos_vel_ins`, `pos_ins_zerovel2d`.
+In the default (Python-compatible) mode all 12 pass the Python integration-test limits with Python's epoch counts
+(`docs/TEST_MATRIX.md` §4).
 
 ## Acceptance
 

@@ -31,7 +31,11 @@ executable `build/tests/test_<name>` linked against `cobra_dep`, `gtest_main` an
 protocol is `gtest`, so individual test names show up in `build/meson-logs/testlog.txt` and in
 `testlog.junit.xml`.
 
-Current status: **16 suites, 169 tests, all green** (2026-10-03). A test run takes well under a second.
+Current status: **19 suites, 186 tests, all green** (2026-10-03). A test run takes about a second.
+
+The `diagnostics` suite writes small HDF5 files; set `PNTOS_TEST_OUT=<dir>` to choose where (default: the
+system temp directory) and open them with h5py to double-check the writer (`tools/run_acceptance.py` does this
+for the real `pos_ins_record_states` output).
 
 The per-test pass/fail matrix lives in `docs/TEST_MATRIX.md`. It is generated, not hand-written:
 
@@ -84,6 +88,9 @@ no config).
 | `initialization` | 5 | `test_manual_initialization_plugin.py`, `inertial_alignment/test_static_align_initialization_plugin.py`, `inertial_alignment/test_manual_heading_align_initialization_plugin.py` | manual solution fields; static and manual-heading alignment on 120 s of synthetic data (level, yaw -pi/2, diagonal covariances); gyro-compass recovers a known attitude; PVA-message initialization with start time and sigma override |
 | `preprocessors` | 9 | `test_preprocessor_plugin.py` (all) + time bias | plugin indices/config errors; downsampler counting; IMU rotation (input untouched); time adjuster synthesis within/outside tolerance; baro→altitude value/variance/channel rename/sigma override; time bias; outage window with INFO logs |
 | `lcm_transport` | 7 | `test_transport_plugin.py` (log parts) + round trips | log write/read; encode/decode of all six supported types incl. absent quaternion; decoding the first 3000 events of the real example log; replay with shutdown flag and UI gate group; channel filter + output recording; threaded listen/stop; same input/output error |
+| `tutorial` | 7 | `test_orchestration.py` (tutorial cases) + new | tutorial / UI configs round trip; provider indices and rejection paths; tutorial velocity and position models (z, H incl. the numpy-broadcast tilt columns, h Jacobian check); orchestration init for pos and pos/vel, stream config, 2 s of IMU + position + velocity updates with feedback and `request_solutions`; UI plugin warnings for missing / invalid logs |
+| `extras` | 3 | — (Python has no unit test; covered by the zerovel2d app) | `ZeroVelocity2dGeneratorConfig` round trip incl. base-type read-back; plugin index / config errors; first-trigger, trigger_dt gating, channel filter, NaN x, 2×2 R, generated message independence |
+| `diagnostics` | 5 | `test_diagnostic_log_plugin.py`, `test_hdf5utils.py` (write half) | HDF5 superblock / EOF address / file bytes; bad dataset names; store serialisation incl. 1-D squeeze and mixed-type abandonment; plugin records every notification (incl. unchanged re-sets, as Python) and writes the file at shutdown; no-mediator error path |
 | `orchestration` | 12 | `test_orchestration.py` (standard cases) | init with real fusion/EKF/state-modeling plugins and mock inertial/initializer; config round trip; one channel → many processors; VSB-chain aux; outage propagation; alignment after N messages; `request_solutions` in all forms; end-to-end position update with feedback |
 
 Python tests that correspond to components not yet ported are listed in §9.
@@ -189,14 +196,22 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 ## 8. Acceptance plan for the applications
 
 1. **Unit parity** — every Python test file in §3 and §9 ported and green. Done for everything except the
-   network LCM transport, the UI/diagnostics layer and the tutorial/Buscat plugins.
-2. **Golden replay** — DONE: `build/apps/pos_ins OUT.log` replays the example log (2.1 s).
-3. **Compare** — DONE: `tools/run_acceptance.py` applies the Python integration-test limits to every ported
-   app in both Pinson-Q modes; in legacy (Python-compatible) mode the results match Python to three digits.
-   Re-run after any change to the filter math and regenerate `docs/TEST_MATRIX.md`.
-4. **Repeat for the other 12 apps** in the integration matrix (`COBRA_ANALYSIS.md` §14) as their plugins
-   are ported.
-5. **Performance** — record wall and CPU time next to Python's 37.75 s; expect an order of magnitude less.
+   network LCM transport, the UI server layer and the Buscat/ROS plugins.
+2. **Golden replay** — DONE: `build/apps/pos_ins OUT.log` replays the example log (2.4 s).
+3. **Compare** — DONE: `tools/run_acceptance.py` applies the Python integration-test limits to every app in
+   both Pinson-Q modes. In the default legacy (Python-compatible) mode **all 12 log-replay apps pass** with
+   Python's exact epoch counts; the numbers match the Python runs to the printed digits (`pos_ins` yaw std
+   0.805°, `outage_sim` position std 305.5 m). Re-run after any change to the filter math and regenerate
+   `docs/TEST_MATRIX.md`:
+
+   ```bash
+   Cobra/.venv/bin/python tools/run_acceptance.py            # ~1 min; writes docs/acceptance.json
+   Cobra/.venv/bin/python tools/run_acceptance.py --only outage_sim --modes legacy
+   python3 tools/test_matrix.py                              # renders the matrix
+   ```
+4. **Not replayable here**: `pos_ins_network` (network LCM transport), `pos_ins_ros`, `pos_ins_ui` — see
+   DESIGN.md §9.6.
+5. **Performance** — DONE: 1.4–5.5 s wall per app against 22–40 s for Python (same machine, same log).
 
 ## 8a. Parity and tracing tools
 
@@ -205,7 +220,8 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 | `build/tools/parity_dump` + `Cobra/.venv/bin/python tools/parity_check.py` | Fixed inputs with a rotated attitude and non-zero velocity through nav helpers, Pinson dynamics, three measurement processors, the PinsonErrorToStandard VSB and `apply_error_states`, in C++ and in Python/navtk; prints the max difference per quantity (expected: machine precision). |
 | `build/tools/inertial_parity_dump` + `tools/inertial_parity_check.py` | Replays the first 25 s of the example log through alignment + `BufferedImu` in both languages: alignment solution/covariance/biases, buffered solutions, forces/rates, resets, no-reset-since. |
 | `PNTOS_TRACE_FILE=path ./build/apps/pos_ins …` and `tools/trace_python_pos_ins.py in out trace` | One line per propagate/update with trace(P) and selected states (`PNTOS_TRACE_FULL=1` for all), from both implementations; diff them to find the first diverging step. |
-| `tools/run_acceptance.py` | Runs every app on the example log in `corrected` and `legacy` Pinson-Q modes and applies the Python integration-test limits; writes `docs/acceptance.json` for the matrix. |
+| `tools/run_acceptance.py` | Runs every app on the example log in `legacy` (default) and `corrected` Pinson-Q modes and applies the Python integration-test limits; for `pos_ins_record_states` it also opens the HDF5 diagnostics file with h5py; writes `docs/acceptance.json` for the matrix. |
+| Epoch-by-epoch comparison | To compare two solution logs directly, read both with `run_acceptance.read_pva`, interpolate truth to each grid and difference the NED errors (that is how the outage_sim grid-phase issue was found: filters identical to 1 cm, solution epochs 0.4 s apart). |
 
 Use the first two whenever a numerical component changes; use the trace when an application-level result
 moves without an obvious cause (that is how deviation #1's impact was found).

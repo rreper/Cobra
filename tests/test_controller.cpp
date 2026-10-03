@@ -224,6 +224,66 @@ TEST_F(MediatorTest, PublishesSolutionsAtTheInterval) {
   EXPECT_EQ(med->filter_description_list(), std::vector<std::string>{"BEST_ESTIMATE"});
 }
 
+// Orchestration that, like Python's in-place time adjuster, leaves an immediate message 20 ms later
+// than it arrived and tells the mediator so (utils/effective_time.hpp).
+class AdjustingOrchestration final : public api::OrchestrationPlugin {
+ public:
+  void init_plugin(const std::optional<std::string>&, api::Mediator* m) override { mediator_ = m; }
+  void shutdown_plugin() override {}
+  const std::string& identifier() const override { return id_; }
+  void init_orchestration_plugin(const std::optional<api::PluginList>&, api::MessageStreamConfig& sc) override {
+    sc.sequenced_stream_all(true);
+    sc.immediate_stream_add(ASPN_MEASUREMENT_IMU);
+  }
+  void process_pntos_message(const Message& m, bool sequenced) override {
+    const auto tov = *cobra::utils::time_of_validity(*m.wrapped_message);
+    if (!sequenced) cobra::report_effective_time(mediator_, Timestamp{tov.elapsed_nsec + 20'000'000});
+    last_ = m;
+    sequenced_seen += sequenced ? 1 : 0;
+  }
+  std::vector<std::string> filter_description_list() const override { return {"BEST_ESTIMATE"}; }
+  std::optional<std::vector<std::optional<Message>>> request_solutions(const std::vector<Timestamp>& t,
+                                                                       const std::optional<std::string>&) override {
+    requested = t;
+    return std::vector<std::optional<Message>>(t.size(), last_);
+  }
+  std::vector<Timestamp> requested;
+  int sequenced_seen = 0;
+
+ private:
+  std::string id_ = "adjusting";
+  api::Mediator* mediator_ = nullptr;
+  std::optional<Message> last_;
+};
+
+TEST_F(MediatorTest, UsesTheEffectiveTimeOfImmediateMessages) {
+  auto adj = std::make_shared<AdjustingOrchestration>();
+  ctx->orchestration_plugin = adj;
+  adj->init_orchestration_plugin(api::PluginList{}, *ctx->stream_config);
+  cobra::StandardMediator orch_med(ctx, "orch", PluginType::ORCHESTRATION);
+  adj->init_plugin(std::nullopt, &orch_med);
+  // first message: last_solution_time is the *effective* time (1.02 s)
+  med->process_pntos_message(imu(1 * kSec, "imu"));
+  ASSERT_TRUE(ctx->last_solution_time);
+  EXPECT_EQ(ctx->last_solution_time->elapsed_nsec, 1 * kSec + 20'000'000);
+  // raw 2.01 s would be > 1 s after a raw 1.0 s start, but effective 2.03 - 1.02 = 1.01 s: publishes at 2.03 s
+  med->process_pntos_message(imu(2 * kSec + 10'000'000, "imu"));
+  ASSERT_EQ(adj->requested.size(), 1u);
+  EXPECT_EQ(adj->requested[0].elapsed_nsec, 2 * kSec + 30'000'000);
+  EXPECT_EQ(ctx->last_solution_time->elapsed_nsec, 2 * kSec + 30'000'000);
+  // a message exactly 1.00 s later in effective time does not publish (strict >), as in Python
+  med->process_pntos_message(imu(3 * kSec + 10'000'000, "imu"));
+  EXPECT_EQ(adj->requested.size(), 1u);
+  // the sequenced buffer is released against the effective time too: a 1.02 s fix is more than
+  // buffer_time (2 s) older than the effective 3.03 s and is released now; against the raw 3.01 s it would wait
+  med->process_pntos_message(pos(1 * kSec + 20'000'000, "gps"));
+  EXPECT_EQ(adj->sequenced_seen, 0);
+  med->process_pntos_message(imu(3 * kSec + 10'000'000, "imu"));
+  EXPECT_EQ(adj->sequenced_seen, 1);
+  // sequenced messages never report an effective time, so a raw-time path still works
+  EXPECT_FALSE(ctx->messages.size());
+}
+
 TEST_F(MediatorTest, BroadcastAndLogging) {
   auto second = std::make_shared<RecordingTransport>("ros");
   ctx->transport_plugins.push_back(second);

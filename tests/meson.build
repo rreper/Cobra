@@ -15,6 +15,9 @@ test_sources = {
   'initialization': files('test_initialization.cpp'),
   'preprocessors': files('test_preprocessors.cpp'),
   'lcm_transport': files('test_lcm_transport.cpp'),
+  'tutorial': files('test_tutorial.cpp'),
+  'extras': files('test_extras.cpp'),
+  'diagnostics': files('test_diagnostics.cpp'),
 }
 
 foreach name, srcs : test_sources

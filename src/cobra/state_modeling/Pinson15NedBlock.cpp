@@ -12,9 +12,11 @@ using api::Matrix3;
 using api::Vector;
 using api::Vector3;
 
-Pinson15NedBlock::Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model, bool legacy_q_rotation)
+Pinson15NedBlock::Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model, bool legacy_q_rotation,
+                                   bool tutorial_model)
     : label_(std::move(label)), mediator_(mediator), imu_model_(imu_model) {
   legacy_inplace_q_ = legacy_q_rotation;
+  tutorial_model_ = tutorial_model;
   Vector diag(15);
   diag.setZero();
   for (int i = 0; i < 3; ++i) {
@@ -71,7 +73,7 @@ std::optional<api::StandardDynamicsModel> Pinson15NedBlock::generate_dynamics(co
   const Matrix Q_prop = Phi * Q * Phi.transpose();
   Matrix Qd = (Q_prop + Q) * (0.5 * dt);
 
-  scale_phi(Phi);
+  if (!tutorial_model_) scale_phi(Phi);
 
   api::StandardDynamicsModel model;
   model.Phi = Phi;
@@ -134,10 +136,11 @@ Matrix Pinson15NedBlock::generate_f_pinson15() const {
   const double a1 = 9.7803267715, a2 = 0.0052790414, a3 = 0.0000232718;
   const double a4 = -3.0876910891e-6, a5 = 4.3977311e-9, a6 = 7.211e-13;
   const double lat = pos(0), alt = pos(2);
-  const double dgdlat = 2 * a1 * a2 * std::cos(2 * lat) +
+  double dgdlat = 2 * a1 * a2 * std::cos(2 * lat) +
                         a1 * a3 * (12 * (1 - std::cos(4 * lat)) / 8 - std::pow(std::sin(lat), 4)) +
                         2 * a5 * (std::cos(2 * lat) - cosl * sinl) * alt;
-  const double dgdalt = (a4 + a5 * sinl * sinl) + a6 * 2 * alt;
+  double dgdalt = (a4 + a5 * sinl * sinl) + a6 * 2 * alt;
+  if (tutorial_model_) dgdlat = dgdalt = 0.0;  // the tutorial block predates the gravity-gradient terms
 
   Matrix3 block6;  // dvel = block6 * dpos
   block6 << -ve * (2 * omega * cosl + ve / (re * cosl * cosl)), 0, ve * ve * tanl / (re * re) - vn * vd / (rn * rn),  //

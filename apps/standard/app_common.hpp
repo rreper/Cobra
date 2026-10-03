@@ -13,6 +13,8 @@
 #include <pntos/cobra/preprocessing/StandardPreprocessorPlugin.hpp>
 #include <pntos/cobra/state_modeling/StandardStateModelingPlugin.hpp>
 #include <pntos/cobra/transport/LcmLogTransportPlugin.hpp>
+#include <pntos/cobra/diagnostics/DiagnosticLogPlugin.hpp>
+#include <pntos/cobra/extras/AdvancedPreprocessorPlugin.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -76,9 +78,10 @@ struct BaseConfig {
   std::shared_ptr<TimeAdjusterConfig> time_adjuster = std::make_shared<TimeAdjusterConfig>();
   std::shared_ptr<TimeBiasConfig> time_bias = std::make_shared<TimeBiasConfig>();
   std::shared_ptr<ManualHeadingAlignmentConfig> alignment = std::make_shared<ManualHeadingAlignmentConfig>();
+  std::shared_ptr<FusionEngineConfig> fusion = std::make_shared<FusionEngineConfig>();
 
   std::vector<std::shared_ptr<const cobra::BaseConfig>> all() const {
-    return {transport, std::make_shared<ControllerConfig>(), std::make_shared<FusionEngineConfig>(), orch};
+    return {transport, std::make_shared<ControllerConfig>(), fusion, orch};
   }
 };
 
@@ -124,12 +127,12 @@ inline BaseConfig base_config(const std::string& input_log, const std::string& o
   return b;
 }
 
-/// Parses `[output.log] [input.log] [--no-joseph] [--legacy-q]`.
+/// Parses `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q]`.
 struct Args {
   std::string output_log = "pntos_output.log";
   std::string input_log = default_input_log();
   bool joseph = true;
-  bool legacy_q = false;  ///< --legacy-q: Python-compatible Pinson process-noise rotation
+  bool legacy_q = true;  ///< default: Python-compatible Pinson process-noise rotation; --corrected-q turns it off
 };
 inline Args parse_args(int argc, char** argv) {
   Args a;
@@ -140,6 +143,8 @@ inline Args parse_args(int argc, char** argv) {
       a.joseph = false;
     else if (s == "--legacy-q")
       a.legacy_q = true;
+    else if (s == "--corrected-q")
+      a.legacy_q = false;
     else
       pos.push_back(s);
   }
@@ -148,9 +153,19 @@ inline Args parse_args(int argc, char** argv) {
   return a;
 }
 
-/// Builds the standard plugin set around `configs` and runs the controller. Returns the exit code.
+/// `output.log` -> `output.hdf5` (the diagnostic log written next to the LCM output log).
+inline std::string hdf5_path_for(const std::string& output_log) {
+  const auto dot = output_log.rfind('.');
+  const auto slash = output_log.rfind('/');
+  const bool has_ext = dot != std::string::npos && (slash == std::string::npos || dot > slash);
+  return (has_ext ? output_log.substr(0, dot) : output_log) + ".hdf5";
+}
+
+/// Builds the standard plugin set around `configs` (plus any `extra` plugins, appended after the
+/// orchestration plugin like the Python apps do) and runs the controller. Returns the exit code.
 inline int run_standard_app(const char* name, const Args& args,
-                            const std::vector<std::shared_ptr<const cobra::BaseConfig>>& configs) {
+                            const std::vector<std::shared_ptr<const cobra::BaseConfig>>& configs,
+                            const api::PluginList& extra = {}) {
   auto transport = std::make_shared<LcmLogTransportPlugin>("Cobra LCM Log Transport Plugin");
   transport->set_progress_callback([name](std::uint64_t done, std::uint64_t total) {
     std::cerr << "\r[" << name << "] " << (100 * done / std::max<std::uint64_t>(total, 1)) << "%" << std::flush;
@@ -167,6 +182,7 @@ inline int run_standard_app(const char* name, const Args& args,
       std::make_shared<StandardPreprocessorPlugin>("Cobra Standard Preprocessor Plugin"),
       std::make_shared<StandardOrchestrationPlugin>("Cobra Standard Orchestration Plugin"),
   };
+  plugins.insert(plugins.end(), extra.begin(), extra.end());
   StandardControllerPlugin::install_sigint_handler();
   StandardControllerPlugin controller("Cobra Standard Controller Plugin");
   controller.init_plugin(std::nullopt, nullptr);

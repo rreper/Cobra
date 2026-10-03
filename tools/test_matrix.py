@@ -29,6 +29,9 @@ SUITES = {
     'initialization': ('test_manual_initialization_plugin.py, inertial_alignment/*', 'all tests ported + PVA-message strategy'),
     'preprocessors': ('test_preprocessor_plugin.py', 'all tests ported + time bias'),
     'lcm_transport': ('test_transport_plugin.py (log parts)', 'network LCM transport not ported'),
+    'tutorial': ('test_orchestration.py (tutorial cases) + new', 'tutorial state model / orchestration / UI summary plugin'),
+    'extras': ('— (Python covers it via the zerovel2d app)', 'ZeroVelocity2dGenerator + AdvancedPreprocessorPlugin'),
+    'diagnostics': ('test_diagnostic_log_plugin.py, test_hdf5utils.py (write half)', 'DiagnosticLogPlugin + dependency-free HDF5 writer; files verified with h5py by run_acceptance'),
 }
 
 # Python test file -> (C++ suite or None, coverage note)
@@ -42,7 +45,7 @@ PYTHON_TESTS = [
     ('test_virtual_state_blocks.py', 'virtual_state_blocks, vsb_manager', 'complete'),
     ('test_message_stream_config.py', 'message_stream_config', 'complete'),
     ('test_single_threaded_controller.py', 'controller', 'complete'),
-    ('test_orchestration.py', 'orchestration', 'standard cases; tutorial-plugin cases and static-align-before-aligned pending'),
+    ('test_orchestration.py', 'orchestration, tutorial', 'standard cases in orchestration, tutorial cases in tutorial; static-align-before-aligned pending'),
     ('test_inertial_plugin.py', 'inertial', 'complete'),
     ('test_manual_initialization_plugin.py', 'initialization', 'complete'),
     ('inertial_alignment/test_static_align_initialization_plugin.py', 'initialization', 'complete'),
@@ -53,8 +56,8 @@ PYTHON_TESTS = [
     ('test_registry_views.py', None, 'UI layer (Tier 2)'),
     ('test_ui_utils.py', None, 'UI layer (Tier 2)'),
     ('test_cobra_ui_plugin.py', None, 'UI layer (Tier 2)'),
-    ('test_diagnostic_log_plugin.py', None, 'diagnostic log plugin (Tier 2)'),
-    ('test_hdf5utils.py', None, 'diagnostic log plugin (Tier 2)'),
+    ('test_diagnostic_log_plugin.py', 'diagnostics', 'complete (every notification recorded, file written at shutdown)'),
+    ('test_hdf5utils.py', 'diagnostics', 'write half; the load half is h5py-side (tools/run_acceptance.py check_hdf5)'),
     ('test_buscat_controller.py', None, 'Buscat controller (Tier 3)'),
     ('test_aspn_ros.py', None, 'ROS transport (Tier 3)'),
 ]
@@ -63,12 +66,12 @@ PYTHON_TESTS = [
 APPS = [
     ('test_dummy_app', 'PASS', 'apps/dummy/minimal runs and exits cleanly'),
     ('test_standard_pos_ins_app', 'NOT RUN', 'apps/standard/pos_ins'),
-    ('test_tutorial_pos_ins_app', 'NOT PORTED', 'tutorial plugins'),
-    ('test_tutorial_pos_ins_vel_app', 'NOT PORTED', 'tutorial plugins'),
-    ('test_standard_pos_ins_record_states_app', 'NOT PORTED', 'needs the HDF5 diagnostic log plugin'),
+    ('test_tutorial_pos_ins_app', 'NOT RUN', 'apps/tutorial/pos_ins (tutorial_pos_ins)'),
+    ('test_tutorial_pos_ins_vel_app', 'NOT RUN', 'apps/tutorial/pos_vel_ins (tutorial_pos_vel_ins)'),
+    ('test_standard_pos_ins_record_states_app', 'NOT RUN', 'apps/standard/pos_ins_record_states (+ HDF5 diagnostics log)'),
     ('test_standard_pos_ins_leverarm_app', 'NOT RUN', 'apps/standard/pos_ins_leverarm'),
     ('test_standard_pos_bodyvel_ins_app', 'NOT RUN', 'apps/standard/pos_ins_bodyvel'),
-    ('test_extras_pos_zerovel2d_ins_app', 'NOT PORTED', 'needs the extras zero-velocity preprocessor'),
+    ('test_extras_pos_zerovel2d_ins_app', 'NOT RUN', 'apps/extras/pos_ins_zerovel2d'),
     ('test_standard_pos_ins_vel_app', 'NOT RUN', 'apps/standard/pos_vel_ins'),
     ('test_standard_posvel_ins_app', 'NOT RUN', 'apps/standard/posvel_ins'),
     ('test_standard_outage_sim_app', 'NOT RUN', 'apps/standard/outage_sim'),
@@ -88,7 +91,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--build', default='build')
     ap.add_argument('--out', default='docs/TEST_MATRIX.md')
-    ap.add_argument('--pos-ins-errors', default=None)
+    ap.add_argument('--pos-ins-errors', default=None)  # kept for compatibility; acceptance.json supersedes it
     ap.add_argument('--acceptance', default='docs/acceptance.json')
     a = ap.parse_args()
 
@@ -172,7 +175,7 @@ def main():
     for v in acc.values():
         if 'python_test' in v:
             by_test.setdefault(v['python_test'], {})[v.get('mode', 'corrected')] = v
-    L[-2] = '| Python integration test | C++ corrected Q | C++ legacy Q (Python-compatible) | Notes |'
+    L[-2] = '| Python integration test | C++ legacy Q (app default, Python-compatible) | C++ corrected Q (`--corrected-q`) | Notes |'
     L[-1] = '|---|---|---|---|'
     def cell(r):
         if r is None: return '—'
@@ -184,16 +187,20 @@ def main():
     for name, status, note in APPS:
         modes = by_test.get(name)
         if modes:
-            r = modes.get('corrected') or next(iter(modes.values()))
+            r = modes.get('legacy') or next(iter(modes.values()))
             note = f"epochs {r.get('epochs')} (py {r.get('expected_epochs')}), wall {r.get('wall_s', '?')} s"
-            L.append(f'| {name} | {cell(modes.get("corrected"))} | {cell(modes.get("legacy"))} | {note} |')
+            if r.get('hdf5'):
+                h = r['hdf5']
+                note += f"; HDF5 {'ok' if h.get('ok') else 'BAD'} ({h.get('records', '?')} records x {h.get('states', '?')} states, read back with h5py)"
+            L.append(f'| {name} | {cell(modes.get("legacy"))} | {cell(modes.get("corrected"))} | {note} |')
         else:
             L.append(f'| {name} | {status} | {status} | {note} |')
     L.append('')
     L.append('Values are per-axis error standard deviations (N/E/D or roll/pitch/yaw) checked against the Python '
-             "integration-test limits together with max-error and sigma-coverage checks. 'Legacy Q' reproduces the Python "
+             "integration-test limits together with max-error and sigma-coverage checks. 'Legacy Q' (the app default) reproduces the Python "
              'process-noise rotation bug (`PinsonStateBlockConfig::legacy_q_rotation`, app flag `--legacy-q`) and is the '
-             'apples-to-apples comparison; the limits were tuned on that behaviour.\n')
+             "apples-to-apples comparison; the limits were tuned on that behaviour. 'Corrected Q' (`--corrected-q`) applies the "
+             'configured sigmas as written and fails most of the tilt limits, which were set with the inflated yaw noise.\n')
     if acc:
         L.append(f'App results from `{a.acceptance}` (generated {json.load(open(a.acceptance))["generated"]}; '
                  'regenerate with `Cobra/.venv/bin/python tools/run_acceptance.py`). Limits are the Python integration test limits; '

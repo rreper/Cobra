@@ -98,7 +98,9 @@ api::GenXandP StandardFusionEngine::gen_x_and_p_func() {
 }
 
 void StandardFusionEngine::save_x_and_p_to_registry() {
-  if (!strategy_ || !mediator_) return;
+  // Python deep-copies the engine (mediator and registry included) for peek_ahead, so the copy's
+  // saves never reach the real registry; the clone is excluded here for the same effect.
+  if (!strategy_ || !mediator_ || g_in_peek > 0) return;
   auto estimate = strategy_->estimate();
   auto covariance = strategy_->covariance();
   if (!estimate || !covariance) return;

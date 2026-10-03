@@ -1,5 +1,6 @@
 #include <pntos/cobra/orchestration/StandardOrchestrationPlugin.hpp>
 #include <pntos/cobra/utils/arrays.hpp>
+#include <pntos/cobra/utils/effective_time.hpp>
 #include <pntos/cobra/utils/logging.hpp>
 #include <pntos/cobra/utils/plugins.hpp>
 
@@ -492,7 +493,8 @@ void StandardOrchestrationPlugin::send_message_as_aux_data(const Message& messag
     for (const auto& l : it->second) fusion_engine_->give_virtual_state_block_aux_data(l, {message});
 }
 
-std::optional<std::vector<Message>> StandardOrchestrationPlugin::preprocess_message(const Message& message) {
+std::optional<std::vector<Message>> StandardOrchestrationPlugin::preprocess_message(const Message& message,
+                                                                                    std::optional<Timestamp>* effective_tov) {
   std::vector<Message> out{message};
   for (auto& [pp, channels] : preprocessors_) {
     if (out.empty()) return std::nullopt;
@@ -505,16 +507,22 @@ std::optional<std::vector<Message>> StandardOrchestrationPlugin::preprocess_mess
         out.push_back(m);
       }
     }
+    // The first output descends from the input message: its time is what Python's in-place
+    // preprocessing would have left on the original object.
+    if (effective_tov && !out.empty() && out.front().wrapped_message)
+      *effective_tov = utils::time_of_validity(*out.front().wrapped_message);
   }
   if (out.empty()) return std::nullopt;
   return out;
 }
 
-void StandardOrchestrationPlugin::process_pntos_message(const Message& message, bool) {
+void StandardOrchestrationPlugin::process_pntos_message(const Message& message, bool sequenced) {
   if (!engine_ready_ || !initializer_) return;
+  std::optional<Timestamp> effective_tov;
   std::optional<std::vector<Message>> msgs =
       preprocessors_.empty() ? std::optional<std::vector<Message>>{std::vector<Message>{message}}
-                             : preprocess_message(message);
+                             : preprocess_message(message, &effective_tov);
+  if (!sequenced) report_effective_time(mediator_, effective_tov);
   if (!msgs) return;
   auto logfn = [this](LoggingLevel l, const std::string& m) { log(l, m); };
 

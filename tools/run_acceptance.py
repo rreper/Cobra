@@ -39,6 +39,10 @@ LIMITS = {
     'outage_sim': ('test_standard_outage_sim_app', 2570, 10.0, L(306, 2441, 64), L(8, 35, 68, 91, 98), L(1.32, 5.3, 68, 95, 98)),
     'pos_ins_vsb': ('test_standard_pos_ins_vsb_app', 2570, 10.0, L(1.4, 3.8), L(0.1, 0.8), L(0.82, 3.55)),
     'direction_to_points': ('test_standard_direction_to_points_app', 2570, 10.0, L(20.0, 200.0, 55, 85, 95), L(1.0, 8.0, 55, 85, 95), L(0.6, 3.5, 55, 85, 95)),
+    'pos_ins_record_states': ('test_standard_pos_ins_record_states_app', 2570, 10.0, L(1.4, 3.8, 63), L(0.1, 0.8), L(0.81, 3.5)),
+    'pos_ins_zerovel2d': ('test_extras_pos_zerovel2d_ins_app', 2570, 10.0, L(1.4, 3.8), L(0.1, 0.8), L(0.8, 3.5)),
+    'tutorial_pos_ins': ('test_tutorial_pos_ins_app', 2593, 0.0, L(2.0, 4.0, 60), L(0.11, 1.0), L(0.85, 3.5, 48, 91)),
+    'tutorial_pos_vel_ins': ('test_tutorial_pos_ins_vel_app', 2593, 0.0, L(2.0, 4.5, 40, 70, 95), L(0.2, 1.5, 55, 75, 85), L(2.0, 6.0, 20, 50, 60)),
 }
 
 def rpy_to_dcm(rpy):
@@ -103,6 +107,21 @@ def evaluate(app, log_path, truth, tsig_unused):
     out['passed'] = bool(nan_free and starts_ok and count_ok and all(out['checks'][k]['passed'] for k in ('pos', 'vel', 'tilt')))
     return out
 
+def check_hdf5(path):
+    """Opens the diagnostic log written by pos_ins_record_states with h5py and checks its datasets."""
+    try:
+        import h5py
+        with h5py.File(path, 'r') as f:
+            keys = sorted(f.keys())
+            n = int(f['time'].shape[0])
+            est = f['estimate'].shape
+            labels = [l.decode() for l in f['state_labels'][0]]
+            ok = keys == ['estimate', 'sigma', 'state_labels', 'time'] and est[0] == n and est[1] == len(labels) and n > 1000
+            return dict(ok=bool(ok), path=path, records=n, states=len(labels), keys=keys)
+    except Exception as e:  # noqa: BLE001
+        return dict(ok=False, path=path, error=f'{type(e).__name__}: {e}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--build', default='build')
@@ -111,8 +130,9 @@ def main():
     ap.add_argument('--only', default=None)
     ap.add_argument('--no-run', action='store_true')
     ap.add_argument('--input-log', default=None)
-    ap.add_argument('--modes', default='corrected,legacy',
-                    help='comma list of: corrected (default Pinson Q handling), legacy (Python-compatible --legacy-q)')
+    ap.add_argument('--modes', default='legacy,corrected',
+                    help='comma list of: legacy (app default, Python-compatible Pinson Q rotation, --legacy-q), '
+                         'corrected (Q rotated from a copy as the config intends, --corrected-q)')
     a = ap.parse_args()
     if a.input_log is None:
         from pntos_python_datasets_lcm import EXAMPLE_LCM_LOG
@@ -125,7 +145,7 @@ def main():
     modes = a.modes.split(',')
     for app in apps:
       for mode in modes:
-        key = app if mode == 'corrected' else f'{app}@{mode}'
+        key = f'{app}@{mode}'
         exe = os.path.join(a.build, 'apps', app)
         log = os.path.join(a.workdir, key.replace('@', '_') + '.log')
         rec = dict(app=app, mode=mode)
@@ -133,7 +153,7 @@ def main():
             rec.update(passed=False, reason='binary not built'); results[key] = rec; continue
         if not a.no_run:
             t0 = time.time()
-            cmd = [exe, log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else [])
+            cmd = [exe, log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q'])
             p = subprocess.run(cmd, capture_output=True, text=True)
             rec['wall_s'] = round(time.time() - t0, 2)
             rec['exit_code'] = p.returncode
@@ -144,6 +164,10 @@ def main():
             if p.returncode != 0:
                 rec['passed'] = False; rec['reason'] = f'exit code {p.returncode}'; results[key] = rec; continue
         rec.update(evaluate(app, log, truth, None))
+        if app == 'pos_ins_record_states' and not a.no_run:
+            rec['hdf5'] = check_hdf5(log[:-4] + '.hdf5')
+            if not rec['hdf5'].get('ok'):
+                rec['passed'] = False; rec['reason'] = 'hdf5: ' + rec['hdf5'].get('error', '?')
         if rec.get('errors'):
             rec['passed'] = False; rec['reason'] = 'ERROR logged'
         if not rec['passed'] and 'reason' not in rec:

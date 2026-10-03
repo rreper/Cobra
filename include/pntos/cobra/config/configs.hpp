@@ -366,6 +366,19 @@ struct TimeBiasConfig final : PreprocessorConfig {
   static std::optional<TimeBiasConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
+/// Extras: generates 2-D (lateral/vertical) zero-velocity measurements for ground vehicles
+/// (Python pntos.cobra.extras.config.ZeroVelocity2dGeneratorConfig).
+struct ZeroVelocity2dGeneratorConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "zero_velocity2d_generator";
+  double trigger_dt_sec = 0.0;    ///< minimum time between generated measurements (0 = every trigger)
+  double lateral_vel_sigma = 0;   ///< m/s
+  double vertical_vel_sigma = 0;  ///< m/s
+  std::string output_channel;
+  ZeroVelocity2dGeneratorConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ZeroVelocity2dGeneratorConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
 struct OutageConfig final : PreprocessorConfig {
   static constexpr const char* kIdentifier = "outage";
   double start_time = 0;  ///< s after the first message on the channel
@@ -457,6 +470,31 @@ struct StandardOrchestrationConfig final : BaseConfig {
   void to_registry(api::Mediator& m) const override;
   static std::optional<StandardOrchestrationConfig> from_registry(api::Mediator& m,
                                                                   const std::string& group = kGroup);
+};
+
+/// Channels used by the tutorial orchestration plugins (Python TutorialOrchestrationConfig,
+/// group "config/orchestration").
+struct TutorialOrchestrationConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/orchestration";
+  std::string group_ = kGroup;
+  std::string position_channel;
+  std::string velocity_channel = "unused";
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<TutorialOrchestrationConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
+/// Log file and channels the UI log plotting plugin summarises at shutdown (Python UiLogPlottingConfig,
+/// group "config/ui_logfile_plotting").
+struct UiLogPlottingConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/ui_logfile_plotting";
+  std::string group_ = kGroup;
+  std::string logfile;
+  std::string solution_channel;
+  std::string truth_channel;
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<UiLogPlottingConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
 };
 
 /// Initial solution taken from the first PVA on a channel (Python PvaMessageInitializationConfig).

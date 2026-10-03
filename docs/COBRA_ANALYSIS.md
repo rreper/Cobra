@@ -431,8 +431,9 @@ Full app matrix: see §14 (13/13 pass).
    rotation reproduced, yaw error std 0.805° and 68.1 % of yaw errors inside 1σ (= Python); with a fresh copy
    per call, yaw std 0.845° and 64.9 % inside 1σ, position/velocity within 1 %. The Python integration-test
    tilt limits (std < 0.81°) were therefore tuned on the buggy behaviour and the corrected filter fails them by
-   4 %. The port exposes both: `PinsonStateBlockConfig::legacy_q_rotation` (default false = corrected). Same
-   code in `TutorialPinson15NedBlock`.
+   4 %. The port exposes both: `PinsonStateBlockConfig::legacy_q_rotation` (struct default false = corrected;
+   **the apps default to true** for parity with Python, `--corrected-q` switches). Same code in
+   `TutorialPinson15NedBlock` (C++: `Pinson15NedBlock` with `tutorial_model`, same flag).
 2. `EkfFusionStrategy.update` uses `(I−KH)P` and explicit `inv()`; port should use Joseph form or at least a
    Cholesky solve, and keep the symmetrization. Unit tests compare against the simple form, so golden tests must
    allow for that or be regenerated.
@@ -471,8 +472,10 @@ Full app matrix: see §14 (13/13 pass).
     for its buffer-release and solution-publish logic, so that logic runs on the time-adjusted IMU timestamps
     (exactly 10 ms apart) while sequenced messages contribute raw timestamps. Effect on pos_ins: the 1 Hz
     solution epochs land two IMU samples later than a raw-time implementation and the run yields 2570 instead of
-    2572 epochs. The C++ port keeps messages immutable and publishes on raw times (`DESIGN.md` §8 #14); at the
-    epochs the two share, the solutions agree to 0.03° in yaw.
+    2572 epochs. The C++ port keeps messages immutable but reproduces the effect: the orchestration reports the
+    post-preprocessing time of each immediate message and the mediator uses it (`DESIGN.md` §7.13). With that,
+    every app yields Python's epoch count and `outage_sim`, whose 600 s dead-reckoning ramp made the grid phase
+    visible (307 m vs 305.5 m position std), matches Python exactly.
 
 ---
 

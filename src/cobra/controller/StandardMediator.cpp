@@ -144,14 +144,17 @@ void StandardMediator::process_pntos_message(const Message& message) {
   std::lock_guard lk(ctx_->mutex);
   if (ctx_->ui_interface && !ctx_->ui_interface->new_mediator_message(message)) return;
 
-  const std::int64_t cur_nsec = tov_nsec(message);
+  std::int64_t cur_nsec = tov_nsec(message);
   if (ctx_->stream_config->is_sequenced(message.message_type(), message.source_identifier)) {
     auto& buf = ctx_->messages;
     auto pos = std::upper_bound(buf.begin(), buf.end(), cur_nsec,
                                 [](std::int64_t t, const Message& m) { return t < tov_nsec(m); });
     buf.insert(pos, message);
   } else {
+    ctx_->effective_tov.reset();
     ctx_->orchestration_plugin->process_pntos_message(message, false);
+    // Python reads the time of validity *after* processing, i.e. after in-place preprocessing.
+    if (ctx_->effective_tov) cur_nsec = ctx_->effective_tov->elapsed_nsec;
   }
 
   const std::int64_t process_until = cur_nsec - ctx_->buffer_time_nsec;
