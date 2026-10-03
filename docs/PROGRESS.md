@@ -13,8 +13,8 @@ Newest first. Each entry: what changed, what was verified, what is next.
 - Tests: `test_message_stream_config` (9, port of the Python 8 + source-specific overrides) and `test_controller`
   (12: mediator routing/buffering/publishing/broadcast/logging/UI gate, exit event, controller wiring, missing-plugin
   validation, ready_to_shutdown flag, error exit code, dummy controller end to end, config round trips).
-- GitHub: Rich created `rreper/Cobra`; origin now points there. Pushing still returns 403 with the fine-grained
-  token, which means it lacks **Contents: Read and write** for that repository.
+- GitHub: pushed to https://github.com/rreper/Cobra (classic token with `repo` scope, stored in git's credential
+  store). All commits are now mirrored there; every further commit is pushed.
 - Next: `StandardOrchestrationPlugin` + orchestration utils + remaining configs, preprocessors, inertial/alignment.
 
 ## 2026-10-03 — Fusion engine, VSB manager, fusion plugin ported (9/9 suites green)

@@ -1,5 +1,7 @@
 # pntos-cpp — C++ rewrite of the pntOS "Cobra" reference implementation
 
+Repository: https://github.com/rreper/Cobra (C++ rewrite; the Python original is the `Cobra/` submodule).
+
 A C++20 implementation of the [pntOS](https://github.com/Open-PNT/pntOS-C) plugin architecture for
 PNT (position, navigation, timing) sensor fusion, ported from IS4S's pure-Python reference
 implementation [Cobra](https://github.com/is4s/Cobra). Linear algebra is [Eigen](https://eigen.tuxfamily.org);
