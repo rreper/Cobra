@@ -501,4 +501,351 @@ StreamConfig default_stream_config() {
   return c;
 }
 
+// ----------------------------------------------------------------------------- InertialConfig
+
+namespace {
+Mat3 to_mat3(const api::Matrix& m) {
+  if (m.rows() != 3 || m.cols() != 3) throw std::invalid_argument("expected a 3x3 matrix");
+  Mat3 out;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) out[i][j] = m(i, j);
+  return out;
+}
+template <class T>
+std::optional<std::vector<std::shared_ptr<const T>>> read_nested_list(
+    ConfigReader& r, api::Mediator& m, const std::string& key,
+    std::optional<T> (*reader)(api::Mediator&, const std::string&)) {
+  auto groups = r.nested_groups(key);
+  if (!groups) return std::nullopt;
+  std::vector<std::shared_ptr<const T>> out;
+  r.suspend();
+  for (const auto& g : *groups) {
+    auto c = reader(m, g);
+    if (!c) {
+      r.resume();
+      r.fail(key);
+      return std::nullopt;
+    }
+    out.push_back(std::make_shared<const T>(*c));
+  }
+  r.resume();
+  return out;
+}
+template <class T>
+std::vector<std::shared_ptr<const BaseConfig>> as_base(const std::vector<std::shared_ptr<const T>>& v) {
+  return std::vector<std::shared_ptr<const BaseConfig>>(v.begin(), v.end());
+}
+}  // namespace
+
+void InertialConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("expected_dt", expected_dt);
+  w.scalar("inertial_buffer_length", inertial_buffer_length);
+  w.strings("channels", channels);
+  w.matrix("C_imu_to_platform", to_matrix(C_imu_to_platform));
+}
+
+std::optional<InertialConfig> InertialConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  InertialConfig c;
+  c.group_ = group;
+  c.expected_dt = r.require<double>("expected_dt");
+  c.inertial_buffer_length = r.require<double>("inertial_buffer_length");
+  c.channels = r.require<api::StringArray>("channels");
+  auto C = r.require<api::Matrix>("C_imu_to_platform");
+  if (!r.ok()) return std::nullopt;
+  try {
+    c.C_imu_to_platform = to_mat3(C);
+  } catch (const std::exception&) {
+    r.fail("C_imu_to_platform");
+    return std::nullopt;
+  }
+  return c;
+}
+
+// ----------------------------------------------------------------------------- FeedbackConfig
+
+void FeedbackConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("time_threshold", time_threshold);
+  w.scalar("pos_error_threshold", pos_error_threshold);
+}
+
+std::optional<FeedbackConfig> FeedbackConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  FeedbackConfig c;
+  c.group_ = group;
+  c.time_threshold = r.optional<double>("time_threshold").value_or(0.0);
+  c.pos_error_threshold = r.optional<double>("pos_error_threshold").value_or(0.0);
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+// ----------------------------------------------------------------------------- preprocessors
+
+void PreprocessorConfig::write_base(ConfigWriter& w) const {
+  w.scalar("identifier", identifier);
+  if (channels) w.strings("channels", *channels);
+  w.scalar("regex", regex);
+}
+
+bool PreprocessorConfig::read_base(ConfigReader& r) {
+  group_ = r.group();
+  identifier = r.require<std::string>("identifier");
+  channels = r.optional<api::StringArray>("channels");
+  regex = r.optional<bool>("regex").value_or(false);
+  return r.ok();
+}
+
+void PreprocessorConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  write_base(w);
+}
+
+std::optional<PreprocessorConfig> PreprocessorConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  PreprocessorConfig c;
+  if (!c.read_base(r)) return std::nullopt;
+  return c;
+}
+
+#define PNTOS_PP_IMPL(Type, WRITE, READ)                                                            \
+  void Type::to_registry(api::Mediator& m) const {                                                  \
+    ConfigWriter w(m, group_);                                                                      \
+    write_base(w);                                                                                  \
+    WRITE                                                                                           \
+  }                                                                                                 \
+  std::optional<Type> Type::from_registry(api::Mediator& m, const std::string& group) {             \
+    ConfigReader r(m, group);                                                                       \
+    if (!r.ok()) return std::nullopt;                                                               \
+    Type c;                                                                                         \
+    if (!c.read_base(r)) return std::nullopt;                                                       \
+    READ                                                                                            \
+    if (!r.ok()) return std::nullopt;                                                               \
+    return c;                                                                                       \
+  }
+
+PNTOS_PP_IMPL(BarometerToAltitudeConfig, { w.optional("alt_sigma", alt_sigma); },
+              { c.alt_sigma = r.optional<double>("alt_sigma"); })
+PNTOS_PP_IMPL(
+    DownsamplerConfig,
+    {
+      std::vector<double> f(downsampling_factors.begin(), downsampling_factors.end());
+      w.matrix("downsampling_factors", to_matrix(f));
+    },
+    {
+      auto f = r.require<api::Matrix>("downsampling_factors");
+      for (Eigen::Index i = 0; i < f.size(); ++i) c.downsampling_factors.push_back(static_cast<std::int64_t>(f(i)));
+    })
+PNTOS_PP_IMPL(ImuRotatorConfig, { w.matrix("C_imu_to_platform", to_matrix(C_imu_to_platform)); },
+              {
+                auto C = r.require<api::Matrix>("C_imu_to_platform");
+                if (r.ok()) {
+                  try {
+                    c.C_imu_to_platform = to_mat3(C);
+                  } catch (const std::exception&) {
+                    r.fail("C_imu_to_platform");
+                  }
+                }
+              })
+PNTOS_PP_IMPL(TimeAdjusterConfig, { w.scalar("expected_dt_nsec", expected_dt_nsec); },
+              { c.expected_dt_nsec = r.require<std::int64_t>("expected_dt_nsec"); })
+PNTOS_PP_IMPL(TimeBiasConfig, { w.scalar("time_bias", time_bias); },
+              { c.time_bias = r.require<std::int64_t>("time_bias"); })
+PNTOS_PP_IMPL(
+    OutageConfig,
+    {
+      w.scalar("start_time", start_time);
+      w.scalar("end_time", end_time);
+    },
+    {
+      c.start_time = r.require<double>("start_time");
+      c.end_time = r.require<double>("end_time");
+    })
+#undef PNTOS_PP_IMPL
+
+// ----------------------------------------------------------------------------- alignment configs
+
+void ManualAlignmentConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.vector("initial_pos", to_vector(initial_pos));
+  w.vector("initial_vel", to_vector(initial_vel));
+  w.vector("initial_rpy", to_vector(initial_rpy));
+  w.vector("initial_accel_bias", to_vector(initial_accel_bias));
+  w.vector("initial_gyro_bias", to_vector(initial_gyro_bias));
+  w.vector("initial_accel_scale_factor", to_vector(initial_accel_scale_factor));
+  w.vector("initial_gyro_scale_factor", to_vector(initial_gyro_scale_factor));
+  w.scalar("initial_time", initial_time);
+  w.vector("initial_pos_var", to_vector(initial_pos_var));
+  w.vector("initial_vel_var", to_vector(initial_vel_var));
+  w.vector("initial_tilt_var", to_vector(initial_tilt_var));
+  w.vector("initial_accel_bias_var", to_vector(initial_accel_bias_var));
+  w.vector("initial_gyro_bias_var", to_vector(initial_gyro_bias_var));
+  w.vector("initial_accel_scale_factor_var", to_vector(initial_accel_scale_factor_var));
+  w.vector("initial_gyro_scale_factor_var", to_vector(initial_gyro_scale_factor_var));
+}
+
+std::optional<ManualAlignmentConfig> ManualAlignmentConfig::from_registry(api::Mediator& m,
+                                                                          const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  ManualAlignmentConfig c;
+  c.group_ = group;
+  c.initial_pos = req_arr<3>(r, "initial_pos");
+  c.initial_vel = req_arr<3>(r, "initial_vel");
+  c.initial_rpy = req_arr<3>(r, "initial_rpy");
+  c.initial_accel_bias = req_arr<3>(r, "initial_accel_bias");
+  c.initial_gyro_bias = req_arr<3>(r, "initial_gyro_bias");
+  c.initial_accel_scale_factor = req_arr<3>(r, "initial_accel_scale_factor");
+  c.initial_gyro_scale_factor = req_arr<3>(r, "initial_gyro_scale_factor");
+  c.initial_time = r.require<double>("initial_time");
+  c.initial_pos_var = req_arr<3>(r, "initial_pos_var");
+  c.initial_vel_var = req_arr<3>(r, "initial_vel_var");
+  c.initial_tilt_var = req_arr<3>(r, "initial_tilt_var");
+  c.initial_accel_bias_var = req_arr<3>(r, "initial_accel_bias_var");
+  c.initial_gyro_bias_var = req_arr<3>(r, "initial_gyro_bias_var");
+  c.initial_accel_scale_factor_var = req_arr<3>(r, "initial_accel_scale_factor_var");
+  c.initial_gyro_scale_factor_var = req_arr<3>(r, "initial_gyro_scale_factor_var");
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+void StaticAlignmentConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("static_time", static_time);
+  w.nested("imu_model", imu_model);
+}
+
+std::optional<StaticAlignmentConfig> StaticAlignmentConfig::from_registry(api::Mediator& m,
+                                                                          const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  StaticAlignmentConfig c;
+  c.group_ = group;
+  c.static_time = r.require<double>("static_time");
+  auto g = r.nested_group("imu_model");
+  if (!g) {
+    r.fail("imu_model");
+    return std::nullopt;
+  }
+  r.suspend();
+  auto imu = ImuConfig::from_registry(m, *g);
+  r.resume();
+  if (!imu || !r.ok()) return std::nullopt;
+  c.imu_model = *imu;
+  return c;
+}
+
+void ManualHeadingAlignmentConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("static_time", static_time);
+  w.nested("imu_model", imu_model);
+  w.scalar("heading", heading);
+  w.scalar("heading_sigma", heading_sigma);
+}
+
+std::optional<ManualHeadingAlignmentConfig> ManualHeadingAlignmentConfig::from_registry(api::Mediator& m,
+                                                                                        const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  ManualHeadingAlignmentConfig c;
+  c.group_ = group;
+  c.static_time = r.require<double>("static_time");
+  c.heading = r.require<double>("heading");
+  c.heading_sigma = r.require<double>("heading_sigma");
+  auto g = r.nested_group("imu_model");
+  if (!g) {
+    r.fail("imu_model");
+    return std::nullopt;
+  }
+  r.suspend();
+  auto imu = ImuConfig::from_registry(m, *g);
+  r.resume();
+  if (!imu || !r.ok()) return std::nullopt;
+  c.imu_model = *imu;
+  return c;
+}
+
+// ----------------------------------------------------------------------------- StandardOrchestrationConfig
+
+void StandardOrchestrationConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("best_sol_channel", best_sol_channel);
+  w.scalar("imu_sol_channel", imu_sol_channel);
+  w.strings("alignment_channels", alignment_channels);
+  w.nested("pinson_sb_config", pinson_sb_config);
+  if (additional_sb_configs) w.nested("additional_sb_configs", as_base(*additional_sb_configs));
+  if (vsb_configs) w.nested("vsb_configs", as_base(*vsb_configs));
+  if (mp_configs) w.nested("mp_configs", as_base(*mp_configs));
+  w.nested("inertial_config", inertial_config);
+  if (feedback_config) w.nested("feedback_config", *feedback_config);
+  if (alignment_config) w.nested("alignment_config", *alignment_config);
+  if (preprocessor_configs) w.nested("preprocessor_configs", as_base(*preprocessor_configs));
+  w.scalar("max_prop_interval", max_prop_interval);
+  w.scalar("publish_before_update", publish_before_update);
+  w.scalar("publish_after_update", publish_after_update);
+  w.scalar("max_filter_lag", max_filter_lag);
+  w.nested("stream_config", stream_config);
+}
+
+std::optional<StandardOrchestrationConfig> StandardOrchestrationConfig::from_registry(api::Mediator& m,
+                                                                                      const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  StandardOrchestrationConfig c;
+  c.group_ = group;
+  c.best_sol_channel = r.require<std::string>("best_sol_channel");
+  c.imu_sol_channel = r.require<std::string>("imu_sol_channel");
+  c.alignment_channels = r.require<api::StringArray>("alignment_channels");
+  c.max_prop_interval = r.optional<double>("max_prop_interval").value_or(2.0);
+  c.publish_before_update = r.optional<bool>("publish_before_update").value_or(false);
+  c.publish_after_update = r.optional<bool>("publish_after_update").value_or(false);
+  c.max_filter_lag = r.optional<double>("max_filter_lag").value_or(ControllerConfig::kDefaultBufferLengthSec);
+  if (!r.ok()) return std::nullopt;
+
+  auto single = [&](const char* key, bool required) -> std::optional<std::string> {
+    auto g = r.nested_group(key);
+    if (!g && required) r.fail(key);
+    return g;
+  };
+  auto pinson_g = single("pinson_sb_config", true);
+  auto inertial_g = single("inertial_config", true);
+  auto align_g = single("alignment_config", true);
+  auto feedback_g = single("feedback_config", false);
+  auto stream_g = single("stream_config", false);
+  if (!r.ok()) return std::nullopt;
+  c.alignment_config_group = *align_g;
+
+  r.suspend();
+  auto pinson = PinsonStateBlockConfig::from_registry(m, *pinson_g);
+  auto inertial = InertialConfig::from_registry(m, *inertial_g);
+  std::optional<FeedbackConfig> feedback;
+  if (feedback_g) feedback = FeedbackConfig::from_registry(m, *feedback_g);
+  std::optional<StreamConfig> stream;
+  if (stream_g) stream = StreamConfig::from_registry(m, *stream_g);
+  r.resume();
+  if (!pinson || !inertial || (feedback_g && !feedback) || (stream_g && !stream)) {
+    r.fail("nested configs");
+    return std::nullopt;
+  }
+  c.pinson_sb_config = *pinson;
+  c.inertial_config = *inertial;
+  c.feedback_config = feedback;
+  if (stream) c.stream_config = *stream;
+
+  c.additional_sb_configs = read_nested_list<StateBlockConfig>(r, m, "additional_sb_configs",
+                                                               &StateBlockConfig::from_registry);
+  c.vsb_configs = read_nested_list<VirtualStateBlockConfig>(r, m, "vsb_configs",
+                                                            &VirtualStateBlockConfig::from_registry);
+  c.mp_configs = read_nested_list<MeasurementProcessorConfig>(r, m, "mp_configs",
+                                                              &MeasurementProcessorConfig::from_registry);
+  c.preprocessor_configs = read_nested_list<PreprocessorConfig>(r, m, "preprocessor_configs",
+                                                                &PreprocessorConfig::from_registry);
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
 }  // namespace pntos::cobra

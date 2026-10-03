@@ -10,6 +10,7 @@ test_sources = {
   'fusion_engine': files('test_fusion_engine.cpp'),
   'message_stream_config': files('test_message_stream_config.cpp'),
   'controller': files('test_controller.cpp'),
+  'orchestration': files('test_orchestration.cpp'),
 }
 
 foreach name, srcs : test_sources

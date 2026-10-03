@@ -277,4 +277,181 @@ struct StreamConfig final : BaseConfig {
 /// IMU immediate-streamed, everything else sequenced (Cobra's DEFAULT_STREAM_CONFIG).
 StreamConfig default_stream_config();
 
+// ----------------------------------------------------------------------------- inertial / feedback
+
+/// Inertial mechanization and buffering (Python InertialConfig).
+struct InertialConfig final : BaseConfig {
+  std::string group_;
+  double expected_dt = 0.01;             ///< s between inertial messages
+  double inertial_buffer_length = 10.0;  ///< s
+  std::vector<std::string> channels;
+  Mat3 C_imu_to_platform{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<InertialConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// When to apply inertial resets (Python FeedbackConfig). Zero thresholds => after every update.
+struct FeedbackConfig final : BaseConfig {
+  std::string group_;
+  double time_threshold = 0.0;       ///< s between resets
+  double pos_error_threshold = 0.0;  ///< m of any position error state
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<FeedbackConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+// ----------------------------------------------------------------------------- preprocessors
+
+/// Base fields of every preprocessor config. Subclasses fix `identifier`.
+struct PreprocessorConfig : BaseConfig {
+  std::string group_;
+  std::string identifier;
+  std::optional<std::vector<std::string>> channels;
+  bool regex = false;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<PreprocessorConfig> from_registry(api::Mediator& m, const std::string& group);
+
+ protected:
+  void write_base(ConfigWriter& w) const;
+  bool read_base(ConfigReader& r);
+};
+
+struct BarometerToAltitudeConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "baro_converter";
+  std::optional<double> alt_sigma;
+  BarometerToAltitudeConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<BarometerToAltitudeConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+struct DownsamplerConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "downsampler";
+  std::vector<std::int64_t> downsampling_factors;
+  DownsamplerConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<DownsamplerConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+struct ImuRotatorConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "imu_rotator";
+  Mat3 C_imu_to_platform{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+  ImuRotatorConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ImuRotatorConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+struct TimeAdjusterConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "time_adjuster";
+  std::int64_t expected_dt_nsec = 0;
+  TimeAdjusterConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<TimeAdjusterConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+struct TimeBiasConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "time_bias";
+  std::int64_t time_bias = 0;  ///< ns subtracted from each timestamp
+  TimeBiasConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<TimeBiasConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+struct OutageConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "outage";
+  double start_time = 0;  ///< s after the first message on the channel
+  double end_time = 0;
+  OutageConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<OutageConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+// ----------------------------------------------------------------------------- alignment
+
+/// Manual (fixed) initial solution (Python ManualAlignmentConfig).
+struct ManualAlignmentConfig final : BaseConfig {
+  std::string group_;
+  Vec3 initial_pos{};  ///< rad, rad, m HAE
+  Vec3 initial_vel{};  ///< m/s NED
+  Vec3 initial_rpy{};  ///< rad
+  Vec3 initial_accel_bias{};
+  Vec3 initial_gyro_bias{};
+  Vec3 initial_accel_scale_factor{};
+  Vec3 initial_gyro_scale_factor{};
+  double initial_time = 0;  ///< s
+  Vec3 initial_pos_var{};
+  Vec3 initial_vel_var{};
+  Vec3 initial_tilt_var{};
+  Vec3 initial_accel_bias_var{};
+  Vec3 initial_gyro_bias_var{};
+  Vec3 initial_accel_scale_factor_var{};
+  Vec3 initial_gyro_scale_factor_var{};
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ManualAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// Static (stationary) alignment (Python StaticAlignmentConfig).
+struct StaticAlignmentConfig final : BaseConfig {
+  std::string group_;
+  double static_time = 0;  ///< s of IMU data before aligning
+  ImuConfig imu_model;
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<StaticAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// Static alignment with a user-supplied heading (Python ManualHeadingAlignmentConfig).
+struct ManualHeadingAlignmentConfig final : BaseConfig {
+  std::string group_;
+  double static_time = 0;
+  ImuConfig imu_model;
+  double heading = 0;        ///< rad
+  double heading_sigma = 0;  ///< rad
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ManualHeadingAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+// ----------------------------------------------------------------------------- orchestration
+
+/// Configuration of StandardOrchestrationPlugin (group "config/orchestration").
+///
+/// Nested configs are stored by group pointer, so on the read side only the *base* fields of the
+/// state block / processor / VSB / preprocessor configs are reconstructed; the providers read their
+/// own full configs from the group when instantiating.
+struct StandardOrchestrationConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/orchestration";
+  std::string group_ = kGroup;
+
+  std::string best_sol_channel;
+  std::string imu_sol_channel;
+  std::vector<std::string> alignment_channels;
+  PinsonStateBlockConfig pinson_sb_config;
+  std::optional<std::vector<std::shared_ptr<const StateBlockConfig>>> additional_sb_configs;
+  std::optional<std::vector<std::shared_ptr<const VirtualStateBlockConfig>>> vsb_configs;
+  std::optional<std::vector<std::shared_ptr<const MeasurementProcessorConfig>>> mp_configs;
+  InertialConfig inertial_config;
+  std::optional<FeedbackConfig> feedback_config;
+  /// Write side: the alignment config to store. Read side: only `alignment_config_group` is filled.
+  std::shared_ptr<const BaseConfig> alignment_config;
+  std::string alignment_config_group;
+  std::optional<std::vector<std::shared_ptr<const PreprocessorConfig>>> preprocessor_configs;
+  double max_prop_interval = 2.0;  ///< s
+  bool publish_before_update = false;
+  bool publish_after_update = false;
+  double max_filter_lag = ControllerConfig::kDefaultBufferLengthSec;  ///< s
+  StreamConfig stream_config = default_stream_config();
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<StandardOrchestrationConfig> from_registry(api::Mediator& m,
+                                                                  const std::string& group = kGroup);
+};
+
 }  // namespace pntos::cobra

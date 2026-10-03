@@ -2,6 +2,23 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Orchestration plugin ported (12/12 suites green)
+
+- Added `StandardOrchestrationPlugin`, the orchestration utilities (`apply_error_states`, best / dead-reckoning
+  solutions, inertial set-up, `SolutionCache` replacing the Python `Cache`/`CacheEntry` classes with three typed,
+  time-validated entries), and the remaining configs: `InertialConfig`, `FeedbackConfig`, `PreprocessorConfig`
+  (+ baro / downsampler / IMU rotator / time adjuster / time bias / outage), `ManualAlignmentConfig`,
+  `StaticAlignmentConfig`, `ManualHeadingAlignmentConfig`, `StandardOrchestrationConfig`.
+- Config note: nested state block / processor / VSB / preprocessor configs are stored by group pointer (same
+  registry layout as Python); on read only the base fields come back and the providers read their full configs.
+- Tests: `test_orchestration` (12) with a mock inertial and mock initializer standing in for the not-yet-ported
+  NavToolkit plugins; covers init, config round trip, VSB-chain aux routing, one channel to many processors,
+  outage propagation, alignment after N messages, request_solutions in all forms, and an end-to-end position
+  update with inertial feedback (bias correction, reset, Pinson states zeroed, covariance behaviour).
+- **12/12 suites green.** Pushed to github.com/rreper/Cobra.
+- Next: NavToolkit as a meson subproject, `StandardInertialPlugin` (mechanization) and the alignment plugins
+  (manual, static, manual-heading), then preprocessors and the LCM log transport, then apps.
+
 ## 2026-10-03 — Controller layer ported (11/11 suites green)
 
 - Added `ControllerConfig`, `BufferMode`/`Stream`/`StreamConfig` (+ `default_stream_config()`), plugin sorting and

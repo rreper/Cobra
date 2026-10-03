@@ -26,6 +26,8 @@ cobra_sources = files(
   'cobra/controller/StandardMediator.cpp',
   'cobra/controller/StandardControllerPlugin.cpp',
   'cobra/dummy/DummyPlugins.cpp',
+  'cobra/orchestration/OrchestrationUtils.cpp',
+  'cobra/orchestration/StandardOrchestrationPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,
