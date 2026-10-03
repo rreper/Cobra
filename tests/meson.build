@@ -4,6 +4,8 @@ test_sources = {
   'ekf_fusion_strategy': files('test_ekf_fusion_strategy.cpp'),
   'simple_state_blocks': files('test_simple_state_blocks.cpp'),
   'registry': files('test_registry.cpp'),
+  'state_modeling': files('test_state_modeling.cpp'),
+  'virtual_state_blocks': files('test_virtual_state_blocks.cpp'),
 }
 
 foreach name, srcs : test_sources

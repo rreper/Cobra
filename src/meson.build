@@ -7,11 +7,18 @@ pntos_api_dep = declare_dependency(
 cobra_sources = files(
   'cobra/utils/logging.cpp',
   'cobra/utils/arrays.cpp',
+  'cobra/utils/navutils.cpp',
+  'cobra/utils/aspn.cpp',
+  'cobra/config/BaseConfig.cpp',
+  'cobra/config/configs.cpp',
   'cobra/EkfFusionStrategyPlugin.cpp',
   'cobra/StandardLoggingPlugin.cpp',
   'cobra/StandardRegistryPlugin.cpp',
-  'cobra/config/BaseConfig.cpp',
   'cobra/state_modeling/SimpleStateBlocks.cpp',
+  'cobra/state_modeling/Pinson15NedBlock.cpp',
+  'cobra/state_modeling/MeasurementProcessors.cpp',
+  'cobra/state_modeling/VirtualStateBlocks.cpp',
+  'cobra/state_modeling/StandardStateModelingPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,
