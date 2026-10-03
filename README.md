@@ -13,6 +13,7 @@ inertial mechanization and alignment come from [NavToolkit](https://github.com/i
 | Status | **Tier 1 complete**: `pos_ins` runs end to end on the example log and reproduces the Python position/velocity accuracy at ~20× the speed (see [docs/PROGRESS.md](docs/PROGRESS.md), [docs/DESIGN.md](docs/DESIGN.md) §9.5) |
 | Design guide (read first) | [docs/DESIGN.md](docs/DESIGN.md) — build, layout, type mapping, every component, deviations, roadmap, recipes |
 | Testing guide | [docs/TESTING.md](docs/TESTING.md) — running, suite inventory, mocks, goldens, porting a Python test, acceptance |
+| Test pass/fail matrix | [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — every test with its result, Python-test coverage, app acceptance; regenerate with `tools/test_matrix.py` |
 | Analysis of the Python original | [docs/COBRA_ANALYSIS.md](docs/COBRA_ANALYSIS.md) — architecture, baselines, findings, app matrix |
 | Reference implementation | `Cobra/` (git submodule, upstream, Apache-2.0) |
 | License | Apache-2.0 (same as upstream) |

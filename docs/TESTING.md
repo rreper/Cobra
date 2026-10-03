@@ -33,6 +33,18 @@ protocol is `gtest`, so individual test names show up in `build/meson-logs/testl
 
 Current status: **16 suites, 169 tests, all green** (2026-10-03). A test run takes well under a second.
 
+The per-test pass/fail matrix lives in `docs/TEST_MATRIX.md`. It is generated, not hand-written:
+
+```bash
+.venv/bin/meson test -C build
+python3 tools/test_matrix.py                                   # parses build/meson-logs/testlog.junit.xml
+python3 tools/test_matrix.py --pos-ins-errors out_errors.json  # also embeds the latest pos_ins acceptance numbers
+```
+
+Regenerate it whenever a suite is added or the acceptance run is repeated; the suite-to-Python mapping and
+the app list are tables at the top of `tools/test_matrix.py`, so a new suite must be added there too (the
+script flags any suite it does not know).
+
 ## 2. Test support helpers
 
 `tests/test_support.hpp` (namespace `pntos::test`) is included by every suite:

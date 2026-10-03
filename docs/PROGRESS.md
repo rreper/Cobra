@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Test pass/fail matrix
+
+- `tools/test_matrix.py` generates `docs/TEST_MATRIX.md` from meson's JUnit output: suite table with Python
+  origins, every individual test with its result, Python-test coverage matrix, and the 13-app acceptance matrix
+  (with the latest pos_ins numbers when given the comparison JSON). Current: 16 suites, 169 tests, all green;
+  2 of 13 apps ported (dummy, pos_ins).
+
 ## 2026-10-03 — LCM log transport, apps, and pos_ins acceptance on the example log (16/16 suites green)
 
 - Decided against liblcm: `transport/LcmLog` reads/writes the event-log format directly and the lcm-gen C++
