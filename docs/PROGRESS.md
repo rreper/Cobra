@@ -2,6 +2,16 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Design and testing guides; sanitizer run
+
+- Added `docs/DESIGN.md` (build, layout, type mapping, every component with diagrams, the complete list of
+  deviations from Python, the roadmap with Python-source pointers, recipes, conventions) and `docs/TESTING.md`
+  (running, suite inventory with Python origins, mocks, goldens, how to port a Python test, baseline
+  reproduction, acceptance plan, unported tests, debugging). README links both.
+- Whole suite run under ASan + UBSan (`meson setup build-asan -Db_sanitize=address,undefined`): clean after
+  fixing one shared_ptr cycle in `DummyOrchestrationPlugin` (it stored a pointer to itself when handed the full
+  plugin list).
+
 ## 2026-10-03 — Orchestration plugin ported (12/12 suites green)
 
 - Added `StandardOrchestrationPlugin`, the orchestration utilities (`apply_error_states`, best / dead-reckoning

@@ -10,8 +10,10 @@ inertial mechanization and alignment come from [NavToolkit](https://github.com/i
 
 | | |
 |---|---|
-| Status | **early — Tier 1 in progress** (see [docs/PROGRESS.md](docs/PROGRESS.md)) |
-| Analysis of the Python original | [docs/COBRA_ANALYSIS.md](docs/COBRA_ANALYSIS.md) |
+| Status | **Tier 1 in progress**: fusion, state modeling, controller and orchestration layers ported; inertial, alignment, preprocessors and transport next (see [docs/PROGRESS.md](docs/PROGRESS.md)) |
+| Design guide (read first) | [docs/DESIGN.md](docs/DESIGN.md) — build, layout, type mapping, every component, deviations, roadmap, recipes |
+| Testing guide | [docs/TESTING.md](docs/TESTING.md) — running, suite inventory, mocks, goldens, porting a Python test, acceptance |
+| Analysis of the Python original | [docs/COBRA_ANALYSIS.md](docs/COBRA_ANALYSIS.md) — architecture, baselines, findings, app matrix |
 | Reference implementation | `Cobra/` (git submodule, upstream, Apache-2.0) |
 | License | Apache-2.0 (same as upstream) |
 
@@ -39,6 +41,12 @@ python3 -m venv .venv && .venv/bin/pip install meson ninja
 ```
 
 All dependencies are fetched as meson subprojects on first `setup`; nothing needs to be installed system-wide.
+
+## Working on the port
+
+1. Read `docs/DESIGN.md` §9 for the next item and the Python source it comes from.
+2. Port the class and its Python test side by side (`docs/TESTING.md` §6), keeping names identical.
+3. `meson test -C build` must stay green; add a dated entry to `docs/PROGRESS.md`; commit and push.
 
 ## Acceptance
 

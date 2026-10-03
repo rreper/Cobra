@@ -76,7 +76,12 @@ api::Registry& DummyMediator::registry() {
 
 void DummyOrchestrationPlugin::init_orchestration_plugin(const std::optional<api::PluginList>& plugins,
                                                          api::MessageStreamConfig& stream_config) {
-  plugins_ = plugins.value_or(api::PluginList{});
+  // Keep every plugin except ourselves: the dummy controller passes the full list, and holding a
+  // shared_ptr to ourselves would be a reference cycle (Python's GC hides this; C++ would leak).
+  plugins_.clear();
+  if (plugins)
+    for (const auto& p : *plugins)
+      if (p.get() != this) plugins_.push_back(p);
   stream_config.immediate_stream_all(true);
 }
 
