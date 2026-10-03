@@ -85,6 +85,10 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
 
   /// Test hook.
   const VirtualStateBlockManager& vsb_manager() const { return vsb_manager_; }
+  /// Diagnostics: when set (process-wide), every propagate/update writes one line
+  /// ("P from to trace(P) x6 x7 x8" / "U label tov trace(P) x6 x7 x8"). Also enabled by the
+  /// PNTOS_TRACE_FILE environment variable.
+  static void set_trace(std::ostream* os);
 
  private:
   struct StateBlockInfo {

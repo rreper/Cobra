@@ -2,6 +2,7 @@
 
 #include <aspn23/eigen/MeasurementAltitude.hpp>
 #include <aspn23/eigen/MeasurementBarometer.hpp>
+#include <aspn23/eigen/MeasurementDirection3DToPoints.hpp>
 #include <aspn23/eigen/MeasurementImu.hpp>
 #include <aspn23/eigen/MeasurementPosition.hpp>
 #include <aspn23/eigen/MeasurementPositionVelocityAttitude.hpp>
@@ -10,6 +11,7 @@
 #include <aspn23_lcm/measurement_IMU.hpp>
 #include <aspn23_lcm/measurement_altitude.hpp>
 #include <aspn23_lcm/measurement_barometer.hpp>
+#include <aspn23_lcm/measurement_direction_3d_to_points.hpp>
 #include <aspn23_lcm/measurement_position.hpp>
 #include <aspn23_lcm/measurement_position_velocity_attitude.hpp>
 #include <aspn23_lcm/measurement_velocity.hpp>
@@ -249,6 +251,85 @@ std::vector<std::uint8_t> barometer_to(const aspn23_eigen::MeasurementBarometer&
   m.num_integrity = static_cast<std::int16_t>(m.integrity.size());
   return encode_as(m);
 }
+
+// ---- direction 3D to points (nested types)
+
+aspn23_eigen::TypeRemotePoint remote_point_from(const aspn23_lcm::type_remote_point& r) {
+  return aspn23_eigen::TypeRemotePoint(static_cast<std::uint8_t>(r.included_terms), static_cast<std::uint32_t>(r.id),
+                                       static_cast<Aspn23TypeRemotePointPositionReferenceFrame>(r.position_reference_frame),
+                                       r.position1, r.position2, r.position3, cov_from(r.position_covariance));
+}
+aspn23_lcm::type_remote_point remote_point_to(const aspn23_eigen::TypeRemotePoint& r) {
+  aspn23_lcm::type_remote_point o{};
+  o.included_terms = r.get_included_terms();
+  o.id = r.get_id();
+  o.position_reference_frame = static_cast<std::int8_t>(r.get_position_reference_frame());
+  o.position1 = r.get_position1();
+  o.position2 = r.get_position2();
+  o.position3 = r.get_position3();
+  o.position_covariance = cov_to(r.get_position_covariance());
+  o.num_position_components = static_cast<std::int16_t>(o.position_covariance.size());
+  return o;
+}
+aspn23_eigen::TypeImageFeature feature_from(const aspn23_lcm::type_image_feature& f) {
+  Eigen::Matrix<std::uint8_t, Eigen::Dynamic, 1> d(static_cast<Eigen::Index>(f.descriptor.size()));
+  for (std::size_t i = 0; i < f.descriptor.size(); ++i) d(static_cast<Eigen::Index>(i)) = static_cast<std::uint8_t>(f.descriptor[i]);
+  return aspn23_eigen::TypeImageFeature(f.response, f.orientation, f.size, static_cast<std::uint16_t>(f.class_id),
+                                        static_cast<std::uint16_t>(f.octave), d);
+}
+aspn23_lcm::type_image_feature feature_to(const aspn23_eigen::TypeImageFeature& f) {
+  aspn23_lcm::type_image_feature o{};
+  o.response = f.get_response();
+  o.orientation = f.get_orientation();
+  o.size = f.get_size();
+  o.class_id = f.get_class_id();
+  o.octave = f.get_octave();
+  auto d = f.get_descriptor();
+  o.descriptor.assign(d.data(), d.data() + d.size());  // uint8 -> int16
+  o.descriptor_size = static_cast<std::int32_t>(o.descriptor.size());
+  return o;
+}
+std::shared_ptr<api::AspnBase> d2p_from(const aspn23_lcm::measurement_direction_3d_to_points& m) {
+  std::vector<aspn23_eigen::TypeDirection3DToPoint> obs;
+  for (const auto& o : m.obs) {
+    DynVec ob(2);
+    ob << o.obs[0], o.obs[1];
+    RowMat cov(2, 2);
+    cov << o.covariance[0][0], o.covariance[0][1], o.covariance[1][0], o.covariance[1][1];
+    obs.emplace_back(remote_point_from(o.remote_point), static_cast<Aspn23TypeDirection3DToPointReferenceFrame>(o.reference_frame),
+                     ob, cov, o.has_observation_characteristics != 0, feature_from(o.observation_characteristics),
+                     static_cast<Aspn23TypeDirection3DToPointErrorModel>(o.error_model), vec_from(o.error_model_params),
+                     integrity_from(o.integrity));
+  }
+  return std::make_shared<aspn23_eigen::MeasurementDirection3DToPoints>(
+      header_from(m.header, ASPN_MEASUREMENT_DIRECTION_3D_TO_POINTS), tov_from(m.time_of_validity), obs);
+}
+std::vector<std::uint8_t> d2p_to(const aspn23_eigen::MeasurementDirection3DToPoints& e) {
+  aspn23_lcm::measurement_direction_3d_to_points m{};
+  m.header = header_to(e.get_header());
+  m.time_of_validity = tov_to(e.get_time_of_validity());
+  for (const auto& ob : e.get_obs()) {
+    aspn23_lcm::type_direction_3d_to_point o{};
+    o.remote_point = remote_point_to(ob.get_remote_point());
+    o.reference_frame = static_cast<std::int8_t>(ob.get_reference_frame());
+    DynVec v = ob.get_obs();
+    o.obs[0] = v.size() > 0 ? v(0) : 0.0;
+    o.obs[1] = v.size() > 1 ? v(1) : 0.0;
+    RowMat c = ob.get_covariance();
+    for (int i = 0; i < 2; ++i)
+      for (int j = 0; j < 2; ++j) o.covariance[i][j] = (c.rows() == 2 && c.cols() == 2) ? c(i, j) : 0.0;
+    o.has_observation_characteristics = ob.get_has_observation_characteristics() ? 1 : 0;
+    o.observation_characteristics = feature_to(ob.get_observation_characteristics());
+    o.error_model = static_cast<std::int8_t>(ob.get_error_model());
+    o.error_model_params = vec_to(ob.get_error_model_params());
+    o.num_error_model_params = static_cast<std::int32_t>(o.error_model_params.size());
+    o.integrity = integrity_to(ob.get_integrity());
+    o.num_integrity = static_cast<std::int16_t>(o.integrity.size());
+    m.obs.push_back(o);
+  }
+  m.num_obs = static_cast<std::int32_t>(m.obs.size());
+  return encode_as(m);
+}
 }  // namespace
 
 std::shared_ptr<api::AspnBase> decode(const std::uint8_t* d, std::size_t len) {
@@ -264,6 +345,8 @@ std::shared_ptr<api::AspnBase> decode(const std::uint8_t* d, std::size_t len) {
     return altitude_from(decode_as<aspn23_lcm::measurement_altitude>(d, len));
   if (hash == aspn23_lcm::measurement_barometer::getHash())
     return barometer_from(decode_as<aspn23_lcm::measurement_barometer>(d, len));
+  if (hash == aspn23_lcm::measurement_direction_3d_to_points::getHash())
+    return d2p_from(decode_as<aspn23_lcm::measurement_direction_3d_to_points>(d, len));
   return nullptr;
 }
 
@@ -275,6 +358,7 @@ std::optional<std::string> type_name_for(const std::uint8_t* d, std::size_t len)
   if (hash == aspn23_lcm::measurement_position_velocity_attitude::getHash()) return "measurement_position_velocity_attitude";
   if (hash == aspn23_lcm::measurement_altitude::getHash()) return "measurement_altitude";
   if (hash == aspn23_lcm::measurement_barometer::getHash()) return "measurement_barometer";
+  if (hash == aspn23_lcm::measurement_direction_3d_to_points::getHash()) return "measurement_direction_3d_to_points";
   return std::nullopt;
 }
 
@@ -285,6 +369,7 @@ std::optional<std::vector<std::uint8_t>> encode(const api::AspnBase& msg) {
   if (auto* p = dynamic_cast<const aspn23_eigen::MeasurementPositionVelocityAttitude*>(&msg)) return pva_to(*p);
   if (auto* p = dynamic_cast<const aspn23_eigen::MeasurementAltitude*>(&msg)) return altitude_to(*p);
   if (auto* p = dynamic_cast<const aspn23_eigen::MeasurementBarometer*>(&msg)) return barometer_to(*p);
+  if (auto* p = dynamic_cast<const aspn23_eigen::MeasurementDirection3DToPoints*>(&msg)) return d2p_to(*p);
   return std::nullopt;
 }
 

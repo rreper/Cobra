@@ -540,6 +540,28 @@ TEST_F(StateModelingTest, QIsNotMutatedAcrossCalls) {
   EXPECT_EQ(q1, q2);
 }
 
+TEST_F(StateModelingTest, LegacyQRotationReproducesThePythonMutation) {
+  auto cfg = cobra::PinsonStateBlockConfig::from_registry(med, "config/pinson_block");
+  ASSERT_TRUE(cfg);
+  EXPECT_FALSE(cfg->legacy_q_rotation);  // absent key -> corrected behaviour
+  cobra::Pinson15NedBlock legacy("p", &med, cfg->imu_model, /*legacy_q_rotation=*/true);
+  nav::Vector4 q = nav::rpy_to_quat(Vector3(0.1, 0.2, 0.7));
+  Message pva(make_pva(kSec, 0.6, -1.5, 300, 1, 2, 0, Vector(q)), "a");
+  legacy.receive_aux_data({pva, force_aux});
+  Matrix q1 = legacy.generate_q_pinson15();
+  Matrix q2 = legacy.generate_q_pinson15();
+  EXPECT_FALSE(allclose(q1, q2, 1e-12, 0.0)) << "legacy mode must re-rotate the stored Q";
+  // round trip of the flag through the registry
+  cobra::PinsonStateBlockConfig c2 = *cfg;
+  c2.group_ = "config/pinson_legacy";
+  c2.imu_model.group_ = "config/pinson_legacy/imu";
+  c2.legacy_q_rotation = true;
+  c2.to_registry(med);
+  auto back = cobra::PinsonStateBlockConfig::from_registry(med, "config/pinson_legacy");
+  ASSERT_TRUE(back);
+  EXPECT_TRUE(back->legacy_q_rotation);
+}
+
 TEST_F(StateModelingTest, CloneBlockAndProcessorsAreIndependent) {
   auto blk = provider->new_block(0, nullptr, "pinson15", "config/pinson_block");
   auto* pinson = dynamic_cast<cobra::Pinson15NedBlock*>(blk.get());

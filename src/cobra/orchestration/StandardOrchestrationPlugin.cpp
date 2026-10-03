@@ -3,7 +3,11 @@
 #include <pntos/cobra/utils/logging.hpp>
 #include <pntos/cobra/utils/plugins.hpp>
 
+#include <aspn23/eigen/MeasurementImu.hpp>
+
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 
@@ -378,6 +382,22 @@ void StandardOrchestrationPlugin::send_inertial_aux_to_measurement_processor(con
 
 void StandardOrchestrationPlugin::send_inertial_aux_to_pinson() {
   api::AuxData aux{cache_->inertial_solution(), get_inertial_forces()};
+  if (const char* f = std::getenv("PNTOS_TRACE_FILE")) {  // diagnostics: aux inputs of the Pinson block
+    static std::ofstream os(std::string(f) + ".aux");
+    os << std::setprecision(17) << fusion_engine_->time().elapsed_nsec;
+    if (aux[0]) {
+      auto p = aux[0]->as<utils::PVA>();
+      os << " pva " << p->get_time_of_validity().get_elapsed_nsec() << ' ' << p->get_p1() << ' ' << p->get_p2() << ' '
+         << p->get_p3() << ' ' << p->get_v1() << ' ' << p->get_v2() << ' ' << p->get_v3() << ' '
+         << api::Vector(p->get_quaternion()).transpose();
+    }
+    if (aux[1]) {
+      auto m = aux[1]->as<aspn23_eigen::MeasurementImu>();
+      os << " imu " << m->get_time_of_validity().get_elapsed_nsec() << ' ' << api::Vector(m->get_meas_accel()).transpose()
+         << ' ' << api::Vector(m->get_meas_gyro()).transpose();
+    }
+    os << '\n';
+  }
   fusion_engine_->give_state_block_aux_data(pinson_sb_config_.label, aux);
 }
 

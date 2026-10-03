@@ -191,11 +191,24 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 1. **Unit parity** — every Python test file in §3 and §9 ported and green. Done for everything except the
    network LCM transport, the UI/diagnostics layer and the tutorial/Buscat plugins.
 2. **Golden replay** — DONE: `build/apps/pos_ins OUT.log` replays the example log (2.1 s).
-3. **Compare** — DONE with `tools/compare_to_truth.py` (see DESIGN.md §9.5 for the table): position and
-   velocity RMS within about 1 % of the Python baseline. Re-run after any change to the filter math.
+3. **Compare** — DONE: `tools/run_acceptance.py` applies the Python integration-test limits to every ported
+   app in both Pinson-Q modes; in legacy (Python-compatible) mode the results match Python to three digits.
+   Re-run after any change to the filter math and regenerate `docs/TEST_MATRIX.md`.
 4. **Repeat for the other 12 apps** in the integration matrix (`COBRA_ANALYSIS.md` §14) as their plugins
    are ported.
 5. **Performance** — record wall and CPU time next to Python's 37.75 s; expect an order of magnitude less.
+
+## 8a. Parity and tracing tools
+
+| Tool | What it does |
+|---|---|
+| `build/tools/parity_dump` + `Cobra/.venv/bin/python tools/parity_check.py` | Fixed inputs with a rotated attitude and non-zero velocity through nav helpers, Pinson dynamics, three measurement processors, the PinsonErrorToStandard VSB and `apply_error_states`, in C++ and in Python/navtk; prints the max difference per quantity (expected: machine precision). |
+| `build/tools/inertial_parity_dump` + `tools/inertial_parity_check.py` | Replays the first 25 s of the example log through alignment + `BufferedImu` in both languages: alignment solution/covariance/biases, buffered solutions, forces/rates, resets, no-reset-since. |
+| `PNTOS_TRACE_FILE=path ./build/apps/pos_ins …` and `tools/trace_python_pos_ins.py in out trace` | One line per propagate/update with trace(P) and selected states (`PNTOS_TRACE_FULL=1` for all), from both implementations; diff them to find the first diverging step. |
+| `tools/run_acceptance.py` | Runs every app on the example log in `corrected` and `legacy` Pinson-Q modes and applies the Python integration-test limits; writes `docs/acceptance.json` for the matrix. |
+
+Use the first two whenever a numerical component changes; use the trace when an application-level result
+moves without an obvious cause (that is how deviation #1's impact was found).
 
 ## 9. Python tests not yet ported
 

@@ -1,4 +1,5 @@
 #include <pntos/cobra/state_modeling/Pinson15NedBlock.hpp>
+
 #include <pntos/cobra/utils/navutils.hpp>
 
 #include <cmath>
@@ -11,8 +12,9 @@ using api::Matrix3;
 using api::Vector;
 using api::Vector3;
 
-Pinson15NedBlock::Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model)
+Pinson15NedBlock::Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model, bool legacy_q_rotation)
     : label_(std::move(label)), mediator_(mediator), imu_model_(imu_model) {
+  legacy_inplace_q_ = legacy_q_rotation;
   Vector diag(15);
   diag.setZero();
   for (int i = 0; i < 3; ++i) {
@@ -164,8 +166,15 @@ Matrix Pinson15NedBlock::generate_f_pinson15() const {
 }
 
 Matrix Pinson15NedBlock::generate_q_pinson15() const {
-  Matrix Q = pre_Q_;  // copy (the Python original rotated its stored matrix in place)
   const Matrix3 C = nav::quat_to_dcm(*utils::quaternion(*new_pva_aux_));
+  if (legacy_inplace_q_) {
+    // Python-compatible path: rotate the stored matrix itself (see header).
+    auto& Q = const_cast<Matrix&>(pre_Q_);
+    Q.block<3, 3>(3, 3) = Matrix3(C * Q.block<3, 3>(3, 3) * C.transpose());
+    Q.block<3, 3>(6, 6) = Matrix3(C * Q.block<3, 3>(6, 6) * C.transpose());
+    return Q;
+  }
+  Matrix Q = pre_Q_;  // copy (the Python original rotated its stored matrix in place)
   Q.block<3, 3>(3, 3) = C * Q.block<3, 3>(3, 3) * C.transpose();
   Q.block<3, 3>(6, 6) = C * Q.block<3, 3>(6, 6) * C.transpose();
   return Q;

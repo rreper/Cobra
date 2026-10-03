@@ -420,13 +420,19 @@ Full app matrix: see §14 (13/13 pass).
 
 ## 12. Findings, quirks and latent bugs (decide deliberately in the port)
 
-1. **Pinson15 process-noise matrix mutated in place (real bug, reproduced).**
+1. **Pinson15 process-noise matrix mutated in place (real bug, reproduced, impact quantified).**
    `Pinson15NedBlock.generate_q_pinson15` does `Q = self._pre_Q` (a reference) then
    `Q[3:6,3:6] = C Q[3:6,3:6] Cᵀ` and `Q[6:9,6:9] = …`, so the stored sensor-frame Q is re-rotated on every
    propagation step. Test: two calls with the same attitude return different matrices
-   (`max|Q2−Q1| = 1.5e-7` on a 1e-6-scale block; eigenvalues preserved). Harmless for isotropic noise (the accel
-   RW sigmas in pos_ins are isotropic) but the gyro RW sigmas `(9.9e-4, 9.9e-4, 6.7e-5)` are not, so the gyro
-   noise orientation drifts. Same code in `TutorialPinson15NedBlock`. Fix: `Q = self._pre_Q.copy()`.
+   (`max|Q2−Q1| = 1.5e-7` on a 1e-6-scale block; eigenvalues preserved). The accel RW sigmas in pos_ins are
+   isotropic, but the gyro RW sigmas `(9.9e-4, 9.9e-4, 6.7e-5)` are not, so the small yaw-axis gyro noise is
+   progressively mixed with the large roll/pitch-axis noise: an unintended process-noise inflation on yaw.
+   **Measured impact (C++ port, pos_ins on the example log, everything else identical):** with the in-place
+   rotation reproduced, yaw error std 0.805° and 68.1 % of yaw errors inside 1σ (= Python); with a fresh copy
+   per call, yaw std 0.845° and 64.9 % inside 1σ, position/velocity within 1 %. The Python integration-test
+   tilt limits (std < 0.81°) were therefore tuned on the buggy behaviour and the corrected filter fails them by
+   4 %. The port exposes both: `PinsonStateBlockConfig::legacy_q_rotation` (default false = corrected). Same
+   code in `TutorialPinson15NedBlock`.
 2. `EkfFusionStrategy.update` uses `(I−KH)P` and explicit `inv()`; port should use Joseph form or at least a
    Cholesky solve, and keep the symmetrization. Unit tests compare against the simple form, so golden tests must
    allow for that or be regenerated.
@@ -458,6 +464,15 @@ Full app matrix: see §14 (13/13 pass).
     assignment raises `ValueError: could not broadcast`. The C++ port consumes the *virtual* width (rows of the
     real→virtual Jacobian) and maps it back with `sub_H · J`; covered by
     `FusionEngineTest.UpdateThroughRealAndVirtualBlocks`.
+15. **Preprocessors mutate messages in place, and the mediator reads the mutated timestamp (quirk, found during
+    acceptance).** `TimeAdjusterPreprocessor`, `TimeBiasPreprocessor` and `ImuRotationPreprocessor` modify the
+    incoming `Message.wrapped_message`. For *immediate* messages (IMU) `StandardMediator.process_pntos_message`
+    hands the message to the orchestration first and only then reads `cur_time = message.wrapped_message.time_of_validity`
+    for its buffer-release and solution-publish logic, so that logic runs on the time-adjusted IMU timestamps
+    (exactly 10 ms apart) while sequenced messages contribute raw timestamps. Effect on pos_ins: the 1 Hz
+    solution epochs land two IMU samples later than a raw-time implementation and the run yields 2570 instead of
+    2572 epochs. The C++ port keeps messages immutable and publishes on raw times (`DESIGN.md` §8 #14); at the
+    epochs the two share, the solutions agree to 0.03° in yaw.
 
 ---
 

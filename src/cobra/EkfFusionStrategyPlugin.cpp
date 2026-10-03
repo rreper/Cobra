@@ -151,7 +151,11 @@ std::unique_ptr<api::StandardFusionStrategy> EkfFusionStrategy::clone() const {
 }
 
 std::unique_ptr<api::StandardFusionStrategy> EkfFusionStrategyPlugin::new_fusion_strategy(api::FusionType type) {
-  if (is_fusion_type_supported(type)) return std::make_unique<EkfFusionStrategy>(mediator_);
+  if (is_fusion_type_supported(type)) {
+    auto s = std::make_unique<EkfFusionStrategy>(mediator_);
+    s->set_joseph_form(joseph_form_);
+    return s;
+  }
   if (mediator_)
     mediator_->log_message(LoggingLevel::ERROR,
                            "Fusion strategy type not currently supported. Make sure to call "

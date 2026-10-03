@@ -140,8 +140,8 @@ TEST(LcmConversions, DecodesTheRealExampleLog) {
       pva_lat = pva->get_p1();
   }
   for (const auto& [ch, n] : unsupported) std::cerr << "unsupported: " << ch << " x" << n << "\n";
-  // Only the simulated direction-to-points channel is expected to be unsupported.
-  for (const auto& [ch, n] : unsupported) EXPECT_EQ(ch, "/sensor/simulated/directiontoknownfeature");
+  EXPECT_TRUE(unsupported.empty());
+  EXPECT_GT(seen["/sensor/simulated/directiontoknownfeature"], 0);
   EXPECT_GT(seen["/sensor/vn-100/imu"], 500);
   EXPECT_GT(seen["/sensor/ins-d/pva"], 500);
   ASSERT_TRUE(imu_dv);

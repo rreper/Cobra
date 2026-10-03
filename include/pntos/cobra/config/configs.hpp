@@ -80,6 +80,11 @@ struct StateBlockConfig : BaseConfig {
 struct PinsonStateBlockConfig final : StateBlockConfig {
   static constexpr const char* kIdentifier = "pinson15";
   ImuConfig imu_model;
+  /// Reproduce the Python original's process-noise handling, which re-rotates its stored
+  /// sensor-frame Q into NED on every propagation (COBRA_ANALYSIS §12 #1). False (default) rotates a
+  /// fresh copy each time, i.e. the configured random-walk sigmas are applied as written. The Python
+  /// integration-test limits were tuned with the legacy behaviour; see DESIGN.md §9.5.
+  bool legacy_q_rotation = false;
   PinsonStateBlockConfig() { identifier = kIdentifier; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<PinsonStateBlockConfig> from_registry(api::Mediator& m, const std::string& group);

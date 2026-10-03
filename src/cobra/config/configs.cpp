@@ -153,6 +153,7 @@ void PinsonStateBlockConfig::to_registry(api::Mediator& m) const {
   ConfigWriter w(m, group_);
   write_base(w);
   w.nested("imu_model", imu_model);
+  if (legacy_q_rotation) w.scalar("legacy_q_rotation", true);  // absent in Python-written registries
 }
 
 std::optional<PinsonStateBlockConfig> PinsonStateBlockConfig::from_registry(api::Mediator& m,
@@ -171,6 +172,7 @@ std::optional<PinsonStateBlockConfig> PinsonStateBlockConfig::from_registry(api:
   r.resume();
   if (!imu) return std::nullopt;
   c.imu_model = *imu;
+  c.legacy_q_rotation = r.optional<bool>("legacy_q_rotation").value_or(false);
   return c;
 }
 

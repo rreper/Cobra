@@ -57,4 +57,5 @@ endif
 
 if get_option('apps')
   subdir('apps')
+  subdir('tools')
 endif

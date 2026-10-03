@@ -49,7 +49,10 @@ class EkfFusionStrategy final : public api::StandardFusionStrategy {
 /// Factory producing EkfFusionStrategy instances.
 class EkfFusionStrategyPlugin final : public api::FusionStrategyPlugin {
  public:
-  explicit EkfFusionStrategyPlugin(std::string identifier) : identifier_(std::move(identifier)) {}
+  /// `joseph_form`: covariance update form for every strategy created (default Joseph; false gives
+  /// Python's (I - K H) P arithmetic).
+  explicit EkfFusionStrategyPlugin(std::string identifier, bool joseph_form = true)
+      : identifier_(std::move(identifier)), joseph_form_(joseph_form) {}
 
   void init_plugin(const std::optional<std::string>& plugin_resources_location, api::Mediator* mediator) override {
     mediator_ = mediator;
@@ -63,6 +66,7 @@ class EkfFusionStrategyPlugin final : public api::FusionStrategyPlugin {
  private:
   std::string identifier_;
   api::Mediator* mediator_ = nullptr;
+  bool joseph_form_;
 };
 
 }  // namespace pntos::cobra

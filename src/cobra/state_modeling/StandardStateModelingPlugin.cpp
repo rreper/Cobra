@@ -102,7 +102,7 @@ std::unique_ptr<api::StandardStateBlock> StandardStateModelProvider::new_block(
         err("Could not get IMU config from registry.");
         return nullptr;
       }
-      return std::make_unique<Pinson15NedBlock>(label, mediator_, c->imu_model);
+      return std::make_unique<Pinson15NedBlock>(label, mediator_, c->imu_model, c->legacy_q_rotation);
     }
     if (id == FogmStateBlockConfig::kIdentifier) {
       auto c = FogmStateBlockConfig::from_registry(*mediator_, *config_group);

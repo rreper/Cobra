@@ -501,7 +501,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 
 | # | Deviation | Why |
 |---|---|---|
-| 1 | Pinson15 process-noise matrix is rotated from a copy, not in place | Python bug (`COBRA_ANALYSIS.md` §12 #1). Test `QIsNotMutatedAcrossCalls`. |
+| 1 | Pinson15 process-noise matrix is rotated from a copy, not in place (default); `PinsonStateBlockConfig::legacy_q_rotation = true` reproduces Python | Python bug (`COBRA_ANALYSIS.md` §12 #1). The bug inflates yaw process noise, and the Python integration limits were tuned with it; legacy mode reproduces Python's results to three digits, the corrected mode fails the pos_ins tilt limit by 4 %. Tests `QIsNotMutatedAcrossCalls`, `LegacyQRotationReproducesThePythonMutation`. |
 | 2 | Fusion engine `update` uses the virtual block width for a VSB-targeted processor | Python bug (§12 #14). Test `UpdateThroughRealAndVirtualBlocks`. |
 | 3 | EKF uses Joseph form + LDLT by default | Numerical robustness; `set_joseph_form(false)` restores Python's arithmetic for parity tests. |
 | 4 | Shape errors throw instead of raising inside numpy | C++ idiom; same observable effect (crash on programmer error). |
@@ -513,6 +513,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 10 | Nested config lists read back as base types | No introspection; providers re-read their own groups (as the Python providers do anyway). |
 | 11 | MSL altitude measurements are rejected until a geoid model is wired in | navtk's geoid lookup is not ported yet (§9). |
 | 13 | Preprocessors return modified copies instead of mutating the message in place | Messages are immutable shared objects in the port. |
+| 14 | The mediator's buffer-release and publish logic uses the raw message timestamp | Follows from 13. Python's mediator sees the preprocessor-adjusted time for immediate messages (`COBRA_ANALYSIS.md` §12 #15), which shifts its 1 Hz solution grid by two IMU samples and changes the epoch count (2570 vs 2572 on the example log). Not a filter difference: at shared epochs the solutions agree to 0.03° yaw. |
 | 12 | `has_virtual_state_block` returns true only for nodes known to the manager (roots included, as Python) | identical; listed because the API doc says otherwise (§12 #5). |
 
 ## 9. Roadmap: what remains and how to do it
@@ -595,10 +596,22 @@ input log defaults to the dataset inside the Cobra venv, output to `pntos_output
 | Wall / CPU time | 42 s / 37.8 s (loaded machine) | 22.6 s / 32.2 s | 2.1 s / 1.8 s |
 | Peak RSS | — | 196 MB | 8 MB |
 
-Position agrees to 0.4 %, velocity to 2 %, roll/pitch to 1 %; yaw RMS is 4.6 % higher in C++. The C++ uses the
-Joseph-form covariance update where Python uses `(I−KH)P`; whether that or the interpolation details in
-`BufferedImu` explain the yaw difference is an open follow-up (run with `set_joseph_form(false)` to test).
-The two extra epochs come from the C++ transport delivering the first solution request one message earlier.
+Position agrees to 0.4 %, velocity to 2 %, roll/pitch to 1 %; yaw RMS is 4.6 % higher in C++. **Resolved
+(2026-10-03):** step-by-step tracing (`PNTOS_TRACE_FILE`, see below) showed identical propagate/update sequences
+and identical inputs, with the first divergence inside the second Pinson propagation: the port rotates a fresh
+copy of the process-noise matrix while Python re-rotates its stored one (deviation #1). With
+`--legacy-q` the C++ pos_ins reproduces Python to three significant digits in every metric (yaw std 0.805°,
+68.1 % within 1σ) and passes the Python limits; the corrected mode has yaw std 0.845° and 64.9 % within 1σ. The
+Joseph form, the inertial layer, the alignment and all processors were verified identical to Python by
+`tools/parity_check.py` and `tools/inertial_parity_check.py` (machine precision). The remaining 20 ms offset of
+the 1 Hz solution grid is deviation #14 and does not affect the filter. `tools/run_acceptance.py` runs every app
+in both modes and `docs/TEST_MATRIX.md` shows both columns.
+
+Diagnostics hooks kept in the code: `PNTOS_TRACE_FILE=<path>` makes `StandardFusionEngine` write one line per
+propagate/update (plus `<path>.aux` with the Pinson aux inputs from the orchestration); `PNTOS_TRACE_FULL=1` adds
+the full state and covariance diagonal. `tools/trace_python_pos_ins.py` produces the same trace from the Python
+app for side-by-side comparison.
+
 The remaining twelve apps of the integration matrix (`COBRA_ANALYSIS.md` §14)
 need their plugins ported first (velocity, body-velocity, direction-to-points processors already exist; the
 UI, diagnostics and tutorial plugins do not).

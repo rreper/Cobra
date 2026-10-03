@@ -14,7 +14,7 @@ namespace pntos::cobra {
 
 class Pinson15NedBlock final : public api::StandardStateBlock {
  public:
-  Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model);
+  Pinson15NedBlock(std::string label, api::Mediator* mediator, const ImuConfig& imu_model, bool legacy_q_rotation = false);
 
   const std::string& label() const override { return label_; }
   std::size_t num_states() const override { return 15; }
@@ -47,6 +47,11 @@ class Pinson15NedBlock final : public api::StandardStateBlock {
   api::Mediator* mediator_;
   ImuConfig imu_model_;
   api::Matrix pre_Q_;  ///< sensor-frame Q, never mutated after construction
+  /// PinsonStateBlockConfig::legacy_q_rotation: rotate the stored Q in place like the Python original.
+  bool legacy_inplace_q_ = false;
+
+ public:
+  bool legacy_q_rotation() const { return legacy_inplace_q_; }
   std::shared_ptr<const utils::PVA> old_pva_aux_;
   std::shared_ptr<const utils::PVA> new_pva_aux_;
   std::shared_ptr<const aspn23_eigen::MeasurementImu> force_and_rate_aux_;

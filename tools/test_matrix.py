@@ -62,18 +62,18 @@ PYTHON_TESTS = [
 # Integration apps (COBRA_ANALYSIS.md section 14) -> (C++ status, note)
 APPS = [
     ('test_dummy_app', 'PASS', 'apps/dummy/minimal runs and exits cleanly'),
-    ('test_standard_pos_ins_app', 'PASS', 'apps/standard/pos_ins; see acceptance numbers below'),
+    ('test_standard_pos_ins_app', 'NOT RUN', 'apps/standard/pos_ins'),
     ('test_tutorial_pos_ins_app', 'NOT PORTED', 'tutorial plugins'),
     ('test_tutorial_pos_ins_vel_app', 'NOT PORTED', 'tutorial plugins'),
     ('test_standard_pos_ins_record_states_app', 'NOT PORTED', 'needs the HDF5 diagnostic log plugin'),
-    ('test_standard_pos_ins_leverarm_app', 'NOT PORTED', 'plugins exist (pinson_with_lever_arm_position MP); app not written'),
-    ('test_standard_pos_bodyvel_ins_app', 'NOT PORTED', 'plugins exist (pinson_body_velocity MP, downsampler); app not written'),
+    ('test_standard_pos_ins_leverarm_app', 'NOT RUN', 'apps/standard/pos_ins_leverarm'),
+    ('test_standard_pos_bodyvel_ins_app', 'NOT RUN', 'apps/standard/pos_ins_bodyvel'),
     ('test_extras_pos_zerovel2d_ins_app', 'NOT PORTED', 'needs the extras zero-velocity preprocessor'),
-    ('test_standard_pos_ins_vel_app', 'NOT PORTED', 'plugins exist (pinson_velocity MP); app not written'),
-    ('test_standard_posvel_ins_app', 'NOT PORTED', 'plugins exist (pinson_posvel MP); app not written'),
-    ('test_standard_outage_sim_app', 'NOT PORTED', 'plugins exist (outage preprocessor); app not written'),
-    ('test_standard_pos_ins_vsb_app', 'NOT PORTED', 'plugins exist (pinson_error_to_standard, position MP); app not written'),
-    ('test_standard_direction_to_points_app', 'NOT PORTED', 'MP exists; LCM decode of measurement_direction_3d_to_points missing'),
+    ('test_standard_pos_ins_vel_app', 'NOT RUN', 'apps/standard/pos_vel_ins'),
+    ('test_standard_posvel_ins_app', 'NOT RUN', 'apps/standard/posvel_ins'),
+    ('test_standard_outage_sim_app', 'NOT RUN', 'apps/standard/outage_sim'),
+    ('test_standard_pos_ins_vsb_app', 'NOT RUN', 'apps/standard/pos_ins_vsb'),
+    ('test_standard_direction_to_points_app', 'NOT RUN', 'apps/standard/direction_to_points'),
 ]
 
 
@@ -89,6 +89,7 @@ def main():
     ap.add_argument('--build', default='build')
     ap.add_argument('--out', default='docs/TEST_MATRIX.md')
     ap.add_argument('--pos-ins-errors', default=None)
+    ap.add_argument('--acceptance', default='docs/acceptance.json')
     a = ap.parse_args()
 
     xml_path = os.path.join(a.build, 'meson-logs', 'testlog.junit.xml')
@@ -166,9 +167,37 @@ def main():
              'runs the full example log and `tools/compare_to_truth.py` reproduces the Python accuracy.\n')
     L.append('| Python integration test | C++ status | Notes |')
     L.append('|---|---|---|')
+    acc = json.load(open(a.acceptance))['results'] if os.path.exists(a.acceptance) else {}
+    by_test = {}
+    for v in acc.values():
+        if 'python_test' in v:
+            by_test.setdefault(v['python_test'], {})[v.get('mode', 'corrected')] = v
+    L[-2] = '| Python integration test | C++ corrected Q | C++ legacy Q (Python-compatible) | Notes |'
+    L[-1] = '|---|---|---|---|'
+    def cell(r):
+        if r is None: return '—'
+        if not r.get('checks'): return f"FAIL ({r.get('reason', '?')})"
+        c = r['checks']
+        return (f"{'PASS' if r['passed'] else 'FAIL'}: pos {'/'.join(f'{v:.2f}' for v in c['pos']['std'])} m, "
+                f"vel {'/'.join(f'{v:.3f}' for v in c['vel']['std'])}, tilt {'/'.join(f'{v:.3f}' for v in c['tilt']['std'])} deg"
+                + (f" ({r['reason']})" if not r['passed'] and r.get('reason') else ''))
     for name, status, note in APPS:
-        L.append(f'| {name} | {status} | {note} |')
+        modes = by_test.get(name)
+        if modes:
+            r = modes.get('corrected') or next(iter(modes.values()))
+            note = f"epochs {r.get('epochs')} (py {r.get('expected_epochs')}), wall {r.get('wall_s', '?')} s"
+            L.append(f'| {name} | {cell(modes.get("corrected"))} | {cell(modes.get("legacy"))} | {note} |')
+        else:
+            L.append(f'| {name} | {status} | {status} | {note} |')
     L.append('')
+    L.append('Values are per-axis error standard deviations (N/E/D or roll/pitch/yaw) checked against the Python '
+             "integration-test limits together with max-error and sigma-coverage checks. 'Legacy Q' reproduces the Python "
+             'process-noise rotation bug (`PinsonStateBlockConfig::legacy_q_rotation`, app flag `--legacy-q`) and is the '
+             'apples-to-apples comparison; the limits were tuned on that behaviour.\n')
+    if acc:
+        L.append(f'App results from `{a.acceptance}` (generated {json.load(open(a.acceptance))["generated"]}; '
+                 'regenerate with `Cobra/.venv/bin/python tools/run_acceptance.py`). Limits are the Python integration test limits; '
+                 'the epoch count is allowed to differ by up to 5 (see DESIGN.md section 8, deviation 14).\n')
     if a.pos_ins_errors and os.path.exists(a.pos_ins_errors):
         e = json.load(open(a.pos_ins_errors))
         L.append('### pos_ins acceptance numbers (C++, from `--pos-ins-errors`)\n')

@@ -2,6 +2,30 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Yaw investigation closed, seven more apps, two-mode acceptance
+
+- **Root cause of the yaw gap found and proven.** Parity harnesses showed every numerical component (nav helpers,
+  Pinson dynamics at a rotated attitude, processors, VSB, error-state application, alignment, buffered inertial
+  incl. resets) identical to Python/navtk at machine precision; a propagate/update trace of both apps on a 60 s
+  cut showed identical step sequences and inputs with the first divergence inside the second Pinson
+  propagation. Cause: deviation #1 (Python re-rotates its stored process-noise matrix in place every call, which
+  inflates yaw process noise). `PinsonStateBlockConfig::legacy_q_rotation` (app flag `--legacy-q`) reproduces it;
+  with it pos_ins matches Python to three digits (yaw std 0.805°, 68.1 % within 1σ) and passes the Python limits.
+  The Joseph form was ruled out first (identical results with `--no-joseph`).
+- Apps added: `pos_vel_ins`, `posvel_ins`, `pos_ins_leverarm`, `pos_ins_bodyvel`, `outage_sim`, `pos_ins_vsb`,
+  `direction_to_points` (shared `apps/standard/app_common.hpp`). LCM decode added for
+  `measurement_direction_3d_to_points`; the vendored `type_image_feature` was fixed to the log's int16
+  descriptor layout (the pinned aspn-generated commit changed it to byte).
+- `tools/run_acceptance.py` replicates the Python integration-test checks (std/max limits, sigma coverage, point
+  count ±5, NaNs, start/end) for every app in corrected and legacy modes; `docs/TEST_MATRIX.md` shows both columns.
+  **Legacy mode: 7/8 apps pass; `outage_sim` misses the position-std limit by 0.3 % (307 m vs 306 m after a
+  600 s GNSS outage). Corrected mode: 2/8 pass (leverarm, outage_sim); the rest fail only the tilt (and for the
+  velocity apps, velocity) limits that were tuned on the Python behaviour.**
+- Tools: `parity_dump`/`parity_check.py`, `inertial_parity_dump`/`inertial_parity_check.py`,
+  `trace_python_pos_ins.py`, `PNTOS_TRACE_FILE` hook. 16 suites, 170 tests green.
+- Not ported: `pos_ins_record_states` (HDF5 diagnostics plugin), the two tutorial apps (tutorial plugins),
+  `pos_ins_zerovel2d` (extras preprocessor).
+
 ## 2026-10-03 — Test pass/fail matrix
 
 - `tools/test_matrix.py` generates `docs/TEST_MATRIX.md` from meson's JUnit output: suite table with Python

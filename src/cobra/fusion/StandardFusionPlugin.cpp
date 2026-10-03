@@ -3,6 +3,8 @@
 #include <pntos/cobra/utils/aspn.hpp>
 
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <set>
 #include <sstream>
@@ -17,6 +19,37 @@ using api::Timestamp;
 using api::Vector;
 
 namespace {
+std::ostream* g_trace = nullptr;
+int g_in_peek = 0;
+std::ofstream g_trace_file;
+bool g_trace_checked = false;
+std::ostream* trace() {
+  if (!g_trace_checked) {
+    g_trace_checked = true;
+    if (const char* f = std::getenv("PNTOS_TRACE_FILE")) {
+      g_trace_file.open(f);
+      if (g_trace_file) g_trace = &g_trace_file;
+    }
+  }
+  return g_trace;
+}
+void trace_state(const char* kind, const std::string& what, Timestamp a, Timestamp b, api::StandardFusionStrategy* s) {
+  auto* os = trace();
+  if (!os || !s || g_in_peek > 0) return;
+  auto P = s->covariance();
+  auto x = s->estimate();
+  *os << kind << ' ' << what << ' ' << a.elapsed_nsec << ' ' << b.elapsed_nsec << ' ' << std::setprecision(17)
+      << (P ? P->trace() : 0.0);
+  if (x && x->size() >= 9) *os << ' ' << (*x)(6) << ' ' << (*x)(7) << ' ' << (*x)(8);
+  if (P && P->rows() >= 9) *os << ' ' << (*P)(8, 8);
+  if (std::getenv("PNTOS_TRACE_FULL") && x && P) {
+    *os << " |";
+    for (Eigen::Index i = 0; i < x->size(); ++i) *os << ' ' << (*x)(i);
+    *os << " |";
+    for (Eigen::Index i = 0; i < P->rows(); ++i) *os << ' ' << (*P)(i, i);
+  }
+  *os << '\n';
+}
 std::string secs(Timestamp t) {
   std::ostringstream os;
   os << std::fixed << std::setprecision(9) << t.seconds();
@@ -357,6 +390,7 @@ void StandardFusionEngine::propagate(Timestamp time) {
   big.Phi = std::move(big_Phi);
   big.Qd = std::move(big_Qd);
   strategy_->propagate(big);
+  trace_state("P", "prop", time_, time, strategy_.get());
   time_ = time;
   if (save_after_prop_) save_x_and_p_to_registry();
 }
@@ -456,6 +490,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
 
   api::StandardMeasurementModel big{mm->z, full_h, full_H, mm->R};
   strategy_->update(big);
+  trace_state("U", processor_label, *tov, time_, strategy_.get());
   if (save_after_update_) save_x_and_p_to_registry();
 }
 
@@ -479,7 +514,9 @@ std::optional<EstimateWithCovariance> StandardFusionEngine::peek_ahead(Timestamp
     }
   }
   auto copy = clone();
+  ++g_in_peek;
   copy->propagate(time);
+  --g_in_peek;
   return copy->generate_x_and_p(block_labels);
 }
 
@@ -572,6 +609,11 @@ std::unique_ptr<api::StandardFusionEngine> StandardFusionEngine::clone() const {
   for (const auto& p : mp_) c->mp_.push_back(p->clone());
   c->vsb_manager_ = vsb_manager_;
   return c;
+}
+
+void StandardFusionEngine::set_trace(std::ostream* os) {
+  g_trace = os;
+  g_trace_checked = true;
 }
 
 // ----------------------------------------------------------------------------- plugin
