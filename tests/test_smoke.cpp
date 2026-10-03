@@ -18,9 +18,9 @@ TEST(Smoke, AspnEigenPvaRoundTrip) {
       Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>::Identity(9, 9);
   aspn23_eigen::MeasurementPositionVelocityAttitude pva(
       header, tov,
-      ASPN_MEASUREMENT_POSITION_VELOCITY_ATTITUDE_REFERENCE_FRAME_GEODETIC,
+      ASPN23_MEASUREMENT_POSITION_VELOCITY_ATTITUDE_REFERENCE_FRAME_GEODETIC,
       0.6, -1.5, 300.0, 1.0, 2.0, 3.0, quat, cov,
-      ASPN_MEASUREMENT_POSITION_VELOCITY_ATTITUDE_ERROR_MODEL_NONE,
+      ASPN23_MEASUREMENT_POSITION_VELOCITY_ATTITUDE_ERROR_MODEL_NONE,
       Eigen::Matrix<double, Eigen::Dynamic, 1>(0), {});
   EXPECT_EQ(pva.get_message_type(), ASPN_MEASUREMENT_POSITION_VELOCITY_ATTITUDE);
   EXPECT_EQ(pva.get_time_of_validity().get_elapsed_nsec(), 1'500'000'000);

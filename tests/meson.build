@@ -1,5 +1,9 @@
 test_sources = {
   'smoke': files('test_smoke.cpp'),
+  'api': files('test_api.cpp'),
+  'ekf_fusion_strategy': files('test_ekf_fusion_strategy.cpp'),
+  'simple_state_blocks': files('test_simple_state_blocks.cpp'),
+  'registry': files('test_registry.cpp'),
 }
 
 foreach name, srcs : test_sources

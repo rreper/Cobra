@@ -5,7 +5,13 @@ pntos_api_dep = declare_dependency(
 
 # Cobra plugin implementations.
 cobra_sources = files(
-  'cobra/placeholder.cpp',
+  'cobra/utils/logging.cpp',
+  'cobra/utils/arrays.cpp',
+  'cobra/EkfFusionStrategyPlugin.cpp',
+  'cobra/StandardLoggingPlugin.cpp',
+  'cobra/StandardRegistryPlugin.cpp',
+  'cobra/config/BaseConfig.cpp',
+  'cobra/state_modeling/SimpleStateBlocks.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,
