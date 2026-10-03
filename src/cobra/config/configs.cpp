@@ -396,4 +396,23 @@ std::optional<StateExtractorConfig> StateExtractorConfig::from_registry(api::Med
   return c;
 }
 
+// ----------------------------------------------------------------------------- FusionEngineConfig
+
+void FusionEngineConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("save_x_and_p_after_prop", save_x_and_p_after_prop);
+  w.scalar("save_x_and_p_after_update", save_x_and_p_after_update);
+}
+
+std::optional<FusionEngineConfig> FusionEngineConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  FusionEngineConfig c;
+  c.group_ = group;
+  c.save_x_and_p_after_prop = r.optional<bool>("save_x_and_p_after_prop").value_or(false);
+  c.save_x_and_p_after_update = r.optional<bool>("save_x_and_p_after_update").value_or(false);
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
 }  // namespace pntos::cobra

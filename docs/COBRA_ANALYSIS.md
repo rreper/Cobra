@@ -445,6 +445,15 @@ Full app matrix: see §14 (13/13 pass).
     setting `NAVTK_GEOID_UNDULATION_PATH` to that directory makes the navtk binary die with a floating-point
     exception (SIGFPE) on this build — an upstream navtk issue, not Cobra. Only `test_generate_model_alt_msl` is
     affected.
+14. **`StandardFusionEngine.update` slices the processor's H by the *real* block width for virtual blocks
+    (latent bug, found while porting).** For a label that is a VSB target, `stop_index = mp_num_states +
+    self._sb[real_label].num_states` and `sub_H = H[:, mp_num_states:stop_index]`; `full_h` likewise sizes
+    `x_mp` by the real width and assigns the converted (virtual-width) estimate into a real-width slice. This
+    only works when the VSB preserves the state count (`PinsonErrorToStandard`, 15→15, the only case the apps
+    exercise). For a size-reducing VSB (`StateExtractor`) numpy silently truncates the H slice and the `x_mp`
+    assignment raises `ValueError: could not broadcast`. The C++ port consumes the *virtual* width (rows of the
+    real→virtual Jacobian) and maps it back with `sub_H · J`; covered by
+    `FusionEngineTest.UpdateThroughRealAndVirtualBlocks`.
 
 ---
 

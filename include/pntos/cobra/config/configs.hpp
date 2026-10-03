@@ -215,4 +215,20 @@ struct StateExtractorConfig final : VirtualStateBlockConfig {
   static std::optional<StateExtractorConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
+// ----------------------------------------------------------------------------- fusion engine
+
+/// Configuration for StandardFusionEngine (group "config/fusion_engine").
+struct FusionEngineConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/fusion_engine";
+  std::string group_ = kGroup;
+  /// Record state_labels/time/estimate/sigma to the `diagnostics` group after every propagate.
+  bool save_x_and_p_after_prop = false;
+  /// Record state_labels/time/estimate/sigma to the `diagnostics` group after every update.
+  bool save_x_and_p_after_update = false;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<FusionEngineConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
 }  // namespace pntos::cobra

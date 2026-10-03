@@ -19,6 +19,8 @@ cobra_sources = files(
   'cobra/state_modeling/MeasurementProcessors.cpp',
   'cobra/state_modeling/VirtualStateBlocks.cpp',
   'cobra/state_modeling/StandardStateModelingPlugin.cpp',
+  'cobra/fusion/VirtualStateBlockManager.cpp',
+  'cobra/fusion/StandardFusionPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

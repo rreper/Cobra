@@ -2,6 +2,25 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Fusion engine, VSB manager, fusion plugin ported (9/9 suites green)
+
+- Added `VirtualStateBlockManager` (deep-copyable forest of VSB nodes with path/root caches),
+  `StandardFusionEngine` (block bookkeeping, block-diagonal dynamics assembly, full-width measurement models,
+  VSB routing, clone-based `peek_ahead`, diagnostics save to the `diagnostics` registry group) and
+  `StandardFusionPlugin` + `FusionEngineConfig`.
+- Tests: `test_vsb_manager` (4, port of the Python manager tests + deep-copy check) and `test_fusion_engine`
+  (8, new: add/get/set/remove with cross-covariances and re-indexing, non-generic EWC rejection, propagate against
+  FOGM/constant closed forms, update through real and virtual blocks, aux routing, peek_ahead/clone isolation,
+  registry diagnostics, plugin config). **9/9 suites green.**
+- New finding (COBRA_ANALYSIS §12 #14): Python `update()` slices H by the real block width for virtual blocks,
+  which breaks for size-reducing VSBs; the port uses the virtual width and the chain-rule Jacobian.
+- GitHub: `gh` is authenticated but the fine-grained token cannot create repositories and is scoped to a few
+  existing repos; no SSH key. Remote `origin` is preset to `https://github.com/rreper/pntos-cpp.git`. Rich needs
+  to create that repo (or grant the token "Administration: write" / run `gh auth refresh -s repo`), then
+  `git push -u origin main` works.
+- Next: `StandardMediator` + `StandardMessageStreamConfig` + `StandardControllerPlugin`, dummy plugins,
+  `StandardOrchestrationPlugin` and its configs, preprocessors.
+
 ## 2026-10-03 — State-modeling layer ported and tested; repo pushed to GitHub
 
 - Added `nav::` (NavToolkit formulas in Eigen), `utils::aspn` helpers, all state-block / measurement-processor /
