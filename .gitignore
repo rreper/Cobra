@@ -1,0 +1,27 @@
+# build
+/build*/
+/.cache/
+compile_commands.json
+
+# meson wrap downloads (keep the .wrap files, not the sources)
+/subprojects/*/
+/subprojects/packagecache/
+!/subprojects/packagefiles/
+
+# python / tooling
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+
+# outputs
+*.log
+*.hdf5
+OUTPUT.hdf5
+registry_permanency_files/
+
+# editors
+.vscode/
+.idea/
+*.swp
