@@ -28,6 +28,11 @@ cobra_sources = files(
   'cobra/dummy/DummyPlugins.cpp',
   'cobra/orchestration/OrchestrationUtils.cpp',
   'cobra/orchestration/StandardOrchestrationPlugin.cpp',
+  'cobra/inertial/Mechanization.cpp',
+  'cobra/inertial/BufferedImu.cpp',
+  'cobra/inertial/StandardInertialPlugin.cpp',
+  'cobra/initialization/Alignment.cpp',
+  'cobra/initialization/InitializationPlugins.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

@@ -278,4 +278,58 @@ EarthModel::EarthModel(const Vector3& pos_llh, const Vector3& vel_ned) {
   g_n = calculate_gravity_schwartz(alt, lat);
 }
 
+// ----------------------------------------------------------------------------- inertial additions
+
+Vector3 quat_to_rpy(const Vector4& q) {
+  const double q0 = q(0), q1 = q(1), q2 = q(2), q3 = q(3);
+  const double roll = std::atan2(2 * (q0 * q1 + q2 * q3), 1 - 2 * (q1 * q1 + q2 * q2));
+  const double pitch = std::asin(std::min(std::max(2 * (q0 * q2 - q1 * q3), -1.0), 1.0));
+  const double yaw = std::atan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2 * q2 + q3 * q3));
+  return Vector3(roll, pitch, yaw);
+}
+
+Vector4 quat_norm(const Vector4& q) {
+  const double n = q.norm();
+  return n > 0 ? Vector4(q / n) : q;
+}
+
+Matrix3 rot_vec_to_dcm(const Vector3& phi) {
+  const double p0 = phi(0), p1 = phi(1), p2 = phi(2);
+  const double m2 = p0 * p0 + p1 * p1 + p2 * p2;
+  const double m4 = m2 * m2;
+  const double t1 = 1 - m2 / 6 + m4 / 120;
+  const double t2 = 0.5 - m2 / 24 + m4 / 720;
+  Matrix3 C;
+  C << 1.0 + t2 * (-p2 * p2 - p1 * p1), -t1 * p2 + t2 * p1 * p0, t1 * p1 + t2 * p0 * p2,
+       t1 * p2 + t2 * p0 * p1, 1.0 + t2 * (-p2 * p2 - p0 * p0), -t1 * p0 + t2 * p1 * p2,
+       -t1 * p1 + t2 * p0 * p2, t1 * p0 + t2 * p1 * p2, 1.0 + t2 * (-p1 * p1 - p0 * p0);
+  return C;
+}
+
+Matrix3 axis_angle_to_dcm(const Vector3& axis, double angle) {
+  Vector3 u = axis;
+  const double n = u.norm();
+  if (n != 1.0 && n > 0) u /= n;
+  const double x = u(0), y = u(1), z = u(2), c = std::cos(angle), s = std::sin(angle);
+  Matrix3 C;
+  C << c + x * x * (1 - c), x * y * (1 - c) - z * s, x * z * (1 - c) + y * s,
+       y * x * (1 - c) + z * s, c + y * y * (1 - c), y * z * (1 - c) - x * s,
+       z * x * (1 - c) - y * s, z * y * (1 - c) + x * s, c + z * z * (1 - c);
+  return C;
+}
+
+Vector3 calculate_gravity_titterton(double alt, double lat, double R0) {
+  const double sl = std::sin(lat);
+  const double s2l = std::sin(2 * lat);
+  const double g0 = 9.780318 * (1 + 5.3024e-3 * sl * sl - 5.9e-6 * s2l * s2l);
+  const double g = alt >= 0 ? g0 / ((1 + alt / R0) * (1 + alt / R0)) : g0 * (1 + alt / R0);
+  return Vector3(0.0, 0.0, g);
+}
+
+double wrap_to_pi(double a) {
+  if (a <= PI && a > -PI) return a;
+  const double wraps = std::ceil((a - PI) / 2.0 / PI);
+  return a - wraps * 2.0 * PI;
+}
+
 }  // namespace pntos::cobra::nav

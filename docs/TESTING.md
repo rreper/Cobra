@@ -31,7 +31,7 @@ executable `build/tests/test_<name>` linked against `cobra_dep`, `gtest_main` an
 protocol is `gtest`, so individual test names show up in `build/meson-logs/testlog.txt` and in
 `testlog.junit.xml`.
 
-Current status: **12 suites, 143 tests, all green** (2026-10-03). A test run takes well under a second.
+Current status: **14 suites, 153 tests, all green** (2026-10-03). A test run takes well under a second.
 
 ## 2. Test support helpers
 
@@ -68,6 +68,8 @@ no config).
 | `fusion_engine` | 8 | — (Python covers the engine only via orchestration) | bookkeeping with cross-covariances and re-indexing, non-generic EWC rejection, block-diagonal propagate, update through real and virtual blocks, aux routing, `peek_ahead`/`clone` isolation, diagnostics save, plugin config |
 | `message_stream_config` | 9 | `test_message_stream_config.py` (all) + source-specific overrides | buffer-mode resolution rules |
 | `controller` | 13 | `test_single_threaded_controller.py` (all) + mediator behaviour | mediator routing/buffering/publishing/broadcast/logging/UI gate; `ExitEvent`; controller wiring order, validation, `ready_to_shutdown`, error exit code; dummy controller end to end; config round trips |
+| `inertial` | 5 | `test_inertial_plugin.py` (all) + mechanization checks | plugin contract (ranges, reset, continuous vs best solutions, forces/rates, sensor errors); stationary mechanization drift bound; error-model correction; helper closed forms; ring eviction/interpolation |
+| `initialization` | 5 | `test_manual_initialization_plugin.py`, `inertial_alignment/test_static_align_initialization_plugin.py`, `inertial_alignment/test_manual_heading_align_initialization_plugin.py` | manual solution fields; static and manual-heading alignment on 120 s of synthetic data (level, yaw -pi/2, diagonal covariances); gyro-compass recovers a known attitude; PVA-message initialization with start time and sigma override |
 | `orchestration` | 12 | `test_orchestration.py` (standard cases) | init with real fusion/EKF/state-modeling plugins and mock inertial/initializer; config round trip; one channel → many processors; VSB-chain aux; outage propagation; alignment after N messages; `request_solutions` in all forms; end-to-end position update with feedback |
 
 Python tests that correspond to components not yet ported are listed in §9.
@@ -87,9 +89,10 @@ promote one to `test_support.hpp` when a second suite needs it).
 | `MockMP`, `MockVSB`, `MockProvider`, `MockStateModelingPlugin` | `test_orchestration.cpp` | a second state-modeling plugin | identifiers `mock_mp` / `mock_vsb`; record "received message" / "got aux" events (Python prints them) |
 | `cobra::Dummy*` | `include/pntos/cobra/dummy/` | production dummies | ported from Python's `dummy_plugins`; used by the minimal app and by `test_controller` |
 
-When the real inertial and alignment plugins land, `test_orchestration.cpp` should gain a second fixture
-that uses them with `ManualAlignmentConfig`, keeping the mock fixture for fast, deterministic routing
-tests.
+The real inertial and alignment plugins now exist; `test_orchestration.cpp` should gain a second fixture
+that uses `StandardInertialPlugin` + `TutorialInitializationPlugin` with `ManualAlignmentConfig`, keeping the mock
+fixture for fast, deterministic routing tests (this is the first item in §9 of DESIGN.md's roadmap after the
+preprocessors).
 
 ## 5. Golden values and tolerances
 
@@ -186,8 +189,6 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 
 | Python test | Component to port first | Planned C++ suite |
 |---|---|---|
-| `test_inertial_plugin.py` | `StandardInertialPlugin` (NavToolkit) | `inertial` |
-| `inertial_alignment/*`, `test_manual_initialization_plugin.py` | alignment plugins | `initialization` |
 | `test_preprocessor_plugin.py` | `StandardPreprocessorPlugin` | `preprocessors` |
 | `test_transport_plugin.py` | LCM transports | `transport` |
 | `test_orchestration.py` (tutorial cases, `test_process_pntos_message_before_aligned`) | tutorial plugins, static alignment | `orchestration` (second fixture) |

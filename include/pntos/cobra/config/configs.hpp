@@ -454,4 +454,18 @@ struct StandardOrchestrationConfig final : BaseConfig {
                                                                   const std::string& group = kGroup);
 };
 
+/// Initial solution taken from the first PVA on a channel (Python PvaMessageInitializationConfig).
+struct PvaMessageInitializationConfig final : BaseConfig {
+  std::string group_;
+  std::string initial_pva_channel;
+  Vec3 initial_accel_bias_sigma{};
+  Vec3 initial_gyro_bias_sigma{};
+  std::optional<std::array<double, 9>> initial_pva_sigma;  ///< overrides the message covariance
+  std::optional<double> start_time;                        ///< s; PVAs before this are ignored
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<PvaMessageInitializationConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
 }  // namespace pntos::cobra

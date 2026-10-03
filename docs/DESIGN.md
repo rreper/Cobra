@@ -48,8 +48,8 @@ Principles that were applied throughout and should be kept:
    quirky behaviours, is reproduced so that the ported tests pass unchanged.
 4. **Eigen for all linear algebra, `aspn23_eigen` for all messages.** No xtensor anywhere. NavToolkit's
    math that Cobra calls from Python was re-implemented in Eigen (`nav::` namespace) rather than
-   calling NavToolkit's xtensor API; NavToolkit itself will be consumed only for the inertial
-   mechanization and alignment (§9).
+   calling NavToolkit's xtensor API, and the inertial mechanization and alignment were ported the same way
+   (§9.1, §9.2). There is no NavToolkit dependency.
 5. **C++ classes first, C ABI later.** The pntOS-C `PntosManagedMemory` reference-counting ABI is not
    implemented. The API classes are shaped so a thin C shim can wrap them later (every factory returns
    an owning pointer, every plugin has a `plugin_type()`).
@@ -71,7 +71,7 @@ python3 -m venv .venv && .venv/bin/pip install meson ninja
 | eigen | `subprojects/eigen.wrap` (wrapdb) | 5.0.1 | all matrices |
 | gtest | `subprojects/gtest.wrap` (wrapdb) | 1.18.0 | tests |
 | aspn-generated | `subprojects/aspn-generated.wrap` (git, pinned commit `8edae7ee…`) | is4s main | `aspn23_eigen` message classes + `aspn-c` structs |
-| NavToolkit | **not yet added** (git wrap planned, see §9) | — | inertial mechanization, alignment |
+| NavToolkit | not used: the needed parts were ported into Eigen (§9.1, §9.2) | — | — |
 | lcm | **not yet added** | — | LCM log transport |
 
 Options (`meson_options.txt`): `tests` (default on) and `apps` (default on).
@@ -95,11 +95,13 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   fusion/                     StandardFusionEngine/Plugin, VirtualStateBlockManager
   orchestration/              StandardOrchestrationPlugin, OrchestrationUtils     namespace pntos::cobra::orch
   state_modeling/             blocks, measurement processors, VSBs, provider plugin
+  inertial/                   Mechanization, BufferedImu, StandardInertialPlugin  namespace pntos::cobra::inertial
+  initialization/             Alignment (ImuModel, static/manual-heading), InitializationPlugins
   dummy/                      the dummy plugins
   utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins
 src/                          mirrors include/ one-to-one
 tests/                        test_<suite>.cpp + test_support.hpp
-apps/                         (empty until the inertial layer lands)
+apps/                         (empty until the transport lands)
 docs/                         this file, TESTING.md, PROGRESS.md, COBRA_ANALYSIS.md
 Cobra/                        the Python original (submodule)
 ```
@@ -126,6 +128,8 @@ Python module → C++ header mapping for the pieces that exist:
 | `utils/logging.py` | `utils/logging.hpp` |
 | `utils/arrays.py` | `utils/arrays.hpp` |
 | `navtk.navutils` (the parts Cobra uses) | `utils/navutils.hpp` |
+| `standard_plugins/StandardInertialPlugin.py` + navtk `BufferedImu`/mechanization | `inertial/StandardInertialPlugin.hpp`, `inertial/BufferedImu.hpp`, `inertial/Mechanization.hpp` |
+| `tutorial_plugins/TutorialInitializationPlugin.py`, `standard_plugins/{StaticAlign,ManualHeadingAlign,PvaMessage}InitializationPlugin.py` + navtk alignment | `initialization/InitializationPlugins.hpp`, `initialization/Alignment.hpp` |
 | `dummy_plugins/*` | `dummy/DummyPlugins.hpp` |
 
 ## 4. Type and idiom mapping Python → C++
@@ -505,37 +509,43 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 
 ## 9. Roadmap: what remains and how to do it
 
-Ordered so that the `pos_ins` app becomes runnable as early as possible. Each item names the Python
+Ordered so that the `pos_ins` app becomes runnable as early as possible. 9.1 and 9.2 are done; 9.3 is next. Each item names the Python
 source to port, the planned C++ location, and the tests to port.
 
-### 9.1 NavToolkit subproject + inertial plugin
+### 9.1 Inertial mechanization — DONE (ported into Eigen, no NavToolkit dependency)
 
-- **Python:** `standard_plugins/inertial/StandardInertialPlugin.py` (wraps `navtk.filtering.InertialMechanization`
-  / `NavSolution` / buffering), `tests/test_inertial_plugin.py`.
-- **C++:** `include/pntos/cobra/inertial/StandardInertialPlugin.hpp`. Add `subprojects/navtoolkit.wrap`
-  (git, pin a commit; NavToolkit is a meson project with an xtensor dependency, so the wrap will pull
-  xtensor/xtl as well; keep it `default_options: ['python=disabled']` or equivalent). Convert at the
-  boundary only: Eigen ↔ xtensor for the PVA/IMU vectors, never inside the filter code.
-- The class implements `api::StandardInertialMechanization`: ring buffer of mechanized solutions of
-  `inertial_buffer_length` seconds, `request_solution(time)` with interpolation, `request_forces_and_rates`
-  / `request_average_forces_and_rates` from the buffered IMU data (specific force rotated to NED, rates in
-  body), `reset_solution` (re-mechanize from the reset time forward), sensor error correction
-  (biases, scale factors), `is_time_in_range`, earliest/latest time.
-- `InertialConfig.C_imu_to_platform` rotates incoming IMU samples; `expected_dt` detects gaps.
-- Alternative if NavToolkit integration proves painful: port the mechanization itself into `nav::`
-  (NavToolkit's `InertialMechanization` is ~600 lines of xtensor; the formulas needed are already in
-  `navutils.hpp`). Decide after one day of trying the wrap.
+Decision: NavToolkit was **not** added as a subproject. It needs xtensor, xtensor-blas (BLAS/LAPACK), a
+Python interpreter at configure time, spdlog, nlohmann_json and a data download; the parts Cobra uses are
+~2,300 lines of plain math. They were ported line-by-line into Eigen:
 
-### 9.2 Alignment (initialization) plugins
+| NavToolkit | C++ |
+|---|---|
+| `inertial/mechanization_standard.cpp`, `inertial_functions.cpp`, `Inertial.cpp`, `MechanizationOptions.hpp` | `inertial/Mechanization.hpp` (`mechanization_standard`, `calc_force_ned`, `calc_rot_rate`, `Inertial`, `ImuErrors`, `StandardPva`) |
+| `inertial/BufferedPva.cpp`, `BufferedImu.cpp`, `utils/Ordered.hpp`, `utils/interpolation.cpp` | `inertial/BufferedImu.hpp` (`TimestampedRing<T>`, `BufferedImu`, `linear_interp_pva`) |
+| `navutils` (`rot_vec_to_dcm`, `axis_angle_to_dcm`, `quat_to_rpy`, Titterton gravity, `wrap_to_pi`) | `utils/navutils.hpp` additions |
+| Cobra `standard_plugins/StandardInertialPlugin.py` | `inertial/StandardInertialPlugin.hpp` |
 
-- **Python:** `standard_plugins/initialization/ManualAlignInitializationPlugin.py`,
-  `StaticAlignInitializationPlugin.py`, `ManualHeadingAlignInitializationPlugin.py`,
-  `PvaMessageInitializationPlugin.py`, `tests/inertial_alignment/*`, `test_manual_initialization_plugin.py`.
-- **C++:** `include/pntos/cobra/initialization/*.hpp`. Each returns an `InertialInitializationStrategy`:
-  manual (immediately good from `ManualAlignmentConfig`), static (average `static_time` of IMU to level
-  and gyro-compass, from `navtk.filtering.StaticAlign`), manual heading (static levelling + configured
-  heading), PVA message (first PVA on a channel). The orchestration tests' `MockInitializer` shows the
-  contract they must satisfy.
+Behavioural notes: integrated IMU only (SAMPLED throws, as NavToolkit); the ring buffers hold
+`buffer_length / expected_dt + 2` entries and the reported time span excludes the oldest entry once the ring is
+full (NavToolkit quirk, kept); `estimated_dt()` switches from the configured value to the running mean after
+10 samples; resets re-mechanize every buffered IMU record after the reset time, scaling the first one by the
+partial interval. Aiding altitude and wander-azimuth mechanization were not ported (Cobra does not use them).
+`InertialConfig.C_imu_to_platform` is ignored by the inertial itself, as in Python (the IMU rotator
+preprocessor applies it).
+
+### 9.2 Alignment (initialization) plugins — DONE
+
+| Python | C++ |
+|---|---|
+| `tutorial_plugins/TutorialInitializationPlugin.py` (`ManualInitialization`) | `initialization/InitializationPlugins.hpp`: `ManualInitialization`, `TutorialInitializationPlugin` (alias `ManualAlignInitializationPlugin`) |
+| `standard_plugins/StaticAlignInitializationPlugin.py` + navtk `StaticAlignment`, `quaternion_static_alignment`, `AlignBase` | `initialization/Alignment.hpp` (`StaticAlignment`, `quaternion_static_alignment`, `first_order_rpy_covariance`, `ImuModel` + `hg1700/hg9900/stim300_model`), `AlignmentStrategy`, `StaticAlignInitializationPlugin` |
+| `standard_plugins/ManualHeadingAlignInitializationPlugin.py` + navtk `ManualHeadingAlignment` | `ManualHeadingAlignment`, `ManualHeadingAlignInitializationPlugin` |
+| `standard_plugins/PvaMessageInitializationPlugin.py` | `PvaMessageInitialization`, `PvaMessageInitializationPlugin`, `PvaMessageInitializationConfig` |
+
+Conventions to keep straight: NavToolkit's `NavSolution.rot_mat` is **C_nav_to_sensor**; the ASPN PVA
+quaternion is C_sensor_to_nav, so `AlignmentStrategy::request_solution` transposes. The alignment
+covariance is the 15×15 Pinson block; rows/cols 0–8 become the PVA covariance, 9–14 the bias covariance.
+The numerical RPY Jacobian uses NavToolkit's relative perturbation (`x_i * 0.01`, or `0.01` where `x_i == 0`).
 
 ### 9.3 Preprocessors
 

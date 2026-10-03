@@ -11,6 +11,8 @@ test_sources = {
   'message_stream_config': files('test_message_stream_config.cpp'),
   'controller': files('test_controller.cpp'),
   'orchestration': files('test_orchestration.cpp'),
+  'inertial': files('test_inertial.cpp'),
+  'initialization': files('test_initialization.cpp'),
 }
 
 foreach name, srcs : test_sources

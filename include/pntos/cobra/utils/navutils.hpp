@@ -70,4 +70,19 @@ struct EarthModel {
   Vector3 g_n;
 };
 
+// --- additions for the inertial / alignment port (NavToolkit navigation.hpp, gravity.cpp, math.cpp)
+
+/// Roll, pitch, yaw (rad) from a quaternion [w, x, y, z] (C_platform_to_nav convention).
+Vector3 quat_to_rpy(const Vector4& q);
+/// Normalised quaternion.
+Vector4 quat_norm(const Vector4& q);
+/// Sixth-order rotation-vector -> DCM (NavToolkit `rot_vec_to_dcm`).
+Matrix3 rot_vec_to_dcm(const Vector3& phi);
+/// Rodrigues rotation about `axis` (normalised internally) by `angle` (rad).
+Matrix3 axis_angle_to_dcm(const Vector3& axis, double angle);
+/// Titterton & Weston 1967-model gravity, NED, with R0 = sqrt(Rn Re).
+Vector3 calculate_gravity_titterton(double alt, double lat, double R0);
+/// Wrap an angle into (-pi, pi].
+double wrap_to_pi(double angle);
+
 }  // namespace pntos::cobra::nav

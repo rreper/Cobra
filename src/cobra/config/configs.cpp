@@ -848,4 +848,33 @@ std::optional<StandardOrchestrationConfig> StandardOrchestrationConfig::from_reg
   return c;
 }
 
+// ----------------------------------------------------------------------------- PvaMessageInitializationConfig
+
+void PvaMessageInitializationConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("initial_pva_channel", initial_pva_channel);
+  w.vector("initial_accel_bias_sigma", to_vector(initial_accel_bias_sigma));
+  w.vector("initial_gyro_bias_sigma", to_vector(initial_gyro_bias_sigma));
+  if (initial_pva_sigma) {
+    std::vector<double> v(initial_pva_sigma->begin(), initial_pva_sigma->end());
+    w.matrix("initial_pva_sigma", to_matrix(v));
+  }
+  w.optional("start_time", start_time);
+}
+
+std::optional<PvaMessageInitializationConfig> PvaMessageInitializationConfig::from_registry(api::Mediator& m,
+                                                                                            const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  PvaMessageInitializationConfig c;
+  c.group_ = group;
+  c.initial_pva_channel = r.require<std::string>("initial_pva_channel");
+  c.initial_accel_bias_sigma = req_arr<3>(r, "initial_accel_bias_sigma");
+  c.initial_gyro_bias_sigma = req_arr<3>(r, "initial_gyro_bias_sigma");
+  c.initial_pva_sigma = read_arr<9>(r, "initial_pva_sigma");
+  c.start_time = r.optional<double>("start_time");
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
 }  // namespace pntos::cobra

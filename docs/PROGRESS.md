@@ -2,6 +2,19 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — Inertial mechanization and alignment ported into Eigen (14/14 suites green)
+
+- Decision: port NavToolkit's mechanization/alignment (~2,300 lines) into Eigen instead of adding NavToolkit
+  (xtensor + BLAS + Python-at-configure + spdlog + data download) as a subproject. DESIGN.md §9.1/9.2 lists the
+  file mapping and the conventions (C_nav_to_sensor in NavSolution, relative perturbation in the RPY Jacobian).
+- Added `inertial/Mechanization` (standard NED mechanization, error model, `Inertial`), `inertial/BufferedImu`
+  (time-sorted rings, interpolation, resets with re-propagation, force/rate queries, no-reset-since solutions),
+  `StandardInertialPlugin`; `initialization/Alignment` (`ImuModel`, static + manual-heading alignment,
+  gyro-compass), the four initialization plugins and `PvaMessageInitializationConfig`.
+- Tests: `inertial` (5) and `initialization` (5), ported from the Python tests plus closed-form checks.
+  **14/14 suites, 153 tests green.** Pushed.
+- Next: preprocessors + StandardPreprocessorPlugin, then the LCM log transport and the pos_ins app.
+
 ## 2026-10-03 — Design and testing guides; sanitizer run
 
 - Added `docs/DESIGN.md` (build, layout, type mapping, every component with diagrams, the complete list of
