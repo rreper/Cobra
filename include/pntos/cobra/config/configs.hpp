@@ -468,4 +468,32 @@ struct PvaMessageInitializationConfig final : BaseConfig {
   static std::optional<PvaMessageInitializationConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
+// ----------------------------------------------------------------------------- transports
+
+/// LcmLogTransportPlugin (group "config/lcm_log_transport").
+struct LcmLogTransportConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/lcm_log_transport";
+  std::string group_ = kGroup;
+  std::optional<std::string> input_file;   ///< LCM log to replay
+  std::optional<std::string> output_file;  ///< LCM log to record to (overwritten; must differ from input)
+  std::optional<std::vector<std::string>> channels_to_process;  ///< nullopt = all
+  bool record_input_channels = true;       ///< copy input events into the output log
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<LcmLogTransportConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
+/// LcmTransportPlugin (network LCM; not ported, config kept for registry compatibility).
+struct LcmTransportConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/lcm_transport";
+  std::string group_ = kGroup;
+  std::string url = "tcpq://";
+  std::string subscribe_to = "^((?!pntos).)*$";
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<LcmTransportConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
 }  // namespace pntos::cobra

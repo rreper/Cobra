@@ -3,6 +3,9 @@ pntos_api_dep = declare_dependency(
   include_directories: pntos_inc,
   dependencies: [eigen_dep, aspn_eigen_dep, aspn_c_dep, thread_dep])
 
+# Header-only third-party code (see third_party/NOTICE.md).
+third_party_inc = include_directories('../third_party/lcm', '../third_party/aspn23_lcm')
+
 # Cobra plugin implementations.
 cobra_sources = files(
   'cobra/utils/logging.cpp',
@@ -34,13 +37,17 @@ cobra_sources = files(
   'cobra/initialization/Alignment.cpp',
   'cobra/initialization/InitializationPlugins.cpp',
   'cobra/preprocessing/StandardPreprocessorPlugin.cpp',
+  'cobra/transport/LcmLog.cpp',
+  'cobra/transport/LcmConversions.cpp',
+  'cobra/transport/LcmLogTransportPlugin.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,
-  include_directories: pntos_inc,
+  include_directories: [pntos_inc, third_party_inc],
   dependencies: [pntos_api_dep],
   install: true)
 
 cobra_dep = declare_dependency(
   link_with: cobra_lib,
+  include_directories: third_party_inc,
   dependencies: [pntos_api_dep])

@@ -79,6 +79,10 @@ messages at 100 Hz and ~2.6k GPS positions at 1 Hz were processed. The integrati
 `std < 1.4 m / 0.1 m/s / 0.81°`, `max < 3.8 m / 0.8 m/s / 3.5°` and minimum percent-within-sigma bounds;
 **this table is the acceptance baseline the C++ port must reproduce.**
 
+> **C++ port result (2026-10-03):** `apps/standard/pos_ins` on the same log gives position RMS 0.917 / 1.233 /
+> 1.668 m, velocity RMS 0.0850 / 0.0939 / 0.0423 m/s, 2572 epochs, 2.1 s wall (`tools/compare_to_truth.py`;
+> see `docs/DESIGN.md` §9.5).
+
 ---
 
 ## 3. Repository layout

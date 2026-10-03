@@ -2,6 +2,23 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-03 — LCM log transport, apps, and pos_ins acceptance on the example log (16/16 suites green)
+
+- Decided against liblcm: `transport/LcmLog` reads/writes the event-log format directly and the lcm-gen C++
+  classes are vendored header-only (`third_party/`, see NOTICE.md). `LcmConversions` covers IMU, position,
+  velocity, PVA, altitude, barometer; `LcmLogTransportPlugin` replays with channel filter, UI source gate,
+  output recording and the end-of-log shutdown flag. Fingerprints match the venv-generated Python types
+  (verified by decoding the real example log).
+- Apps: `apps/dummy/minimal`, `apps/standard/pos_ins` (configs identical to the Python app).
+  `tools/compare_to_truth.py` computes NED/velocity/RPY RMS against `/sensor/ins-d/pva`.
+- **Acceptance:** on the 43-minute example log the C++ pos_ins gives position RMS 0.917/1.233/1.668 m vs Python
+  0.921/1.235/1.667 (same tool), velocity 0.0850/0.0939/0.0423 vs 0.0837/0.0930/0.0431 m/s, attitude
+  0.090/0.079/0.847° vs 0.089/0.078/0.810°. Wall time 2.1 s vs 22.6 s; peak RSS 8 MB vs 196 MB. No WARN/ERROR
+  logged during the run. Open follow-up: the 4.6 % higher yaw RMS (Joseph form vs `(I−KH)P` is the first suspect).
+- Tests: `lcm_transport` (7). **16/16 suites, 169 tests green.** Pushed.
+- Remaining (Tier 2/3, DESIGN.md §9.6): the other 12 apps' missing plugins (UI, diagnostics/HDF5 log, tutorial,
+  Buscat), network LCM transport, ROS, geoid model for MSL altitude, C ABI shim.
+
 ## 2026-10-03 — Preprocessors ported (15/15 suites green)
 
 - `StandardPreprocessorPlugin` with the six preprocessors; `utils::with_time_of_validity` added so timestamp

@@ -10,7 +10,7 @@ inertial mechanization and alignment come from [NavToolkit](https://github.com/i
 
 | | |
 |---|---|
-| Status | **Tier 1 in progress**: fusion, state modeling, controller and orchestration layers ported; inertial, alignment, preprocessors and transport next (see [docs/PROGRESS.md](docs/PROGRESS.md)) |
+| Status | **Tier 1 complete**: `pos_ins` runs end to end on the example log and reproduces the Python position/velocity accuracy at ~20× the speed (see [docs/PROGRESS.md](docs/PROGRESS.md), [docs/DESIGN.md](docs/DESIGN.md) §9.5) |
 | Design guide (read first) | [docs/DESIGN.md](docs/DESIGN.md) — build, layout, type mapping, every component, deviations, roadmap, recipes |
 | Testing guide | [docs/TESTING.md](docs/TESTING.md) — running, suite inventory, mocks, goldens, porting a Python test, acceptance |
 | Analysis of the Python original | [docs/COBRA_ANALYSIS.md](docs/COBRA_ANALYSIS.md) — architecture, baselines, findings, app matrix |
@@ -47,6 +47,14 @@ All dependencies are fetched as meson subprojects on first `setup`; nothing need
 1. Read `docs/DESIGN.md` §9 for the next item and the Python source it comes from.
 2. Port the class and its Python test side by side (`docs/TESTING.md` §6), keeping names identical.
 3. `meson test -C build` must stay green; add a dated entry to `docs/PROGRESS.md`; commit and push.
+
+## Running the pos_ins app
+
+```bash
+.venv/bin/meson compile -C build
+./build/apps/pos_ins out.log                      # input defaults to the Cobra example dataset in Cobra/.venv
+Cobra/.venv/bin/python tools/compare_to_truth.py out.log   # NED position / velocity / RPY RMS vs truth
+```
 
 ## Acceptance
 

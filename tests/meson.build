@@ -14,6 +14,7 @@ test_sources = {
   'inertial': files('test_inertial.cpp'),
   'initialization': files('test_initialization.cpp'),
   'preprocessors': files('test_preprocessors.cpp'),
+  'lcm_transport': files('test_lcm_transport.cpp'),
 }
 
 foreach name, srcs : test_sources

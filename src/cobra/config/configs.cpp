@@ -877,4 +877,44 @@ std::optional<PvaMessageInitializationConfig> PvaMessageInitializationConfig::fr
   return c;
 }
 
+// ----------------------------------------------------------------------------- transport configs
+
+void LcmLogTransportConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.optional("input_file", input_file);
+  w.optional("output_file", output_file);
+  if (channels_to_process) w.strings("channels_to_process", *channels_to_process);
+  w.scalar("record_input_channels", record_input_channels);
+}
+
+std::optional<LcmLogTransportConfig> LcmLogTransportConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  LcmLogTransportConfig c;
+  c.group_ = group;
+  c.input_file = r.optional<std::string>("input_file");
+  c.output_file = r.optional<std::string>("output_file");
+  c.channels_to_process = r.optional<api::StringArray>("channels_to_process");
+  c.record_input_channels = r.optional<bool>("record_input_channels").value_or(true);
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+void LcmTransportConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("url", url);
+  w.scalar("subscribe_to", subscribe_to);
+}
+
+std::optional<LcmTransportConfig> LcmTransportConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  LcmTransportConfig c;
+  c.group_ = group;
+  c.url = r.optional<std::string>("url").value_or("tcpq://");
+  c.subscribe_to = r.optional<std::string>("subscribe_to").value_or("^((?!pntos).)*$");
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
 }  // namespace pntos::cobra

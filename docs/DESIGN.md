@@ -72,7 +72,7 @@ python3 -m venv .venv && .venv/bin/pip install meson ninja
 | gtest | `subprojects/gtest.wrap` (wrapdb) | 1.18.0 | tests |
 | aspn-generated | `subprojects/aspn-generated.wrap` (git, pinned commit `8edae7ee…`) | is4s main | `aspn23_eigen` message classes + `aspn-c` structs |
 | NavToolkit | not used: the needed parts were ported into Eigen (§9.1, §9.2) | — | — |
-| lcm | **not yet added** | — | LCM log transport |
+| lcm | not needed: log format read/written directly; core header vendored in `third_party/lcm` | 1.5.x header | LCM log transport |
 
 Options (`meson_options.txt`): `tests` (default on) and `apps` (default on).
 
@@ -98,11 +98,14 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   inertial/                   Mechanization, BufferedImu, StandardInertialPlugin  namespace pntos::cobra::inertial
   initialization/             Alignment (ImuModel, static/manual-heading), InitializationPlugins
   preprocessing/              StandardPreprocessorPlugin (six preprocessors)
+  transport/                  LcmLog (reader/writer), LcmConversions, LcmLogTransportPlugin  namespace pntos::cobra::lcm
   dummy/                      the dummy plugins
   utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins
 src/                          mirrors include/ one-to-one
 tests/                        test_<suite>.cpp + test_support.hpp
-apps/                         (empty until the transport lands)
+apps/                         dummy/minimal, standard/pos_ins
+third_party/                  vendored header-only code (lcm_coretypes.h, lcm-gen ASPN classes), see NOTICE.md
+tools/                        compare_to_truth.py (needs the Cobra venv)
 docs/                         this file, TESTING.md, PROGRESS.md, COBRA_ANALYSIS.md
 Cobra/                        the Python original (submodule)
 ```
@@ -132,6 +135,8 @@ Python module → C++ header mapping for the pieces that exist:
 | `standard_plugins/StandardInertialPlugin.py` + navtk `BufferedImu`/mechanization | `inertial/StandardInertialPlugin.hpp`, `inertial/BufferedImu.hpp`, `inertial/Mechanization.hpp` |
 | `tutorial_plugins/TutorialInitializationPlugin.py`, `standard_plugins/{StaticAlign,ManualHeadingAlign,PvaMessage}InitializationPlugin.py` + navtk alignment | `initialization/InitializationPlugins.hpp`, `initialization/Alignment.hpp` |
 | `standard_plugins/preprocessor/*` | `preprocessing/StandardPreprocessorPlugin.hpp` |
+| `standard_plugins/LcmLogTransportPlugin.py`, `utils/lcm_utils.py`, `aspn23_lcm_conversions` | `transport/LcmLogTransportPlugin.hpp`, `transport/LcmLog.hpp`, `transport/LcmConversions.hpp` |
+| `pntos-cobra-apps/.../standard/pos_ins.py`, `dummy/minimal.py` | `apps/standard/pos_ins.cpp`, `apps/dummy/minimal.cpp` |
 | `dummy_plugins/*` | `dummy/DummyPlugins.hpp` |
 
 ## 4. Type and idiom mapping Python → C++
@@ -512,7 +517,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 
 ## 9. Roadmap: what remains and how to do it
 
-Ordered so that the `pos_ins` app becomes runnable as early as possible. 9.1–9.3 are done; 9.4 (LCM transport) is next. Each item names the Python
+Ordered so that the `pos_ins` app becomes runnable as early as possible. 9.1–9.5 are done; what remains is listed in 9.6. Each item names the Python
 source to port, the planned C++ location, and the tests to port.
 
 ### 9.1 Inertial mechanization — DONE (ported into Eigen, no NavToolkit dependency)
@@ -559,24 +564,44 @@ The numerical RPY Jacobian uses NavToolkit's relative perturbation (`x_i * 0.01`
 mutate the incoming message in place; the port returns a modified copy (`utils::with_time_of_validity` rewrites
 a timestamp on any timed ASPN type). A downsampling factor of 0 passes everything (Python would divide by zero).
 
-### 9.4 LCM transport
+### 9.4 LCM transport — DONE (no liblcm)
 
-- **Python:** `standard_plugins/transport/LcmLogTransportPlugin.py` (+ `LcmTransportPlugin.py`),
-  `utils/lcm_utils.py`, `config/LcmTransportConfig.py`, `tests/test_transport_plugin.py`.
-- **C++:** needs `lcm` (meson wrap or system package) and aspn-generated's LCM C++ bindings
-  (`aspn23_lcm`), plus the `aspn23_lcm → aspn23_eigen` conversions (aspn-generated provides converters;
-  check `aspn-cpp/src/aspn23/lcm`). The log transport replays an `.lcmlog` on its own thread,
-  mapping channel → message type, calling `mediator->process_pntos_message`, and sets
-  `controller/flags: ready_to_shutdown` at EOF.
+`transport/LcmLog.hpp` reads and writes the `.lcmlog` event format directly (sync word, event number,
+µs timestamp, channel, payload); `transport/LcmConversions.hpp` decodes/encodes the ASPN-23 LCM wire format
+for IMU, position, velocity, PVA, altitude and barometer using the lcm-gen C++ classes vendored in
+`third_party/aspn23_lcm` (header-only; they need only `third_party/lcm/lcm/lcm_coretypes.h`, see
+`third_party/NOTICE.md`). `LcmLogTransportPlugin` replays a log on its own thread, honours
+`channels_to_process` and the `ui/channel/<ch>: enabled_source` gate, records input events and broadcast
+messages to the output log, and sets `controller/flags: ready_to_shutdown` at end of file. Types not yet
+converted (e.g. `measurement_direction_3d_to_points`) are logged as WARN and skipped; add a pair of
+`*_from`/`*_to` functions in `LcmConversions.cpp` to support more. The network `LcmTransportPlugin` is not
+ported (it needs liblcm's UDP/TCP providers); its config exists for registry compatibility.
 
-### 9.5 Apps and acceptance
+### 9.5 Apps and acceptance — DONE for pos_ins
 
-- `apps/dummy/minimal`: dummy controller + dummy orchestration + dummy transport (all exist).
-- `apps/standard/pos_ins`: `Cobra/pntos-cobra/src/pntos/cobra/apps/standard/pos_ins.py` — build the
-  config list in C++ exactly as the Python app does, run `StandardControllerPlugin::take_control`.
-- Acceptance: run on the example log and reproduce `COBRA_ANALYSIS.md` §2 (pos RMS 0.92/1.24/1.67 m,
-  vel RMS 0.084/0.093/0.043 m/s, tilt RMS 0.074/0.092/0.811°) within a few percent; the Python
-  `utils/plots.py` / truth comparison can be reused from the venv on the C++ output log.
+`apps/dummy/minimal.cpp` and `apps/standard/pos_ins.cpp` (same configuration values as the Python app; the
+input log defaults to the dataset inside the Cobra venv, output to `pntos_output.log`). `tools/compare_to_truth.py`
+(run with the Cobra venv) computes NED position / velocity / RPY RMS of a solution log against the
+`/sensor/ins-d/pva` truth channel. Result on the 43-minute example log, C++ vs the Python baseline from
+`COBRA_ANALYSIS.md` §2:
+
+| | Python (`COBRA_ANALYSIS.md` §2 script) | Python (`tools/compare_to_truth.py`) | C++ (`tools/compare_to_truth.py`) |
+|---|---|---|---|
+| Position RMS N / E / D [m] | 0.92 / 1.24 / 1.67 | 0.921 / 1.235 / 1.667 | 0.917 / 1.233 / 1.668 |
+| Position max abs N / E / D [m] | 2.86 / 2.87 / 3.76 | 2.86 / 2.87 / 3.76 | 2.73 / 2.85 / 3.75 |
+| Velocity RMS N / E / D [m/s] | 0.084 / 0.093 / 0.043 | 0.0837 / 0.0930 / 0.0431 | 0.0850 / 0.0939 / 0.0423 |
+| Attitude RMS roll / pitch / yaw [deg] | 0.074 / 0.092 / 0.811 | 0.089 / 0.078 / 0.810 | 0.090 / 0.079 / 0.847 |
+| Epochs | 2570 | 2570 | 2572 |
+| Wall / CPU time | 42 s / 37.8 s (loaded machine) | 22.6 s / 32.2 s | 2.1 s / 1.8 s |
+| Peak RSS | — | 196 MB | 8 MB |
+
+Position agrees to 0.4 %, velocity to 2 %, roll/pitch to 1 %; yaw RMS is 4.6 % higher in C++. The C++ uses the
+Joseph-form covariance update where Python uses `(I−KH)P`; whether that or the interpolation details in
+`BufferedImu` explain the yaw difference is an open follow-up (run with `set_joseph_form(false)` to test).
+The two extra epochs come from the C++ transport delivering the first solution request one message earlier.
+The remaining twelve apps of the integration matrix (`COBRA_ANALYSIS.md` §14)
+need their plugins ported first (velocity, body-velocity, direction-to-points processors already exist; the
+UI, diagnostics and tutorial plugins do not).
 
 ### 9.6 Later (Tier 2/3)
 
