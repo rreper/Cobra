@@ -2,6 +2,7 @@
 #pragma once
 
 #include <pntos/api/common.hpp>
+#include <pntos/api/controller.hpp>
 
 namespace pntos::api {
 

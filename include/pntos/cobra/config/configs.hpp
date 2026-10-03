@@ -231,4 +231,50 @@ struct FusionEngineConfig final : BaseConfig {
   static std::optional<FusionEngineConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
 };
 
+// ----------------------------------------------------------------------------- controller / streams
+
+/// Config for StandardControllerPlugin (group "config/controller").
+struct ControllerConfig final : BaseConfig {
+  static constexpr const char* kGroup = "config/controller";
+  static constexpr double kDefaultBufferLengthSec = 2.0;
+  std::string group_ = kGroup;
+  /// Sequenced-streamed messages are held this long (s) before reaching the orchestration plugin.
+  double buffer_length_sec = kDefaultBufferLengthSec;
+  /// Minimum time (s) between solution requests; nullopt disables solution publishing.
+  std::optional<double> publish_interval = 1.0;
+  /// Shut down automatically once `controller/flags: ready_to_shutdown` is set.
+  bool auto_shutdown = true;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ControllerConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
+enum class BufferMode : int { IMMEDIATE = 0, SEQUENCED = 1 };
+
+/// One message type (optionally restricted to a source) whose buffer mode is overridden.
+struct Stream final : BaseConfig {
+  std::string group_;
+  api::AspnMessageType message_type = ASPN_UNDEFINED;
+  std::optional<std::string> source_identifier;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<Stream> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// Orchestration message-stream config: a default buffer mode plus overrides.
+struct StreamConfig final : BaseConfig {
+  std::string group_;
+  BufferMode default_buffer_mode = BufferMode::SEQUENCED;
+  std::optional<std::vector<Stream>> override_streams;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<StreamConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// IMU immediate-streamed, everything else sequenced (Cobra's DEFAULT_STREAM_CONFIG).
+StreamConfig default_stream_config();
+
 }  // namespace pntos::cobra

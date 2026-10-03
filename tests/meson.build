@@ -8,6 +8,8 @@ test_sources = {
   'virtual_state_blocks': files('test_virtual_state_blocks.cpp'),
   'vsb_manager': files('test_vsb_manager.cpp'),
   'fusion_engine': files('test_fusion_engine.cpp'),
+  'message_stream_config': files('test_message_stream_config.cpp'),
+  'controller': files('test_controller.cpp'),
 }
 
 foreach name, srcs : test_sources

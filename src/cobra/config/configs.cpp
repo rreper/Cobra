@@ -415,4 +415,90 @@ std::optional<FusionEngineConfig> FusionEngineConfig::from_registry(api::Mediato
   return c;
 }
 
+// ----------------------------------------------------------------------------- ControllerConfig
+
+void ControllerConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("buffer_length_sec", buffer_length_sec);
+  w.optional("publish_interval", publish_interval);
+  w.scalar("auto_shutdown", auto_shutdown);
+}
+
+std::optional<ControllerConfig> ControllerConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  ControllerConfig c;
+  c.group_ = group;
+  c.buffer_length_sec = r.optional<double>("buffer_length_sec").value_or(kDefaultBufferLengthSec);
+  c.publish_interval = r.optional<double>("publish_interval");
+  c.auto_shutdown = r.optional<bool>("auto_shutdown").value_or(true);
+  if (!r.ok()) return std::nullopt;
+  return c;
+}
+
+// ----------------------------------------------------------------------------- Stream / StreamConfig
+
+void Stream::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("message_type", static_cast<std::int64_t>(message_type));
+  w.optional("source_identifier", source_identifier);
+}
+
+std::optional<Stream> Stream::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  Stream s;
+  s.group_ = group;
+  s.message_type = static_cast<api::AspnMessageType>(r.require<std::int64_t>("message_type"));
+  s.source_identifier = r.optional<std::string>("source_identifier");
+  if (!r.ok()) return std::nullopt;
+  return s;
+}
+
+void StreamConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.scalar("default_buffer_mode", static_cast<std::int64_t>(default_buffer_mode));
+  if (override_streams) {
+    std::vector<std::shared_ptr<const BaseConfig>> nested;
+    for (const auto& s : *override_streams) nested.push_back(std::make_shared<Stream>(s));
+    w.nested("override_streams", nested);
+  }
+}
+
+std::optional<StreamConfig> StreamConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  StreamConfig c;
+  c.group_ = group;
+  c.default_buffer_mode = static_cast<BufferMode>(
+      r.optional<std::int64_t>("default_buffer_mode").value_or(static_cast<std::int64_t>(BufferMode::SEQUENCED)));
+  auto groups = r.nested_groups("override_streams");
+  if (!r.ok()) return std::nullopt;
+  if (groups) {
+    r.suspend();
+    std::vector<Stream> streams;
+    for (const auto& g : *groups) {
+      auto s = Stream::from_registry(m, g);
+      if (!s) {
+        r.resume();
+        return std::nullopt;
+      }
+      streams.push_back(*s);
+    }
+    r.resume();
+    c.override_streams = std::move(streams);
+  }
+  return c;
+}
+
+StreamConfig default_stream_config() {
+  Stream imu;
+  imu.group_ = "config/imu_stream";
+  imu.message_type = ASPN_MEASUREMENT_IMU;
+  StreamConfig c;
+  c.group_ = "config/stream_config";
+  c.override_streams = std::vector<Stream>{imu};
+  return c;
+}
+
 }  // namespace pntos::cobra
