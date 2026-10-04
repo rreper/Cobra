@@ -3,6 +3,7 @@
 #include <pntos/cobra/app/AppBuilder.hpp>
 #include <pntos/cobra/config/JsonConfig.hpp>
 #include <pntos/cobra/diagnostics/DiagnosticLogPlugin.hpp>
+#include <pntos/cobra/orchestration/StandardOrchestrationPlugin.hpp>
 #include <pntos/cobra/presets/Presets.hpp>
 
 #include "test_support.hpp"
@@ -122,6 +123,9 @@ cobra::AppConfig sample_app_config() {
   deg->position_noise_sigma_ned = {1, 1, 2};
   deg->position_covariance_scale = 4.0;
   deg->position_jumps = {{100.0, 50.0, 0.0, 0.0}, {200.0, 0.0, -50.0, 0.0}};
+  deg->position_ramps = {{600.0, 1.4, 1.4, 0.0, 0.0}};
+  deg->derived_position_channel = "/synthetic/cell/position";
+  deg->derived_position_sigma_ned = {5, 5, 8};
   orch->preprocessor_configs = std::vector<std::shared_ptr<const PreprocessorConfig>>{ds, out, baro, zv, deg};
   orch->max_prop_interval = 1.0;
   Stream st;
@@ -330,4 +334,33 @@ TEST(AppBuilder, OptionsOverridesAndPluginSets) {
   bad_spec = AppSpec{};
   bad_spec.logging_level = "LOUD";
   EXPECT_THROW(app::build_plugins(AppConfig{bad_spec, b.configs}), std::runtime_error);
+}
+
+TEST(AppBuilder, RegisteredOrchestrationsAndExtraPlugins) {
+  using namespace cobra;
+  auto a = sample_app_config();
+  int built = 0;
+  app::register_orchestration("test_counting", [&](const AppConfig&) {
+    ++built;
+    return std::make_shared<StandardOrchestrationPlugin>("registered orchestration");
+  });
+  app::register_extra_plugin("test_extra", [&](const AppConfig&) -> std::shared_ptr<api::CommonPlugin> {
+    ++built;
+    return std::make_shared<DiagnosticLogPlugin>("registered extra", "x.hdf5");
+  });
+  auto names = app::registered_orchestrations();
+  EXPECT_NE(std::find(names.begin(), names.end(), "test_counting"), names.end());
+  a.app.orchestration = "test_counting";
+  a.app.extra_plugins = {"test_extra"};
+  a.app.extra_plugins = {};
+  const auto baseline = app::build_plugins(a).size();
+  a.app.extra_plugins = {"test_extra"};
+  auto plugins = app::build_plugins(a);
+  EXPECT_EQ(built, 3);
+  EXPECT_EQ(plugins.size(), baseline + 1);
+  json j = jsoncfg::app_spec_to_json(a.app);
+  EXPECT_EQ(j["extra_plugins"][0], "test_extra");
+  EXPECT_EQ(jsoncfg::app_spec_from_json(j).extra_plugins.size(), 1u);
+  a.app.extra_plugins = {"nope"};
+  EXPECT_THROW(app::build_plugins(a), std::runtime_error);
 }

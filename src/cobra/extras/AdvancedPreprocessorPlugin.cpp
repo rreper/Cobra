@@ -5,6 +5,7 @@
 
 #include <aspn23/eigen/MeasurementImu.hpp>
 #include <aspn23/eigen/MeasurementPosition.hpp>
+#include <aspn23/eigen/MeasurementPositionVelocityAttitude.hpp>
 #include <aspn23/eigen/TypeHeader.hpp>
 #include <pntos/cobra/utils/navutils.hpp>
 
@@ -65,6 +66,17 @@ SensorDegradationPreprocessor::SensorDegradationPreprocessor(const SensorDegrada
 
 double SensorDegradationPreprocessor::gauss() { return n01_(rng_); }
 
+api::Vector3 SensorDegradationPreprocessor::ramp_offset(double rel_s) const {
+  api::Vector3 off = api::Vector3::Zero();
+  for (const auto& r : cfg_.position_ramps) {
+    const double start = r[0], duration = r[4];
+    if (rel_s < start) continue;
+    const double elapsed = duration > 0 ? std::min(rel_s - start, duration) : rel_s - start;
+    off += api::Vector3(r[1], r[2], r[3]) * elapsed;
+  }
+  return off;
+}
+
 std::optional<std::vector<Message>> SensorDegradationPreprocessor::process_pntos_message(const Message& message) {
   if (!message.wrapped_message) return std::vector<Message>{message};
   if (auto imu = message.as<aspn23_eigen::MeasurementImu>()) {
@@ -90,6 +102,12 @@ std::optional<std::vector<Message>> SensorDegradationPreprocessor::process_pntos
     const double rel = static_cast<double>(t - *first_position_ns_) * 1e-9;
     double dn = cfg_.position_noise_sigma_ned[0] * gauss(), de = cfg_.position_noise_sigma_ned[1] * gauss(),
            dd = cfg_.position_noise_sigma_ned[2] * gauss();
+    if (!cfg_.position_ramps.empty()) {
+      const api::Vector3 ramp = ramp_offset(rel);
+      dn += ramp(0);
+      de += ramp(1);
+      dd += ramp(2);
+    }
     while (next_jump_ < cfg_.position_jumps.size() && rel >= cfg_.position_jumps[next_jump_][0]) {
       const auto& jmp = cfg_.position_jumps[next_jump_++];
       dn += jmp[1];
@@ -107,6 +125,27 @@ std::optional<std::vector<Message>> SensorDegradationPreprocessor::process_pntos
     out->set_term3(alt - dd);
     if (cfg_.position_covariance_scale != 1.0) out->set_covariance(pos->get_covariance() * cfg_.position_covariance_scale);
     return std::vector<Message>{Message(out, message.source_identifier)};
+  }
+  if (auto pva = message.as<utils::PVA>(); pva && !cfg_.derived_position_channel.empty() &&
+                                            pva->get_reference_frame() == ASPN23_MEASUREMENT_POSITION_VELOCITY_ATTITUDE_REFERENCE_FRAME_GEODETIC) {
+    const std::int64_t t = pva->get_time_of_validity().get_elapsed_nsec();
+    const std::int64_t period = cfg_.derived_position_rate_hz > 0 ? static_cast<std::int64_t>(1e9 / cfg_.derived_position_rate_hz) : 0;
+    if (last_derived_ns_ && t - *last_derived_ns_ < period - 500'000) return std::vector<Message>{message};
+    last_derived_ns_ = t;
+    const auto& sg = cfg_.derived_position_sigma_ned;
+    const double lat = pva->get_p1(), alt = pva->get_p3();
+    const double dn = sg[0] * gauss(), de = sg[1] * gauss(), dd = sg[2] * gauss();
+    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> cov = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>::Zero(3, 3);
+    cov(0, 0) = sg[0] * sg[0];
+    cov(1, 1) = sg[1] * sg[1];
+    cov(2, 2) = sg[2] * sg[2];
+    auto pos = std::make_shared<aspn23_eigen::MeasurementPosition>(
+        aspn23_eigen::TypeHeader(ASPN_MEASUREMENT_POSITION, 0, 0, 0, 0), aspn23_eigen::TypeTimestamp(t),
+        ASPN23_MEASUREMENT_POSITION_REFERENCE_FRAME_GEODETIC, lat + nav::north_to_delta_lat(dn, lat, alt),
+        pva->get_p2() + nav::east_to_delta_lon(de, lat, alt), alt - dd, cov, ASPN23_MEASUREMENT_POSITION_ERROR_MODEL_NONE,
+        Eigen::Matrix<double, Eigen::Dynamic, 1>(0), std::vector<aspn23_eigen::TypeIntegrity>{});
+    ++derived_count_;
+    return std::vector<Message>{message, Message(pos, cfg_.derived_position_channel)};
   }
   if (auto vel = message.as<aspn23_eigen::MeasurementVelocity>()) {
     auto out = std::make_shared<aspn23_eigen::MeasurementVelocity>(*vel);

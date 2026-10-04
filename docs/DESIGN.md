@@ -509,6 +509,14 @@ flowchart TD
 - `request_solutions` accepts exactly one time; out-of-range times are replaced by the latest inertial
   time (DEBUG log) as in Python.
 
+**Extension points (C++ addition, 2026-10-04).** `StandardOrchestrationPlugin` is no longer `final`: its per-epoch
+steps `propagate_to_time`, `send_inertial_aux_to_pinson`, `send_inertial_aux_to_measurement_processor`,
+`perform_measurement_update`, `apply_inertial_feedback` and `initialize_filter` are protected virtuals and its
+members are protected, so a derived orchestration can wrap each step (for instance to drive a bank of cloned
+fusion engines for integrity monitoring) without copying the standard logic. `test_orchestration.cpp` has a
+counting subclass as the contract check. Such derived plugins may live in other repositories and select
+themselves through `AppSpec.orchestration` once registered in `app::build_plugins`.
+
 ### 7.10 Tutorial plugins (`tutorial/`)
 
 The tutorial apps use a deliberately simpler stack than the standard one, ported one-to-one:
@@ -581,7 +589,7 @@ The Python apps are Python files that build a config list and a plugin list. The
 types are names (`MEASUREMENT_IMU`). Comments (`//`) are allowed in the files.
 
 `AppSpec` names the plugins: `transport` (lcm_log), `initialization` (manual_heading_align | static_align | manual |
-pva_message), `state_modeling` (standard | tutorial), `orchestration` (standard | tutorial_pos | tutorial_pos_vel),
+pva_message), `state_modeling` (standard | tutorial), `orchestration` (standard | tutorial_pos | tutorial_pos_vel | a name registered with `app::register_orchestration`),
 `preprocessors` (standard, advanced), `diagnostic_log`, `ui_log_plotting`, `logging_level`, `joseph_form`,
 `legacy_q_rotation`. `app::build_plugins` instantiates them and `app::run_app` runs the controller; the compiled apps
 and `cobra_run config.json` share this path, and `--dump-config` writes the compiled app's effective config, which is
@@ -625,6 +633,13 @@ not move. The corrected mode is therefore checked against `docs/limits_corrected
 (std: max(Python, 1.05 × measured); max: max(Python, 1.10 × measured); coverage: min(Python, measured − 2)), while the
 legacy mode keeps the Python limits; both are 12 / 12.
 
+**External plugins (C++ addition).** A library linked against Cobra can register its own orchestration or utility
+plugins without touching the app builder: `app::register_orchestration(name, factory)` makes `name` selectable as
+`AppSpec.orchestration`, and `app::register_extra_plugin(name, factory)` appends the factory's plugin when `name`
+appears in `AppSpec.extra_plugins` (JSON `app.extra_plugins`). Factories receive the `AppConfig` being built, so a
+plugin can read its own config group. This is how out-of-tree orchestrations derived from
+`StandardOrchestrationPlugin` (whose per-step methods are virtual, see §7.9) plug into `cobra_run` and the push API.
+
 ### 7.15 Innovation gating (`StandardFusionEngine::set_innovation_gate`)
 
 A C++ addition the Python has no counterpart for. Before an update the engine computes the innovation
@@ -652,7 +667,16 @@ with it, widens the IMU model by the same factors (random walk × k, bias sigma 
 consistent with what it sees, runs each row through `cobra_run`, evaluates against truth like the acceptance
 tool and writes `docs/degraded_matrix.json` and `docs/DEGRADED_MATRIX.md`; `--derive-limits` records
 `docs/limits_degraded.json` (1.10 × std, 1.20 × max, coverage − 5) that later runs are checked against. The
-grades can only make the VN-100 data worse, never emulate a better IMU. First results (2026-10-04): the
+grades can only make the VN-100 data worse, never emulate a better IMU.
+
+Two further knobs serve fault and spoofing studies: `position_ramps` (`{start_s, n_mps, e_mps, d_mps, duration_s}`,
+a slow pull that grows linearly from `start_s` and saturates after `duration_s`; several ramps add up) and
+`derived_position_channel` (a synthetic second position source: every `1/rate` seconds the PVA seen on the
+configured channel, e.g. the truth channel, becomes a `MeasurementPosition` with NED noise of
+`derived_position_sigma_ned` and the matching diagonal covariance). `configs/pos_ins_two_sources.json` is
+pos_ins plus such a 5 m / 1 Hz source with its own FOGM block and processor, both processors gated at 0.999;
+the matrix rows `two_sources_clean`, `ramp2_gnss`, `ramp05_gnss`, `step30_gnss` and `cell_fault` apply faults to
+one source at a time. First results (2026-10-04): the
 industrial and consumer grades raise yaw std from 0.83° to 1.5° and 4.1° with position almost unchanged (GNSS
 dominates position); 0.2 Hz and 0.1 Hz GNSS raise north position std to 0.96 m and 1.12 m; three 60 s outages
 raise east position std to 2.2 m; the `noisy_x3` row (3 m white noise, covariance × 9) drops the position

@@ -2,6 +2,26 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — Degradation extensions, orchestration extension points, plugin registration, v0.2.1
+
+- **Orchestration extension points**: `StandardOrchestrationPlugin` is no longer `final`; its per-step methods
+  (`initialize_filter`, `propagate_to_time`, `send_inertial_aux_to_*`, `apply_inertial_feedback`,
+  `perform_measurement_update`) are `protected virtual`, so a derived orchestration can observe or replace any
+  step while reusing the standard loop (DESIGN §7.9). Test: a counting subclass sees every step.
+- **Plugin registration**: `app::register_orchestration` / `app::register_extra_plugin` let a library linked
+  against Cobra add orchestrations and utility plugins selectable from config files (`app.orchestration`,
+  `app.extra_plugins`) without editing the app builder (DESIGN §7.14).
+- **Sensor degradation**: `position_ramps` (slow pulls, optional duration) and a **derived position source**
+  (a second, independent position channel synthesised from truth with its own noise and rate) so two-source
+  apps can be exercised from the single-GNSS example log. `configs/pos_ins_two_sources.json` fuses GNSS and the
+  synthetic `/synthetic/cell/position` source with a FOGM bias block each and a 0.999 gate.
+- **Degraded matrix** gained five two-source rows (clean, 2 m/s pull, 0.5 m/s pull, 30 m step, second-source
+  pull). Gating handles the step (1 rejection) and the 2 m/s pull (2000 rejections, 2.7 m std); the **0.5 m/s
+  pull defeats gating alone** (solution follows GNSS to hundreds of metres) — the case that needs solution
+  separation, which lives in a separate repository.
+- Verified: 22 suites / 205 tests green; acceptance 24/24 both modes; degraded matrix 16/16 with re-derived
+  limits. Tagged `v0.2.1`.
+
 ## 2026-10-04 — Hygiene: sanitizer + clang-tidy CI job, release workflow, CONTRIBUTING, v0.2.0
 
 - `CONTRIBUTING.md` (the loop, where each kind of addition goes, style), `.clang-tidy` (a conservative check set,

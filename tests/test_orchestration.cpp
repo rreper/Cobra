@@ -624,3 +624,42 @@ TEST_F(OrchestrationTest, EndToEndPositionUpdateWithFeedback) {
 }
 
 }  // namespace
+
+// ----------------------------------------------------------------------------- extension points (C++ addition)
+
+namespace {
+class CountingOrchestration final : public cobra::StandardOrchestrationPlugin {
+ public:
+  using StandardOrchestrationPlugin::StandardOrchestrationPlugin;
+  int updates = 0, feedbacks = 0, propagations = 0;
+
+ protected:
+  void perform_measurement_update(const Message& m, const std::string& mp) override {
+    ++updates;
+    StandardOrchestrationPlugin::perform_measurement_update(m, mp);
+  }
+  void apply_inertial_feedback() override {
+    ++feedbacks;
+    StandardOrchestrationPlugin::apply_inertial_feedback();
+  }
+  void propagate_to_time(Timestamp t) override {
+    ++propagations;
+    StandardOrchestrationPlugin::propagate_to_time(t);
+  }
+};
+}  // namespace
+
+TEST_F(OrchestrationTest, DerivedOrchestrationSeesEveryStep) {
+  set_up(standard_orch_config(false, /*real_position_mp=*/true));  // registry and plugins around the standard orchestration
+  CountingOrchestration counting("counting");
+  counting.init_plugin(std::nullopt, &med);
+  counting.init_orchestration_plugin(api::PluginList{fusion, strategy, inertial, init, sm, mock_sm}, stream_config);
+  ASSERT_TRUE(counting.is_initialized());
+  auto p0 = initial_pva();
+  for (int i = 1; i <= 100; ++i) counting.process_pntos_message(imu_msg(i * 10'000'000), false);
+  counting.process_pntos_message(pos_msg(kSec, p0->get_p1(), p0->get_p2(), p0->get_p3()), false);
+  EXPECT_EQ(counting.updates, 1);
+  EXPECT_EQ(counting.feedbacks, 1);
+  EXPECT_GE(counting.propagations, 1);
+  EXPECT_FALSE(med.has_error()) << med.last_message();
+}

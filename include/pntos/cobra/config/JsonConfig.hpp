@@ -34,6 +34,7 @@ struct AppSpec {
   std::string logging_level = "INFO";                      ///< ERROR | WARN | INFO | DEBUG
   bool joseph_form = true;                                 ///< EKF update form
   bool legacy_q_rotation = false;                          ///< Pinson-Q handling for plugins without a PinsonStateBlockConfig
+  std::vector<std::string> extra_plugins;                  ///< names registered with app::register_extra_plugin
 };
 
 struct AppConfig {

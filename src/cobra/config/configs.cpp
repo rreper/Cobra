@@ -704,6 +704,15 @@ PNTOS_PP_IMPL(
       for (std::size_t i = 0; i < position_jumps.size(); ++i)
         for (int k = 0; k < 4; ++k) jumps(static_cast<Eigen::Index>(i), k) = position_jumps[i][static_cast<std::size_t>(k)];
       if (!position_jumps.empty()) w.matrix("position_jumps", jumps);
+      api::Matrix ramps(static_cast<Eigen::Index>(position_ramps.size()), 5);
+      for (std::size_t i = 0; i < position_ramps.size(); ++i)
+        for (int k = 0; k < 5; ++k) ramps(static_cast<Eigen::Index>(i), k) = position_ramps[i][static_cast<std::size_t>(k)];
+      if (!position_ramps.empty()) w.matrix("position_ramps", ramps);
+      if (!derived_position_channel.empty()) {
+        w.scalar("derived_position_channel", derived_position_channel);
+        w.vector("derived_position_sigma_ned", to_vector(derived_position_sigma_ned));
+        w.scalar("derived_position_rate_hz", derived_position_rate_hz);
+      }
     },
     {
       c.seed = r.optional<std::int64_t>("seed").value_or(1);
@@ -719,6 +728,12 @@ PNTOS_PP_IMPL(
       if (auto m = r.optional<api::Matrix>("position_jumps"); m && m->cols() == 4)
         for (Eigen::Index i = 0; i < m->rows(); ++i)
           c.position_jumps.push_back({(*m)(i, 0), (*m)(i, 1), (*m)(i, 2), (*m)(i, 3)});
+      if (auto m = r.optional<api::Matrix>("position_ramps"); m && m->cols() == 5)
+        for (Eigen::Index i = 0; i < m->rows(); ++i)
+          c.position_ramps.push_back({(*m)(i, 0), (*m)(i, 1), (*m)(i, 2), (*m)(i, 3), (*m)(i, 4)});
+      c.derived_position_channel = r.optional<std::string>("derived_position_channel").value_or("");
+      c.derived_position_sigma_ned = read_arr<3>(r, "derived_position_sigma_ned").value_or(Vec3{5.0, 5.0, 8.0});
+      c.derived_position_rate_hz = r.optional<double>("derived_position_rate_hz").value_or(1.0);
     })
 #undef PNTOS_PP_IMPL
 

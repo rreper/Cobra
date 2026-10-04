@@ -12,7 +12,12 @@ namespace pntos::cobra {
 /// Standard closed-loop INS orchestration: alignment -> inertial mechanization -> Pinson15 error
 /// state EKF with configurable extra blocks / processors / virtual blocks, inertial feedback, and
 /// BEST / DEAD_RECKONING solutions.
-class StandardOrchestrationPlugin final : public api::OrchestrationPlugin {
+///
+/// Extension points (C++ addition): the per-epoch steps are protected virtuals so that a derived
+/// orchestration (e.g. an integrity-monitoring one that runs a bank of fusion engines) can wrap them:
+/// propagate_to_time, send_inertial_aux_to_pinson, send_inertial_aux_to_measurement_processor,
+/// perform_measurement_update, apply_inertial_feedback, initialize_filter.
+class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
  public:
   explicit StandardOrchestrationPlugin(std::string identifier) : identifier_(std::move(identifier)) {}
 
@@ -28,6 +33,8 @@ class StandardOrchestrationPlugin final : public api::OrchestrationPlugin {
       const std::vector<api::Timestamp>& solution_times,
       const std::optional<std::string>& filter_description = std::nullopt) override;
 
+  ~StandardOrchestrationPlugin() override = default;
+
   // --- test / diagnostic hooks
   api::StandardFusionEngine* fusion_engine() const { return fusion_engine_.get(); }
   api::StandardInertialMechanization* inertial() const { return inertial_.get(); }
@@ -37,7 +44,7 @@ class StandardOrchestrationPlugin final : public api::OrchestrationPlugin {
   const std::map<std::string, std::vector<std::string>>& measurement_channels() const { return measurement_channels_; }
   const std::map<std::string, std::vector<std::string>>& vsbs_needing_pva() const { return vsbs_needing_pva_; }
 
- private:
+ protected:
   using Providers = std::vector<std::unique_ptr<api::StandardStateModelProvider>>;
 
   void log(api::LoggingLevel level, const std::string& message) const;
@@ -55,21 +62,21 @@ class StandardOrchestrationPlugin final : public api::OrchestrationPlugin {
       const std::string& identifier, std::size_t num_states, const std::optional<api::EstimateWithCovariance>& ewc);
 
   bool generate_initial_inertial_solution();
-  bool initialize_filter();
+  virtual bool initialize_filter();
   void try_initialize();
 
-  void propagate_to_time(api::Timestamp target);
+  virtual void propagate_to_time(api::Timestamp target);
   void propagate_during_outage();
   void publish_solution(const std::optional<api::Message>& solution, const std::string& group,
                         const std::string& key);
   std::optional<api::Message> get_inertial_forces(std::optional<api::Timestamp> t1 = std::nullopt,
                                                   std::optional<api::Timestamp> t2 = std::nullopt);
-  void send_inertial_aux_to_measurement_processor(const std::string& mp_label);
-  void send_inertial_aux_to_pinson();
+  virtual void send_inertial_aux_to_measurement_processor(const std::string& mp_label);
+  virtual void send_inertial_aux_to_pinson();
   void send_inertial_aux_to_vsbs(const std::string& mp_label);
   bool ready_to_apply_feedback();
-  void apply_inertial_feedback();
-  void perform_measurement_update(const api::Message& message, const std::string& target_mp);
+  virtual void apply_inertial_feedback();
+  virtual void perform_measurement_update(const api::Message& message, const std::string& target_mp);
   void send_message_as_aux_data(const api::Message& message);
   /// Runs the preprocessor chain. `effective_tov` (optional) receives the time the original message
   /// would carry after Python's in-place preprocessing (utils/effective_time.hpp).

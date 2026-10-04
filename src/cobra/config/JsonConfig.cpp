@@ -641,6 +641,15 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
         if (!row.is_array() || row.size() != 4) fail("position_jumps entries must be [time_s, north, east, down]");
         c->position_jumps.push_back({row[0].get<double>(), row[1].get<double>(), row[2].get<double>(), row[3].get<double>()});
       }
+    if (jc.contains("position_ramps"))
+      for (const auto& row : jc.at("position_ramps")) {
+        if (!row.is_array() || (row.size() != 4 && row.size() != 5)) fail("position_ramps entries must be [start_s, n_mps, e_mps, d_mps, duration_s]");
+        c->position_ramps.push_back({row[0].get<double>(), row[1].get<double>(), row[2].get<double>(), row[3].get<double>(),
+                                     row.size() == 5 ? row[4].get<double>() : 0.0});
+      }
+    c->derived_position_channel = get_or<std::string>(jc, "derived_position_channel", "");
+    if (jc.contains("derived_position_sigma_ned")) c->derived_position_sigma_ned = vec3(jc, "derived_position_sigma_ned");
+    c->derived_position_rate_hz = get_or(jc, "derived_position_rate_hz", 1.0);
     return c;
   }
   if (type == "ManualAlignmentConfig") return std::make_shared<ManualAlignmentConfig>(manual_from(jc));
@@ -887,6 +896,14 @@ json config_to_json(const BaseConfig& c) {
     json jumps = json::array();
     for (const auto& r : p->position_jumps) jumps.push_back(json::array({r[0], r[1], r[2], r[3]}));
     o["position_jumps"] = jumps;
+    json ramps = json::array();
+    for (const auto& r : p->position_ramps) ramps.push_back(json::array({r[0], r[1], r[2], r[3], r[4]}));
+    o["position_ramps"] = ramps;
+    if (!p->derived_position_channel.empty()) {
+      o["derived_position_channel"] = p->derived_position_channel;
+      o["derived_position_sigma_ned"] = j(p->derived_position_sigma_ned);
+      o["derived_position_rate_hz"] = p->derived_position_rate_hz;
+    }
     return o;
   }
   if (auto* p = dynamic_cast<const ManualAlignmentConfig*>(&c)) return manual_to(*p);
@@ -947,6 +964,7 @@ AppSpec app_spec_from_json(const json& ja) {
   s.logging_level = get_or(ja, "logging_level", s.logging_level);
   s.joseph_form = get_or(ja, "joseph_form", s.joseph_form);
   s.legacy_q_rotation = get_or(ja, "legacy_q_rotation", s.legacy_q_rotation);
+  s.extra_plugins = get_or(ja, "extra_plugins", s.extra_plugins);
   return s;
 }
 
@@ -962,7 +980,8 @@ json app_spec_to_json(const AppSpec& s) {
               {"ui_log_plotting", s.ui_log_plotting},
               {"logging_level", s.logging_level},
               {"joseph_form", s.joseph_form},
-              {"legacy_q_rotation", s.legacy_q_rotation}};
+              {"legacy_q_rotation", s.legacy_q_rotation},
+              {"extra_plugins", s.extra_plugins}};
 }
 
 AppConfig app_config_from_json(const json& jc) {

@@ -47,4 +47,14 @@ int run_app_via_push(const AppConfig& config, const RunOptions& options);
 /// The AppSpec every standard app uses (lcm_log, manual-heading alignment, standard everything).
 AppSpec standard_app_spec(const std::string& name);
 
+/// Registration of plugins that live outside this library (C++ addition). A registered orchestration
+/// name becomes selectable as `AppSpec.orchestration`; registered extra plugins are appended to the plugin
+/// list when their name appears in `AppSpec.extra_plugins`. Factories receive the AppConfig being built.
+using OrchestrationFactory = std::function<std::shared_ptr<api::OrchestrationPlugin>(const AppConfig&)>;
+using ExtraPluginFactory = std::function<std::shared_ptr<api::CommonPlugin>(const AppConfig&)>;
+void register_orchestration(const std::string& name, OrchestrationFactory factory);
+void register_extra_plugin(const std::string& name, ExtraPluginFactory factory);
+std::vector<std::string> registered_orchestrations();
+std::vector<std::string> registered_extra_plugins();
+
 }  // namespace pntos::cobra::app

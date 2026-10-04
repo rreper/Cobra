@@ -28,3 +28,6 @@ registry_permanency_files/
 
 # the 60 s cut of the example log used by CI is tracked despite *.log
 !testdata/example_60s.log
+
+# the Python reference checkout used for comparison
+Cobra/

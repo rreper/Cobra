@@ -42,6 +42,15 @@ GNSS = {
 }
 # Rows actually run: all IMU grades at 1 Hz, all GNSS conditions with the VN-100, plus two sensor sets.
 ROWS = [(g, '1hz') for g in IMU_GRADES] + [('vn100', c) for c in GNSS if c != '1hz']
+# Two position sources (GNSS + a synthetic 5 m source derived from truth, both gated at 0.999): what gating alone
+# does against a spoofed GNSS. Faults are applied by an extra degradation instance on the GNSS channel.
+TWO_SOURCE_FAULTS = {
+    'two_sources_clean': dict(note='GNSS + synthetic second source, no fault'),
+    'ramp2_gnss': dict(ramps=[[600.0, 1.4, 1.4, 0.0, 0.0]], note='GNSS pulled at 2 m/s (diagonal) from 600 s: the slow-pull spoofer'),
+    'ramp05_gnss': dict(ramps=[[600.0, 0.35, 0.35, 0.0, 0.0]], note='GNSS pulled at 0.5 m/s from 600 s: too slow for the gate alone, the solution follows GNSS (hundreds of m) until the second source disagrees; the motivating case for solution separation'),
+    'step30_gnss': dict(jumps=[[600.0, 30.0, 0.0, 0.0]], note='one 30 m GNSS step at 600 s'),
+    'cell_fault': dict(cell_ramps=[[600.0, 1.4, 1.4, 0.0, 0.0]], note='the second source pulled at 2 m/s instead of GNSS'),
+}
 SENSOR_SETS = {  # extra rows from other base configs
     'pos+vel (pos_vel_ins)': 'configs/pos_vel_ins.json',
     'pos+zero-velocity (pos_ins_zerovel2d)': 'configs/pos_ins_zerovel2d.json',
@@ -130,6 +139,19 @@ def main():
         rows.append((f'imu={grade} gnss={cond}', patched_config(base, grade, cond), IMU_GRADES[grade]['note'] + '; ' + GNSS[cond]['note']))
     for name, path in SENSOR_SETS.items():
         rows.append((name, json.load(open(path)), f'base config {path}'))
+    two = json.load(open('configs/pos_ins_two_sources.json'))
+    for name, f in TWO_SOURCE_FAULTS.items():
+        cfg = copy.deepcopy(two)
+        for e in cfg['configs']:
+            if e['type'] != 'StandardOrchestrationConfig':
+                continue
+            if f.get('ramps') or f.get('jumps'):
+                e['preprocessor_configs'].append(dict(type='SensorDegradationConfig', group='config/gnss_fault', channels=[POS], seed=3,
+                                                      position_ramps=f.get('ramps', []), position_jumps=f.get('jumps', [])))
+            if f.get('cell_ramps'):
+                e['preprocessor_configs'].append(dict(type='SensorDegradationConfig', group='config/cell_fault', channels=['/synthetic/cell/position'],
+                                                      seed=5, position_ramps=f['cell_ramps']))
+        rows.append((name, cfg, f['note']))
     results = {}
     for name, cfg, note in rows:
         if a.only and name not in a.only.split(','):

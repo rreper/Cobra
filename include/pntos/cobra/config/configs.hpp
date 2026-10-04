@@ -407,6 +407,15 @@ struct SensorDegradationConfig final : PreprocessorConfig {
   Vec3 velocity_noise_sigma{0, 0, 0};         ///< m/s, per message axis
   double velocity_covariance_scale = 1.0;
   std::vector<std::array<double, 4>> position_jumps;  ///< {time_s, north_m, east_m, down_m}
+  /// Slow pulls: from `start_s` (relative to the first position message) the offset grows at the given NED
+  /// rates for `duration_s` (0 = until the end), then stays at its final value. {start_s, n_mps, e_mps, d_mps, duration_s}
+  std::vector<std::array<double, 5>> position_ramps;
+  /// Synthesises a second position source from a PVA stream (e.g. the truth channel) seen on `channels`:
+  /// one MeasurementPosition on `derived_position_channel` per 1/rate seconds, truth plus NED noise with
+  /// `derived_position_sigma_ned`, covariance diag(sigma^2). Empty channel = off.
+  std::string derived_position_channel;
+  Vec3 derived_position_sigma_ned{5.0, 5.0, 8.0};
+  double derived_position_rate_hz = 1.0;
   SensorDegradationConfig() { identifier = kIdentifier; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<SensorDegradationConfig> from_registry(api::Mediator& m, const std::string& group);

@@ -1,11 +1,11 @@
 {
-  "generated": "2026-10-04T10:58:51-0600",
+  "generated": "2026-10-04T12:08:38-0600",
   "input_log": "/home/rreper/orin/work/pntos/Cobra/.venv/lib/python3.12/site-packages/pntos_python_datasets_lcm/cobra_gps_ins_example_data.log",
   "results": {
     "imu=vn100 gnss=1hz": {
       "name": "imu=vn100 gnss=1hz",
       "note": "the recorded VN-100, unchanged; as recorded, 1 Hz",
-      "wall_s": 2.14,
+      "wall_s": 2.0,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -106,12 +106,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=industrial_x3 gnss=1hz": {
       "name": "imu=industrial_x3 gnss=1hz",
       "note": "white noise about 3x the tuned VN-100 random walk, 0.2 mg / 40 deg/h biases; model widened 3x / 2x; as recorded, 1 Hz",
-      "wall_s": 2.12,
+      "wall_s": 1.98,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -212,12 +212,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=consumer_x10 gnss=1hz": {
       "name": "imu=consumer_x10 gnss=1hz",
       "note": "white noise about 10x, 1 mg / 200 deg/h biases; model widened 10x / 5x; as recorded, 1 Hz",
-      "wall_s": 2.03,
+      "wall_s": 1.99,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -318,12 +318,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=vn100 gnss=0.2hz": {
       "name": "imu=vn100 gnss=0.2hz",
       "note": "the recorded VN-100, unchanged; one fix every 5 s",
-      "wall_s": 1.29,
+      "wall_s": 1.25,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -424,12 +424,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=vn100 gnss=0.1hz": {
       "name": "imu=vn100 gnss=0.1hz",
       "note": "the recorded VN-100, unchanged; one fix every 10 s",
-      "wall_s": 1.75,
+      "wall_s": 1.79,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -530,12 +530,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=vn100 gnss=noisy_x3": {
       "name": "imu=vn100 gnss=noisy_x3",
       "note": "the recorded VN-100, unchanged; 3 m NED noise added, covariance x9",
-      "wall_s": 1.98,
+      "wall_s": 2.02,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -636,12 +636,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=vn100 gnss=gaps_3x60s": {
       "name": "imu=vn100 gnss=gaps_3x60s",
       "note": "the recorded VN-100, unchanged; three 60 s outages",
-      "wall_s": 2.16,
+      "wall_s": 2.19,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -742,12 +742,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "imu=vn100 gnss=jump_50m": {
       "name": "imu=vn100 gnss=jump_50m",
       "note": "the recorded VN-100, unchanged; one 50 m north outlier at 900 s, gate 0.999 on the position processor",
-      "wall_s": 2.01,
+      "wall_s": 1.99,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 1,
@@ -848,12 +848,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "pos+vel (pos_vel_ins)": {
       "name": "pos+vel (pos_vel_ins)",
       "note": "base config configs/pos_vel_ins.json",
-      "wall_s": 2.8,
+      "wall_s": 2.74,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -954,12 +954,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "pos+zero-velocity (pos_ins_zerovel2d)": {
       "name": "pos+zero-velocity (pos_ins_zerovel2d)",
       "note": "base config configs/pos_ins_zerovel2d.json",
-      "wall_s": 1.92,
+      "wall_s": 1.96,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -1060,12 +1060,12 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
     },
     "pos+baro MSL via geoid (pos_ins_baro)": {
       "name": "pos+baro MSL via geoid (pos_ins_baro)",
       "note": "base config configs/pos_ins_baro.json",
-      "wall_s": 2.06,
+      "wall_s": 2.04,
       "exit_code": 0,
       "errors": 0,
       "gate_rejections": 0,
@@ -1166,7 +1166,537 @@
         "epoch_count_within_5": true
       },
       "passed": true,
-      "limits_source": "docs/limits_degraded.json"
+      "limits_source": "none (run with --derive-limits to record)"
+    },
+    "two_sources_clean": {
+      "name": "two_sources_clean",
+      "note": "GNSS + synthetic second source, no fault",
+      "wall_s": 4.58,
+      "exit_code": 0,
+      "errors": 0,
+      "gate_rejections": 0,
+      "epochs": 2584,
+      "checks": {
+        "pos": {
+          "passed": true,
+          "std": [
+            0.8082870816708957,
+            0.6628297759346927,
+            1.228530852663682
+          ],
+          "max": [
+            2.7348835592802723,
+            2.87019519517206,
+            3.409054536825039
+          ],
+          "rms": [
+            0.8089217670500597,
+            1.0585641780187138,
+            1.4815303258815251
+          ],
+          "pct_within_1_2_3_sigma": [
+            79.3343653250774,
+            99.84520123839009,
+            99.88390092879257
+          ],
+          "limits": {
+            "std": 1.4,
+            "max": 3.8,
+            "p1": 63,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "vel": {
+          "passed": true,
+          "std": [
+            0.08635400227030822,
+            0.09517922352883164,
+            0.043262345030284394
+          ],
+          "max": [
+            0.6164751803562121,
+            0.7514131168215947,
+            0.3026929859519871
+          ],
+          "rms": [
+            0.08636523253544648,
+            0.09521282603080071,
+            0.04332334923366354
+          ],
+          "pct_within_1_2_3_sigma": [
+            78.0185758513932,
+            95.89783281733746,
+            99.38080495356037
+          ],
+          "limits": {
+            "std": 0.1,
+            "max": 0.8,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "tilt": {
+          "passed": false,
+          "std": [
+            0.07657297049523058,
+            0.08907566838656222,
+            0.8233528736650626
+          ],
+          "max": [
+            0.3616760584779981,
+            0.44102425098995524,
+            3.586867076977989
+          ],
+          "rms": [
+            0.07686015056996813,
+            0.09125721053801386,
+            0.8308236173975386
+          ],
+          "pct_within_1_2_3_sigma": [
+            72.63931888544892,
+            97.94891640866872,
+            100.0
+          ],
+          "limits": {
+            "std": 0.81,
+            "max": 3.5,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "nan_free": true,
+        "start_end_within_3s": true,
+        "epoch_count_within_5": false
+      },
+      "passed": true,
+      "limits_source": "none (run with --derive-limits to record)"
+    },
+    "ramp2_gnss": {
+      "name": "ramp2_gnss",
+      "note": "GNSS pulled at 2 m/s (diagonal) from 600 s: the slow-pull spoofer",
+      "wall_s": 4.66,
+      "exit_code": 0,
+      "errors": 0,
+      "gate_rejections": 2000,
+      "epochs": 2584,
+      "checks": {
+        "pos": {
+          "passed": false,
+          "std": [
+            2.6477639754429,
+            2.7346996153367833,
+            1.8655753814119278
+          ],
+          "max": [
+            9.816146666769606,
+            11.114606374482115,
+            6.904225189366855
+          ],
+          "rms": [
+            2.6556686190986407,
+            2.7347787089156697,
+            1.9225078759511052
+          ],
+          "pct_within_1_2_3_sigma": [
+            85.95201238390094,
+            99.53560371517027,
+            99.88390092879257
+          ],
+          "limits": {
+            "std": 1.4,
+            "max": 3.8,
+            "p1": 63,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "vel": {
+          "passed": false,
+          "std": [
+            0.314113818659713,
+            0.33316111008187366,
+            0.06411368710249798
+          ],
+          "max": [
+            1.2779463925109744,
+            1.3794989403306588,
+            0.3295960943633879
+          ],
+          "rms": [
+            0.31411414648105207,
+            0.3332316102624735,
+            0.06423193906201126
+          ],
+          "pct_within_1_2_3_sigma": [
+            81.92724458204334,
+            97.9876160990712,
+            99.76780185758514
+          ],
+          "limits": {
+            "std": 0.1,
+            "max": 0.8,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "tilt": {
+          "passed": false,
+          "std": [
+            0.1297442367451931,
+            0.1294065374759301,
+            1.6338560110767713
+          ],
+          "max": [
+            0.5436013124588195,
+            0.5162914800745221,
+            3.586867076977989
+          ],
+          "rms": [
+            0.1298809539876837,
+            0.13098374125880546,
+            1.6657973018077084
+          ],
+          "pct_within_1_2_3_sigma": [
+            56.656346749226,
+            94.54334365325077,
+            100.0
+          ],
+          "limits": {
+            "std": 0.81,
+            "max": 3.5,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "nan_free": true,
+        "start_end_within_3s": true,
+        "epoch_count_within_5": false
+      },
+      "passed": true,
+      "limits_source": "none (run with --derive-limits to record)"
+    },
+    "ramp05_gnss": {
+      "name": "ramp05_gnss",
+      "note": "GNSS pulled at 0.5 m/s from 600 s: too slow for the gate alone, the solution follows GNSS (hundreds of m) until the second source disagrees; the motivating case for solution separation",
+      "wall_s": 4.64,
+      "exit_code": 0,
+      "errors": 0,
+      "gate_rejections": 1849,
+      "epochs": 2584,
+      "checks": {
+        "pos": {
+          "passed": false,
+          "std": [
+            231.7857455159629,
+            231.01383013990576,
+            1.3487343057751515
+          ],
+          "max": [
+            699.4091189744819,
+            698.7378704464242,
+            3.375028936885343
+          ],
+          "rms": [
+            355.1194990997723,
+            353.84116318278495,
+            1.6026780485576173
+          ],
+          "pct_within_1_2_3_sigma": [
+            19.156346749226007,
+            23.06501547987616,
+            23.219814241486066
+          ],
+          "limits": {
+            "std": 1.4,
+            "max": 3.8,
+            "p1": 63,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "vel": {
+          "passed": false,
+          "std": [
+            0.17347617978565152,
+            0.17545159546068706,
+            0.04274882943260404
+          ],
+          "max": [
+            0.9411525278076813,
+            1.0118612636680697,
+            0.30066496078710236
+          ],
+          "rms": [
+            0.3235353905686939,
+            0.3284642238574725,
+            0.04280472042835781
+          ],
+          "pct_within_1_2_3_sigma": [
+            23.877708978328176,
+            67.1439628482972,
+            98.1811145510836
+          ],
+          "limits": {
+            "std": 0.1,
+            "max": 0.8,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "tilt": {
+          "passed": false,
+          "std": [
+            0.07696511870994727,
+            0.08959216702897319,
+            0.8159681529060548
+          ],
+          "max": [
+            0.35574876731343297,
+            0.44102425098995524,
+            3.586867076977989
+          ],
+          "rms": [
+            0.0771071544400037,
+            0.0913421150088861,
+            0.8248134055503267
+          ],
+          "pct_within_1_2_3_sigma": [
+            72.21362229102168,
+            97.94891640866872,
+            100.0
+          ],
+          "limits": {
+            "std": 0.81,
+            "max": 3.5,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "nan_free": true,
+        "start_end_within_3s": true,
+        "epoch_count_within_5": false
+      },
+      "passed": true,
+      "limits_source": "none (run with --derive-limits to record)"
+    },
+    "step30_gnss": {
+      "name": "step30_gnss",
+      "note": "one 30 m GNSS step at 600 s",
+      "wall_s": 4.57,
+      "exit_code": 0,
+      "errors": 0,
+      "gate_rejections": 1,
+      "epochs": 2584,
+      "checks": {
+        "pos": {
+          "passed": true,
+          "std": [
+            0.8082202167969792,
+            0.6628339778516912,
+            1.228496417624072
+          ],
+          "max": [
+            2.7348835592802723,
+            2.870195746808709,
+            3.4090526162389096
+          ],
+          "rms": [
+            0.8088566304234087,
+            1.0585814183674225,
+            1.4814794856375606
+          ],
+          "pct_within_1_2_3_sigma": [
+            79.3343653250774,
+            99.84520123839009,
+            99.88390092879257
+          ],
+          "limits": {
+            "std": 1.4,
+            "max": 3.8,
+            "p1": 63,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "vel": {
+          "passed": true,
+          "std": [
+            0.08635171777585474,
+            0.09518678543505955,
+            0.04326248803039045
+          ],
+          "max": [
+            0.6164751803562121,
+            0.7513825362639837,
+            0.30269258139260735
+          ],
+          "rms": [
+            0.08636286393494928,
+            0.09522010116217135,
+            0.04332341423834676
+          ],
+          "pct_within_1_2_3_sigma": [
+            78.0185758513932,
+            95.89783281733746,
+            99.38080495356037
+          ],
+          "limits": {
+            "std": 0.1,
+            "max": 0.8,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "tilt": {
+          "passed": false,
+          "std": [
+            0.07657238400771668,
+            0.08907725848082089,
+            0.823412047028115
+          ],
+          "max": [
+            0.36170559006841346,
+            0.44102425098995524,
+            3.586867076977989
+          ],
+          "rms": [
+            0.07686015194305618,
+            0.09125854063194921,
+            0.830861342704263
+          ],
+          "pct_within_1_2_3_sigma": [
+            72.63931888544892,
+            97.94891640866872,
+            100.0
+          ],
+          "limits": {
+            "std": 0.81,
+            "max": 3.5,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "nan_free": true,
+        "start_end_within_3s": true,
+        "epoch_count_within_5": false
+      },
+      "passed": true,
+      "limits_source": "none (run with --derive-limits to record)"
+    },
+    "cell_fault": {
+      "name": "cell_fault",
+      "note": "the second source pulled at 2 m/s instead of GNSS",
+      "wall_s": 4.63,
+      "exit_code": 0,
+      "errors": 0,
+      "gate_rejections": 1988,
+      "epochs": 2584,
+      "checks": {
+        "pos": {
+          "passed": true,
+          "std": [
+            0.9017902365068818,
+            0.7112479437163399,
+            1.3458070956763946
+          ],
+          "max": [
+            2.7348835592802723,
+            2.829400467253011,
+            3.3742334879923988
+          ],
+          "rms": [
+            0.9227604554197912,
+            1.1431714842138185,
+            1.6010974801553493
+          ],
+          "pct_within_1_2_3_sigma": [
+            76.93498452012383,
+            99.84520123839009,
+            99.88390092879257
+          ],
+          "limits": {
+            "std": 1.4,
+            "max": 3.8,
+            "p1": 63,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "vel": {
+          "passed": true,
+          "std": [
+            0.08471487031127058,
+            0.09428713653362313,
+            0.04274757612857038
+          ],
+          "max": [
+            0.6164751803562121,
+            0.7403407257066752,
+            0.3011664073754008
+          ],
+          "rms": [
+            0.08473884287687188,
+            0.09432777230807626,
+            0.042800831803913426
+          ],
+          "pct_within_1_2_3_sigma": [
+            79.25696594427245,
+            96.51702786377709,
+            99.38080495356037
+          ],
+          "limits": {
+            "std": 0.1,
+            "max": 0.8,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "tilt": {
+          "passed": false,
+          "std": [
+            0.07645805175844671,
+            0.08914002690130557,
+            0.8170188836498602
+          ],
+          "max": [
+            0.3565375655078777,
+            0.44102425098995524,
+            3.586867076977989
+          ],
+          "rms": [
+            0.07673256385564432,
+            0.09132831305801033,
+            0.8250143445860058
+          ],
+          "pct_within_1_2_3_sigma": [
+            72.52321981424149,
+            97.94891640866872,
+            100.0
+          ],
+          "limits": {
+            "std": 0.81,
+            "max": 3.5,
+            "p1": 68.0,
+            "p2": 95.0,
+            "p3": 99.0
+          }
+        },
+        "nan_free": true,
+        "start_end_within_3s": true,
+        "epoch_count_within_5": false
+      },
+      "passed": true,
+      "limits_source": "none (run with --derive-limits to record)"
     }
   }
 }

@@ -82,8 +82,9 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   for all) rejects measurements whose normalised innovation exceeds the chi-square quantile; rejections are
   counted in registry group `fusion/gating` and logged.
 - Sensor degradation: a `SensorDegradationConfig` preprocessor (IMU noise / bias, GNSS noise, covariance scaling,
-  outlier jumps) emulates worse sensors from the recorded ones; `tools/run_degraded_matrix.py` runs the
-  degraded-sensor acceptance matrix (`docs/DEGRADED_MATRIX.md`).
+  outlier jumps, slow pulls, a synthetic second position source) emulates worse or faulty sensors from the
+  recorded ones; `tools/run_degraded_matrix.py` runs the degraded-sensor acceptance matrix
+  (`docs/DEGRADED_MATRIX.md`), including spoofing rows on `configs/pos_ins_two_sources.json`.
 - Geoid: MSL altitudes (barometer) are converted with the bundled EGM96 grid (`data/egm96_15min.bin`), see
   `configs/pos_ins_baro.json`.
 

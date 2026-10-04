@@ -23,6 +23,7 @@
 #include <pntos/cobra/tutorial/TutorialPlugins.hpp>
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <fstream>
 #include <iostream>
@@ -72,6 +73,15 @@ api::LoggingLevel level_from(const std::string& s) {
   if (s == "INFO") return api::LoggingLevel::INFO;
   if (s == "DEBUG") return api::LoggingLevel::DEBUG;
   throw std::runtime_error("unknown logging_level \"" + s + "\"");
+}
+
+std::map<std::string, OrchestrationFactory>& orchestrations() {
+  static std::map<std::string, OrchestrationFactory> m;
+  return m;
+}
+std::map<std::string, ExtraPluginFactory>& extras() {
+  static std::map<std::string, ExtraPluginFactory> m;
+  return m;
 }
 
 template <class F>
@@ -185,8 +195,15 @@ api::PluginList build_plugins(const AppConfig& config, const std::function<void(
     plugins.push_back(std::make_shared<TutorialPosOrchestrationPlugin>("Cobra Tutorial Orchestration Plugin"));
   else if (s.orchestration == "tutorial_pos_vel")
     plugins.push_back(std::make_shared<TutorialPosVelOrchestrationPlugin>("Cobra Tutorial Orchestration Plugin"));
+  else if (auto it = orchestrations().find(s.orchestration); it != orchestrations().end())
+    plugins.push_back(it->second(config));
   else
-    throw std::runtime_error("unknown orchestration \"" + s.orchestration + "\" (standard | tutorial_pos | tutorial_pos_vel)");
+    throw std::runtime_error("unknown orchestration \"" + s.orchestration + "\" (standard | tutorial_pos | tutorial_pos_vel | registered)");
+  for (const auto& name : s.extra_plugins) {
+    auto it = extras().find(name);
+    if (it == extras().end()) throw std::runtime_error("unknown extra plugin \"" + name + "\" (not registered)");
+    plugins.push_back(it->second(config));
+  }
 
   if (s.diagnostic_log) {
     std::string file = s.diagnostic_log_file;
@@ -253,6 +270,19 @@ AppSpec standard_app_spec(const std::string& name) {
   AppSpec s;
   s.name = name;
   return s;
+}
+
+void register_orchestration(const std::string& name, OrchestrationFactory factory) { orchestrations()[name] = std::move(factory); }
+void register_extra_plugin(const std::string& name, ExtraPluginFactory factory) { extras()[name] = std::move(factory); }
+std::vector<std::string> registered_orchestrations() {
+  std::vector<std::string> out;
+  for (const auto& [k, _] : orchestrations()) out.push_back(k);
+  return out;
+}
+std::vector<std::string> registered_extra_plugins() {
+  std::vector<std::string> out;
+  for (const auto& [k, _] : extras()) out.push_back(k);
+  return out;
 }
 
 }  // namespace pntos::cobra::app

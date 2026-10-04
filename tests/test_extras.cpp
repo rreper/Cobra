@@ -16,6 +16,7 @@ using namespace pntos;
 using namespace pntos::test;
 using api::Matrix;
 using api::Message;
+using api::Vector;
 using api::Vector3;
 
 namespace {
@@ -186,4 +187,62 @@ TEST(SensorDegradation, NoiseBiasJumpsAndScales) {
   EXPECT_EQ(back->position_jumps[0][1], 50.0);
   EXPECT_EQ(back->position_covariance_scale, 9.0);
   EXPECT_EQ(back->accel_noise_density[0], 0.02);
+}
+
+TEST(SensorDegradation, RampsAndDerivedSource) {
+  TestMediator med;
+  cobra::SensorDegradationConfig c;
+  c.group_ = "config/degradation";
+  c.position_ramps = {{10.0, 1.0, 0.0, 0.0, 5.0}, {12.0, 0.0, 2.0, 0.0, 0.0}};  // north 1 m/s for 5 s from 10 s; east 2 m/s from 12 s on
+  c.derived_position_channel = "/synthetic/cell/position";
+  c.derived_position_sigma_ned = {5, 5, 8};
+  c.derived_position_rate_hz = 1.0;
+  cobra::SensorDegradationPreprocessor pp(c, &med);
+  EXPECT_EQ(pp.ramp_offset(5.0), Vector3(0, 0, 0));
+  EXPECT_EQ(pp.ramp_offset(12.0), Vector3(2, 0, 0));
+  EXPECT_EQ(pp.ramp_offset(20.0), Vector3(5, 16, 0));  // north saturated at 5 m, east 8 s * 2 m/s
+  const double lat = 0.7, lon = -1.4, alt = 200;
+  auto at = [&](double rel_s) {
+    auto out = pp.process_pntos_message(Message(make_position(static_cast<std::int64_t>(rel_s * 1e9), lat, lon, alt, Matrix::Identity(3, 3)), "/pos"));
+    auto q = (*out)[0].as<aspn23_eigen::MeasurementPosition>();
+    return Vector3(cobra::nav::delta_lat_to_north(q->get_term1() - lat, lat, alt), cobra::nav::delta_lon_to_east(q->get_term2() - lon, lat, alt), alt - q->get_term3());
+  };
+  EXPECT_NEAR(at(0.0).norm(), 0.0, 1e-9);     // first message defines t=0
+  EXPECT_NEAR(at(11.0)(0), 1.0, 1e-6);         // 1 s into the first ramp
+  EXPECT_NEAR(at(20.0)(0), 5.0, 1e-6);
+  EXPECT_NEAR(at(20.0)(1), 16.0, 1e-6);
+  // derived source: one position per second from a 10 Hz PVA stream, noise of the configured size
+  Vector q(4);
+  q << 1, 0, 0, 0;
+  std::vector<double> dn;
+  std::size_t emitted = 0;
+  for (int i = 0; i < 300; ++i) {  // 30 s at 10 Hz
+    auto out = pp.process_pntos_message(Message(make_pva(i * 100'000'000LL, lat, lon, alt, 0, 0, 0, q), "/sensor/ins-d/pva"));
+    ASSERT_TRUE(out);
+    EXPECT_EQ((*out)[0].source_identifier, "/sensor/ins-d/pva");
+    if (out->size() == 2) {
+      ++emitted;
+      auto p = (*out)[1].as<aspn23_eigen::MeasurementPosition>();
+      ASSERT_TRUE(p);
+      EXPECT_EQ((*out)[1].source_identifier, "/synthetic/cell/position");
+      EXPECT_EQ(p->get_time_of_validity().get_elapsed_nsec(), i * 100'000'000LL);
+      EXPECT_DOUBLE_EQ(Matrix(p->get_covariance())(2, 2), 64.0);
+      dn.push_back(cobra::nav::delta_lat_to_north(p->get_term1() - lat, lat, alt));
+    }
+  }
+  EXPECT_EQ(emitted, 30u);
+  EXPECT_EQ(pp.derived_messages(), 30u);
+  double ss = 0;
+  for (double v : dn) ss += v * v;
+  EXPECT_NEAR(std::sqrt(ss / dn.size()), 5.0, 2.0);
+  // registry + JSON keep the new fields
+  auto reg = std::make_shared<cobra::StandardRegistryPlugin>("registry", std::vector<std::shared_ptr<const cobra::BaseConfig>>{std::make_shared<cobra::SensorDegradationConfig>(c)});
+  reg->init_plugin(std::nullopt, &med);
+  med.set_registry(reg->new_registry());
+  auto back = cobra::SensorDegradationConfig::from_registry(med, "config/degradation");
+  ASSERT_TRUE(back);
+  ASSERT_EQ(back->position_ramps.size(), 2u);
+  EXPECT_EQ(back->position_ramps[1][2], 2.0);
+  EXPECT_EQ(back->derived_position_channel, "/synthetic/cell/position");
+  EXPECT_EQ(back->derived_position_rate_hz, 1.0);
 }

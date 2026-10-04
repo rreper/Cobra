@@ -49,6 +49,13 @@ class SensorDegradationPreprocessor final : public api::Preprocessor {
   std::normal_distribution<double> n01_{0.0, 1.0};  ///< per instance: a Box-Muller cache must not leak between seeds
   std::optional<std::int64_t> first_position_ns_;
   std::size_t next_jump_ = 0;
+  std::optional<std::int64_t> last_derived_ns_;
+  std::size_t derived_count_ = 0;
+
+ public:
+  std::size_t derived_messages() const { return derived_count_; }
+  /// Offset (NED, m) the configured ramps add at `rel_s` seconds after the first position message.
+  api::Vector3 ramp_offset(double rel_s) const;
 };
 
 /// Preprocessor plugin providing ["zero_velocity2d_generator", "sensor_degradation"].
