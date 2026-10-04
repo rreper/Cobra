@@ -31,12 +31,12 @@ def main():
             out = os.path.join(a.workdir, f'{app}_{mode}.log')
             flag = '--legacy-q' if mode == 'legacy' else '--corrected-q'
             if a.runner:
-                cmd = [os.path.join(a.build, 'apps', 'cobra_run'), os.path.join('configs', app + '.json'), out, a.log, flag, '--quiet']
+                cmd = [os.path.join(a.build, 'apps', 'cobra_run'), os.path.join('configs', app + '.json'), out, a.log, flag, '--quiet', '--no-record-input']
             else:
-                cmd = [os.path.join(a.build, 'apps', app), out, a.log, flag, '--quiet']
+                cmd = [os.path.join(a.build, 'apps', app), out, a.log, flag, '--quiet', '--no-record-input']
             p = subprocess.run(cmd, capture_output=True, text=True)
             errors = [l for l in (p.stdout + p.stderr).splitlines() if '[ERROR]' in l]
-            s = json.loads(subprocess.check_output([stats_exe, out], text=True)) if p.returncode == 0 else {}
+            s = json.loads(subprocess.check_output([stats_exe, out, '--truth-log', a.log], text=True)) if p.returncode == 0 else {}
             ok = (p.returncode == 0 and not errors and s.get('nan_epochs', 1) == 0 and s.get('solution_epochs', 0) >= min_epochs
                   and max(s.get('rms_pos_ned_m', [1e9])) <= max_pos and s.get('rms_rpy_deg', [1e9])[-1] <= max_yaw)
             print(f"{app:24s} {mode:9s} {'PASS' if ok else 'FAIL'} exit={p.returncode} errors={len(errors)} "

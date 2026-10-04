@@ -1,11 +1,11 @@
 {
-  "generated": "2026-10-04T10:11:37-0600",
+  "generated": "2026-10-04T10:52:24-0600",
   "input_log": "/home/rreper/orin/work/pntos/Cobra/.venv/lib/python3.12/site-packages/pntos_python_datasets_lcm/cobra_gps_ins_example_data.log",
   "results": {
     "pos_ins@corrected": {
       "app": "pos_ins",
       "mode": "corrected",
-      "wall_s": 3.15,
+      "wall_s": 2.07,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -113,7 +113,7 @@
     "pos_ins@legacy": {
       "app": "pos_ins",
       "mode": "legacy",
-      "wall_s": 2.98,
+      "wall_s": 2.02,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -221,7 +221,7 @@
     "pos_ins_leverarm@corrected": {
       "app": "pos_ins_leverarm",
       "mode": "corrected",
-      "wall_s": 2.39,
+      "wall_s": 2.01,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -329,7 +329,7 @@
     "pos_ins_leverarm@legacy": {
       "app": "pos_ins_leverarm",
       "mode": "legacy",
-      "wall_s": 2.5,
+      "wall_s": 2.01,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -437,7 +437,7 @@
     "pos_ins_bodyvel@corrected": {
       "app": "pos_ins_bodyvel",
       "mode": "corrected",
-      "wall_s": 2.58,
+      "wall_s": 2.19,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -545,7 +545,7 @@
     "pos_ins_bodyvel@legacy": {
       "app": "pos_ins_bodyvel",
       "mode": "legacy",
-      "wall_s": 2.59,
+      "wall_s": 2.2,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -653,7 +653,7 @@
     "pos_vel_ins@corrected": {
       "app": "pos_vel_ins",
       "mode": "corrected",
-      "wall_s": 3.35,
+      "wall_s": 3.05,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -761,7 +761,7 @@
     "pos_vel_ins@legacy": {
       "app": "pos_vel_ins",
       "mode": "legacy",
-      "wall_s": 3.31,
+      "wall_s": 3.03,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -869,7 +869,7 @@
     "posvel_ins@corrected": {
       "app": "posvel_ins",
       "mode": "corrected",
-      "wall_s": 2.42,
+      "wall_s": 2.04,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -977,7 +977,7 @@
     "posvel_ins@legacy": {
       "app": "posvel_ins",
       "mode": "legacy",
-      "wall_s": 2.43,
+      "wall_s": 2.05,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1085,7 +1085,7 @@
     "outage_sim@corrected": {
       "app": "outage_sim",
       "mode": "corrected",
-      "wall_s": 2.93,
+      "wall_s": 2.53,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1193,7 +1193,7 @@
     "outage_sim@legacy": {
       "app": "outage_sim",
       "mode": "legacy",
-      "wall_s": 2.9,
+      "wall_s": 2.55,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1301,7 +1301,7 @@
     "pos_ins_vsb@corrected": {
       "app": "pos_ins_vsb",
       "mode": "corrected",
-      "wall_s": 2.47,
+      "wall_s": 2.06,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1409,7 +1409,7 @@
     "pos_ins_vsb@legacy": {
       "app": "pos_ins_vsb",
       "mode": "legacy",
-      "wall_s": 2.51,
+      "wall_s": 2.04,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1517,7 +1517,7 @@
     "direction_to_points@corrected": {
       "app": "direction_to_points",
       "mode": "corrected",
-      "wall_s": 2.49,
+      "wall_s": 2.07,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1625,7 +1625,7 @@
     "direction_to_points@legacy": {
       "app": "direction_to_points",
       "mode": "legacy",
-      "wall_s": 2.52,
+      "wall_s": 2.07,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1733,7 +1733,7 @@
     "pos_ins_record_states@corrected": {
       "app": "pos_ins_record_states",
       "mode": "corrected",
-      "wall_s": 1.57,
+      "wall_s": 1.13,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1839,7 +1839,7 @@
       "limits_source": "derived (docs/limits_corrected.json)",
       "hdf5": {
         "ok": true,
-        "path": "/tmp/claude-1000/-home-rreper-orin-work-pntos/650f132a-4514-43f6-a35d-5ce5de61ca66/scratchpad/acceptance3/pos_ins_record_states_corrected.hdf5",
+        "path": "build/acceptance/pos_ins_record_states_corrected.hdf5",
         "records": 5181,
         "states": 18,
         "keys": [
@@ -1853,7 +1853,7 @@
     "pos_ins_record_states@legacy": {
       "app": "pos_ins_record_states",
       "mode": "legacy",
-      "wall_s": 1.63,
+      "wall_s": 1.13,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -1959,7 +1959,7 @@
       "limits_source": "python",
       "hdf5": {
         "ok": true,
-        "path": "/tmp/claude-1000/-home-rreper-orin-work-pntos/650f132a-4514-43f6-a35d-5ce5de61ca66/scratchpad/acceptance3/pos_ins_record_states_legacy.hdf5",
+        "path": "build/acceptance/pos_ins_record_states_legacy.hdf5",
         "records": 5181,
         "states": 18,
         "keys": [
@@ -1973,7 +1973,7 @@
     "pos_ins_zerovel2d@corrected": {
       "app": "pos_ins_zerovel2d",
       "mode": "corrected",
-      "wall_s": 2.51,
+      "wall_s": 2.08,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -2081,7 +2081,7 @@
     "pos_ins_zerovel2d@legacy": {
       "app": "pos_ins_zerovel2d",
       "mode": "legacy",
-      "wall_s": 2.5,
+      "wall_s": 2.06,
       "exit_code": 0,
       "errors": 0,
       "warnings": 0,
@@ -2189,10 +2189,10 @@
     "tutorial_pos_ins@corrected": {
       "app": "tutorial_pos_ins",
       "mode": "corrected",
-      "wall_s": 4.63,
+      "wall_s": 3.65,
       "exit_code": 0,
       "errors": 0,
-      "warnings": 0,
+      "warnings": 1,
       "python_test": "test_tutorial_pos_ins_app",
       "epochs": 2593,
       "expected_epochs": 2593,
@@ -2297,10 +2297,10 @@
     "tutorial_pos_ins@legacy": {
       "app": "tutorial_pos_ins",
       "mode": "legacy",
-      "wall_s": 4.5,
+      "wall_s": 3.54,
       "exit_code": 0,
       "errors": 0,
-      "warnings": 0,
+      "warnings": 1,
       "python_test": "test_tutorial_pos_ins_app",
       "epochs": 2593,
       "expected_epochs": 2593,
@@ -2405,10 +2405,10 @@
     "tutorial_pos_vel_ins@corrected": {
       "app": "tutorial_pos_vel_ins",
       "mode": "corrected",
-      "wall_s": 5.51,
+      "wall_s": 4.46,
       "exit_code": 0,
       "errors": 0,
-      "warnings": 0,
+      "warnings": 1,
       "python_test": "test_tutorial_pos_ins_vel_app",
       "epochs": 2593,
       "expected_epochs": 2593,
@@ -2513,10 +2513,10 @@
     "tutorial_pos_vel_ins@legacy": {
       "app": "tutorial_pos_vel_ins",
       "mode": "legacy",
-      "wall_s": 5.49,
+      "wall_s": 4.5,
       "exit_code": 0,
       "errors": 0,
-      "warnings": 0,
+      "warnings": 1,
       "python_test": "test_tutorial_pos_ins_vel_app",
       "epochs": 2593,
       "expected_epochs": 2593,

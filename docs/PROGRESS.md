@@ -2,6 +2,26 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — Roadmap Phase 2: innovation gating, degraded-sensor matrix, geoid
+
+- **Innovation gating** (`StandardFusionEngine::set_innovation_gate`, DESIGN.md §7.15): chi-square gate per
+  processor from `MeasurementProcessorConfig::innovation_gate_probability` or the `FusionEngineConfig` default;
+  counters in registry group `fusion/gating`; off by default. A 50 m outlier injected into pos_ins is rejected
+  (1 rejection, solution unchanged).
+- **Sensor degradation** (`SensorDegradationConfig` / `SensorDegradationPreprocessor` in the extras plugin, §7.16)
+  and `tools/run_degraded_matrix.py`: 11 rows (3 IMU grades, 5 GNSS conditions, 3 sensor sets) through
+  `cobra_run`, limits recorded in `docs/limits_degraded.json`, table in `docs/DEGRADED_MATRIX.md`. All rows run
+  clean; e.g. consumer-grade IMU emulation raises yaw std from 0.83° to 4.1°, 0.1 Hz GNSS raises position std
+  from 0.92 to 1.12 m north.
+- **Geoid** (`nav::Geoid`, §7.17): EGM96 15' grid bundled as `data/egm96_15min.bin` (2 MB, `tools/make_geoid.py`);
+  `AltitudeMeasurementProcessor` converts MSL to HAE; `configs/pos_ins_baro.json` runs the barometer through it.
+  Deviation 11 (MSL rejected) resolved.
+- `--no-record-input` on every app and `cobra_run`: acceptance logs shrink from 476 MB to ~1 MB each; the
+  acceptance tools use it (a full run is 53 MB instead of 11 GB). The orchestration now warns when a preprocessor
+  config names an identifier no loaded plugin provides (Python skips silently).
+- Verification: 20 suites / 195 tests green; acceptance 24/24 (12 apps × 2 modes); CI script compiled + config
+  files PASS; degraded matrix 11/11.
+
 ## 2026-10-04 — Roadmap Phase 1: config files, presets, corrected default, CI
 
 - `docs/ROADMAP.md` and `docs/SESSION_NOTES.md` written (shared copies on claude.ai).

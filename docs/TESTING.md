@@ -78,10 +78,10 @@ no config).
 | `ekf_fusion_strategy` | 31 | `test_standard_ekf_fusion_strategy.py` (all) | add/remove states, cross-covariance placement, slices, propagate, update (Python arithmetic via `set_joseph_form(false)`), error paths |
 | `simple_state_blocks` | 17 | `test_fogm_block.py`, `test_constant_block.py`, `test_clock_bias_block.py` | closed-form `Φ`, `Qd`, `g`, bad inputs, clone |
 | `registry` | 22 | `test_registry.py` (all but pickled `Message` permanency) | key order, types, batches, notify (key / any-key / new group), permanency round trip, `end_all_batches` |
-| `state_modeling` | 17 | `test_state_modeling.py` (all) | provider indices and rejection paths; `H`/`z`/`h`/`R` of every processor; Pinson `Φ`/`Qd` golden matrices (rtol 1e-5, atol 1e-20); Q-not-mutated regression; clone independence |
+| `state_modeling` | 19 | `test_state_modeling.py` (all) | provider indices and rejection paths; `H`/`z`/`h`/`R` of every processor; Pinson `Φ`/`Qd` golden matrices (rtol 1e-5, atol 1e-20); Q-not-mutated regression; clone independence |
 | `virtual_state_blocks` | 5 | `test_virtual_state_blocks.py` (VSB half) | `StateExtractor` valid/invalid; `PinsonErrorToStandard` conversion, Jacobian vs central differences, invalid cases |
 | `vsb_manager` | 4 | `test_virtual_state_blocks.py` (manager half) | 25-deep random-order chain, caching, pruning on removal, aux delivery, invalid ops, deep copy |
-| `fusion_engine` | 8 | — (Python covers the engine only via orchestration) | bookkeeping with cross-covariances and re-indexing, non-generic EWC rejection, block-diagonal propagate, update through real and virtual blocks, aux routing, `peek_ahead`/`clone` isolation, diagnostics save, plugin config |
+| `fusion_engine` | 9 | — (Python covers the engine only via orchestration) | bookkeeping with cross-covariances and re-indexing, non-generic EWC rejection, block-diagonal propagate, update through real and virtual blocks, aux routing, `peek_ahead`/`clone` isolation, diagnostics save, plugin config |
 | `message_stream_config` | 9 | `test_message_stream_config.py` (all) + source-specific overrides | buffer-mode resolution rules |
 | `controller` | 13 | `test_single_threaded_controller.py` (all) + mediator behaviour | mediator routing/buffering/publishing/broadcast/logging/UI gate; `ExitEvent`; controller wiring order, validation, `ready_to_shutdown`, error exit code; dummy controller end to end; config round trips |
 | `inertial` | 5 | `test_inertial_plugin.py` (all) + mechanization checks | plugin contract (ranges, reset, continuous vs best solutions, forces/rates, sensor errors); stationary mechanization drift bound; error-model correction; helper closed forms; ring eviction/interpolation |
@@ -89,7 +89,7 @@ no config).
 | `preprocessors` | 9 | `test_preprocessor_plugin.py` (all) + time bias | plugin indices/config errors; downsampler counting; IMU rotation (input untouched); time adjuster synthesis within/outside tolerance; baro→altitude value/variance/channel rename/sigma override; time bias; outage window with INFO logs |
 | `lcm_transport` | 7 | `test_transport_plugin.py` (log parts) + round trips | log write/read; encode/decode of all six supported types incl. absent quaternion; decoding the first 3000 events of the real example log; replay with shutdown flag and UI gate group; channel filter + output recording; threaded listen/stop; same input/output error |
 | `tutorial` | 7 | `test_orchestration.py` (tutorial cases) + new | tutorial / UI configs round trip; provider indices and rejection paths; tutorial velocity and position models (z, H incl. the numpy-broadcast tilt columns, h Jacobian check); orchestration init for pos and pos/vel, stream config, 2 s of IMU + position + velocity updates with feedback and `request_solutions`; UI plugin warnings for missing / invalid logs |
-| `extras` | 3 | — (Python has no unit test; covered by the zerovel2d app) | `ZeroVelocity2dGeneratorConfig` round trip incl. base-type read-back; plugin index / config errors; first-trigger, trigger_dt gating, channel filter, NaN x, 2×2 R, generated message independence |
+| `extras` | 4 | — (Python has no unit test; covered by the zerovel2d app) | `ZeroVelocity2dGeneratorConfig` round trip incl. base-type read-back; plugin index / config errors; first-trigger, trigger_dt gating, channel filter, NaN x, 2×2 R, generated message independence; `SensorDegradation`: noise sigma and bias scaling for sampled and integrated IMU, NED position noise and covariance scale, one-shot jump, velocity noise on present axes only, determinism per seed, registry round trip |
 | `diagnostics` | 5 | `test_diagnostic_log_plugin.py`, `test_hdf5utils.py` (write half) | HDF5 superblock / EOF address / file bytes; bad dataset names; store serialisation incl. 1-D squeeze and mixed-type abandonment; plugin records every notification (incl. unchanged re-sets, as Python) and writes the file at shutdown; no-mediator error path |
 | `json_config` | 5 | — (new) | JSON round trip of a config set covering every class reproduces the registry byte for byte; presets and overrides; error messages name the field; datasheet conversion constants; command-line overrides incl. the vn100 ↔ vn100_corrected swap; plugin sets per AppSpec and rejection of unknown names |
 | `orchestration` | 12 | `test_orchestration.py` (standard cases) | init with real fusion/EKF/state-modeling plugins and mock inertial/initializer; config round trip; one channel → many processors; VSB-chain aux; outage propagation; alignment after N messages; `request_solutions` in all forms; end-to-end position update with feedback |
@@ -214,7 +214,15 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 
    The corrected mode (the default) is checked against `docs/limits_corrected.json`; regenerate that file only after
    a deliberate retune, with `--derive-corrected-limits` (DESIGN.md §7.14 states the rule). The legacy mode is always
-   checked against the Python limits.
+   checked against the Python limits. Output logs go to `build/acceptance` and hold only the solutions
+   (`--no-record-input`), so a full run costs a few MB rather than 11 GB.
+
+   The degraded-sensor matrix is the second acceptance layer:
+
+   ```bash
+   Cobra/.venv/bin/python tools/run_degraded_matrix.py                  # checks against docs/limits_degraded.json
+   Cobra/.venv/bin/python tools/run_degraded_matrix.py --derive-limits  # after a deliberate change of the rows or the filter
+   ```
 4. **Not replayable here**: `pos_ins_network` (network LCM transport), `pos_ins_ros`, `pos_ins_ui` — see
    DESIGN.md §9.6.
 5. **Performance** — DONE: 1.4–5.5 s wall per app against 22–40 s for Python (same machine, same log).
@@ -231,7 +239,9 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 | `build/tools/inertial_parity_dump` + `tools/inertial_parity_check.py` | Replays the first 25 s of the example log through alignment + `BufferedImu` in both languages: alignment solution/covariance/biases, buffered solutions, forces/rates, resets, no-reset-since. |
 | `PNTOS_TRACE_FILE=path ./build/apps/pos_ins …` and `tools/trace_python_pos_ins.py in out trace` | One line per propagate/update with trace(P) and selected states (`PNTOS_TRACE_FULL=1` for all), from both implementations; diff them to find the first diverging step. |
 | `tools/run_acceptance.py` | Runs every app on the example log in `legacy` (default) and `corrected` Pinson-Q modes and applies the Python integration-test limits; for `pos_ins_record_states` it also opens the HDF5 diagnostics file with h5py; writes `docs/acceptance.json` for the matrix. |
-| `build/tools/log_stats out.log` | Epoch count, NaN count, start/end and RMS NED position / velocity / RPY errors against the truth channel as JSON, in C++ (what `ci_acceptance.py` uses). |
+| `build/tools/log_stats out.log [--truth-log in.log]` | Epoch count, NaN count, start/end and RMS NED position / velocity / RPY errors against the truth channel as JSON, in C++ (what `ci_acceptance.py` uses). |
+| `Cobra/.venv/bin/python tools/run_degraded_matrix.py` | Degraded-sensor matrix (DESIGN.md §7.16): IMU grades × GNSS conditions × sensor sets through `cobra_run`; `--derive-limits` records `docs/limits_degraded.json`; writes `docs/DEGRADED_MATRIX.md`. |
+| `--no-record-input` on any app or `cobra_run` | Output log holds only the broadcast solutions (about 1 MB instead of a copy of the 476 MB input); the acceptance tools use it, with truth read from the input log. |
 | `--dump-registry f` on any app or `cobra_run` | Every registry group/key/value as JSON; diff a compiled app against its config file. |
 | Epoch-by-epoch comparison | To compare two solution logs directly, read both with `run_acceptance.read_pva`, interpolate truth to each grid and difference the NED errors (that is how the outage_sim grid-phase issue was found: filters identical to 1 cm, solution epochs 0.4 s apart). |
 

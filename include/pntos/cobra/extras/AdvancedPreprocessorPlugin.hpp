@@ -6,6 +6,8 @@
 
 #include <aspn23/eigen/MeasurementVelocity.hpp>
 
+#include <random>
+
 namespace pntos::cobra {
 
 /// Emits a 2-D zero-velocity measurement (sensor frame, x = not present, y = z = 0) alongside the
@@ -31,7 +33,25 @@ class ZeroVelocity2dGenerator final : public api::Preprocessor {
   std::optional<std::int64_t> last_ns_;
 };
 
-/// Preprocessor plugin providing ["zero_velocity2d_generator"] (configured by ZeroVelocity2dGeneratorConfig).
+/// Emulates a worse sensor set on the fly (SensorDegradationConfig): IMU noise and bias, GNSS position /
+/// velocity noise, covariance scaling and one-shot position jumps. Deterministic for a given seed.
+class SensorDegradationPreprocessor final : public api::Preprocessor {
+ public:
+  SensorDegradationPreprocessor(const SensorDegradationConfig& config, api::Mediator* mediator);
+  std::optional<std::vector<api::Message>> process_pntos_message(const api::Message& message) override;
+  std::size_t jumps_applied() const { return next_jump_; }
+
+ private:
+  double gauss();
+  SensorDegradationConfig cfg_;
+  api::Mediator* mediator_;
+  std::mt19937_64 rng_;
+  std::normal_distribution<double> n01_{0.0, 1.0};  ///< per instance: a Box-Muller cache must not leak between seeds
+  std::optional<std::int64_t> first_position_ns_;
+  std::size_t next_jump_ = 0;
+};
+
+/// Preprocessor plugin providing ["zero_velocity2d_generator", "sensor_degradation"].
 class AdvancedPreprocessorPlugin final : public api::PreprocessorPlugin {
  public:
   explicit AdvancedPreprocessorPlugin(std::string identifier) : identifier_(std::move(identifier)) {}
@@ -45,7 +65,7 @@ class AdvancedPreprocessorPlugin final : public api::PreprocessorPlugin {
  private:
   std::string identifier_;
   api::Mediator* mediator_ = nullptr;
-  std::vector<std::string> ids_{ZeroVelocity2dGeneratorConfig::kIdentifier};
+  std::vector<std::string> ids_{ZeroVelocity2dGeneratorConfig::kIdentifier, SensorDegradationConfig::kIdentifier};
 };
 
 }  // namespace pntos::cobra

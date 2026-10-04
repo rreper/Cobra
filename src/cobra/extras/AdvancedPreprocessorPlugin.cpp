@@ -3,9 +3,13 @@
 #include <pntos/cobra/utils/aspn.hpp>
 #include <pntos/cobra/utils/logging.hpp>
 
+#include <aspn23/eigen/MeasurementImu.hpp>
+#include <aspn23/eigen/MeasurementPosition.hpp>
 #include <aspn23/eigen/TypeHeader.hpp>
+#include <pntos/cobra/utils/navutils.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace pntos::cobra {
@@ -54,6 +58,67 @@ std::optional<std::vector<Message>> ZeroVelocity2dGenerator::process_pntos_messa
   return std::vector<Message>{message, Message(vel, output_channel_)};
 }
 
+// ----------------------------------------------------------------------------- SensorDegradation
+
+SensorDegradationPreprocessor::SensorDegradationPreprocessor(const SensorDegradationConfig& config, api::Mediator* mediator)
+    : cfg_(config), mediator_(mediator), rng_(static_cast<std::uint64_t>(config.seed)) {}
+
+double SensorDegradationPreprocessor::gauss() { return n01_(rng_); }
+
+std::optional<std::vector<Message>> SensorDegradationPreprocessor::process_pntos_message(const Message& message) {
+  if (!message.wrapped_message) return std::vector<Message>{message};
+  if (auto imu = message.as<aspn23_eigen::MeasurementImu>()) {
+    const bool integrated = imu->get_imu_type() == ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED;
+    const double dt = cfg_.imu_expected_dt > 0 ? cfg_.imu_expected_dt : 0.01;
+    const double noise_scale = integrated ? std::sqrt(dt) : 1.0 / std::sqrt(dt);  // density -> per-sample sigma
+    const double bias_scale = integrated ? dt : 1.0;
+    auto out = std::make_shared<aspn23_eigen::MeasurementImu>(*imu);
+    Eigen::Matrix<double, Eigen::Dynamic, 1> a = imu->get_meas_accel(), g = imu->get_meas_gyro();
+    for (int i = 0; i < 3 && i < a.size(); ++i) {
+      const auto k = static_cast<std::size_t>(i);
+      a(i) += cfg_.accel_bias[k] * bias_scale + cfg_.accel_noise_density[k] * noise_scale * gauss();
+      g(i) += cfg_.gyro_bias[k] * bias_scale + cfg_.gyro_noise_density[k] * noise_scale * gauss();
+    }
+    out->set_meas_accel(a);
+    out->set_meas_gyro(g);
+    return std::vector<Message>{Message(out, message.source_identifier)};
+  }
+  if (auto pos = message.as<aspn23_eigen::MeasurementPosition>()) {
+    if (pos->get_reference_frame() != ASPN23_MEASUREMENT_POSITION_REFERENCE_FRAME_GEODETIC) return std::vector<Message>{message};
+    const std::int64_t t = pos->get_time_of_validity().get_elapsed_nsec();
+    if (!first_position_ns_) first_position_ns_ = t;
+    const double rel = static_cast<double>(t - *first_position_ns_) * 1e-9;
+    double dn = cfg_.position_noise_sigma_ned[0] * gauss(), de = cfg_.position_noise_sigma_ned[1] * gauss(),
+           dd = cfg_.position_noise_sigma_ned[2] * gauss();
+    while (next_jump_ < cfg_.position_jumps.size() && rel >= cfg_.position_jumps[next_jump_][0]) {
+      const auto& jmp = cfg_.position_jumps[next_jump_++];
+      dn += jmp[1];
+      de += jmp[2];
+      dd += jmp[3];
+      if (mediator_)
+        mediator_->log_message(LoggingLevel::INFO, "SensorDegradation: injected a position jump of " + std::to_string(jmp[1]) + " / " +
+                                                       std::to_string(jmp[2]) + " / " + std::to_string(jmp[3]) + " m NED at t=" +
+                                                       std::to_string(rel) + " s.");
+    }
+    auto out = std::make_shared<aspn23_eigen::MeasurementPosition>(*pos);
+    const double lat = pos->get_term1(), alt = pos->get_term3();
+    out->set_term1(lat + nav::north_to_delta_lat(dn, lat, alt));
+    out->set_term2(pos->get_term2() + nav::east_to_delta_lon(de, lat, alt));
+    out->set_term3(alt - dd);
+    if (cfg_.position_covariance_scale != 1.0) out->set_covariance(pos->get_covariance() * cfg_.position_covariance_scale);
+    return std::vector<Message>{Message(out, message.source_identifier)};
+  }
+  if (auto vel = message.as<aspn23_eigen::MeasurementVelocity>()) {
+    auto out = std::make_shared<aspn23_eigen::MeasurementVelocity>(*vel);
+    if (utils::present(vel->get_x())) out->set_x(vel->get_x() + cfg_.velocity_noise_sigma[0] * gauss());
+    if (utils::present(vel->get_y())) out->set_y(vel->get_y() + cfg_.velocity_noise_sigma[1] * gauss());
+    if (utils::present(vel->get_z())) out->set_z(vel->get_z() + cfg_.velocity_noise_sigma[2] * gauss());
+    if (cfg_.velocity_covariance_scale != 1.0) out->set_covariance(vel->get_covariance() * cfg_.velocity_covariance_scale);
+    return std::vector<Message>{Message(out, message.source_identifier)};
+  }
+  return std::vector<Message>{message};
+}
+
 void AdvancedPreprocessorPlugin::init_plugin(const std::optional<std::string>&, api::Mediator* mediator) {
   mediator_ = mediator;
   if (!mediator_) utils::print_message(LoggingLevel::ERROR, identifier_, "mediator cannot be null");
@@ -65,6 +130,19 @@ std::unique_ptr<api::Preprocessor> AdvancedPreprocessorPlugin::new_preprocessor(
     utils::print_message(LoggingLevel::ERROR, identifier_,
                          "mediator is null. init_plugin must be called with a valid mediator before new_preprocessor.");
     return nullptr;
+  }
+  if (index == 1) {
+    if (!config_group) {
+      mediator_->log_message(LoggingLevel::ERROR, "config_group is a required parameter for preprocessor \"" + ids_[1] +
+                                                      "\" and cannot be None.");
+      return nullptr;
+    }
+    auto cfg = SensorDegradationConfig::from_registry(*mediator_, *config_group);
+    if (!cfg) {
+      mediator_->log_message(LoggingLevel::ERROR, "Failed to populate SensorDegradationConfig for preprocessor " + ids_[1] + ".");
+      return nullptr;
+    }
+    return std::make_unique<SensorDegradationPreprocessor>(*cfg, mediator_);
   }
   if (index != 0) {
     mediator_->log_message(LoggingLevel::ERROR, "Invalid preprocessor index of " + std::to_string(index) +

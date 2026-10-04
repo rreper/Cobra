@@ -41,9 +41,11 @@ modes from config files (identical to the compiled apps), CI workflow committed 
 
 Gate to Phase 2: unit suite green, 12 / 12 acceptance from config files, CI running.
 
-## Phase 2, Robustness
+## Phase 2, Robustness — DONE 2026-10-04
 
-Proves the presets instead of asserting them, and makes the filter survive real receivers.
+Proves the presets instead of asserting them, and makes the filter survive real receivers. Gate held: 20
+suites green; `docs/DEGRADED_MATRIX.md` records 11 rows with limits in `docs/limits_degraded.json`; the
+50 m outlier row shows one gate rejection and an unchanged solution; MSL altitude works through the geoid.
 
 | Work item | What it delivers | Done when |
 |---|---|---|

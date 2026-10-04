@@ -138,7 +138,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--build', default='build')
     ap.add_argument('--out', default='docs/acceptance.json')
-    ap.add_argument('--workdir', default='/tmp/pntos_acceptance')
+    ap.add_argument('--workdir', default='build/acceptance',
+                    help='output logs go here; with --no-record-input (default) each is ~1 MB instead of a copy of the input log')
+    ap.add_argument('--record-input', action='store_true', help='keep the input channels in the output logs (476 MB each)')
     ap.add_argument('--only', default=None)
     ap.add_argument('--no-run', action='store_true')
     ap.add_argument('--input-log', default=None)
@@ -178,7 +180,8 @@ def main():
             rec.update(passed=False, reason='binary not built'); results[key] = rec; continue
         if not a.no_run:
             t0 = time.time()
-            cmd = [exe] + ([rec['config']] if a.runner else []) + [log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q'])
+            cmd = [exe] + ([rec['config']] if a.runner else []) + [log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q']) \
+                + ([] if a.record_input else ['--no-record-input', '--quiet'])
             p = subprocess.run(cmd, capture_output=True, text=True)
             rec['wall_s'] = round(time.time() - t0, 2)
             rec['exit_code'] = p.returncode

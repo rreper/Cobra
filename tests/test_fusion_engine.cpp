@@ -273,3 +273,43 @@ TEST_F(FusionEngineTest, PluginReadsConfig) {
 }
 
 }  // namespace
+
+TEST_F(FusionEngineTest, InnovationGateRejectsOutliers) {
+  // chi-square quantiles (Wilson-Hilferty): exact 10.83 (p=0.999, dof 1), 7.81 (0.95, 3), 16.27 (0.999, 3)
+  EXPECT_NEAR(cobra::StandardFusionEngine::chi2_quantile(0.999, 1), 10.83, 0.5);
+  EXPECT_NEAR(cobra::StandardFusionEngine::chi2_quantile(0.95, 3), 7.81, 0.3);
+  EXPECT_NEAR(cobra::StandardFusionEngine::chi2_quantile(0.999, 3), 16.27, 0.5);
+
+  engine->add_state_block(std::make_unique<cobra::ConstantStateBlock>("c", &med, std::size_t{3}, std::nullopt), ewc({0, 0, 0}, 4.0), std::nullopt);
+  engine->add_measurement_processor(std::make_unique<DirectProcessor>("far", std::vector<std::string>{"c"}, vec({100, 100, 100}), 1.0));
+  engine->add_measurement_processor(std::make_unique<DirectProcessor>("near", std::vector<std::string>{"c"}, vec({1, 1, 1}), 1.0));
+  engine->set_innovation_gate("far", 0.999);
+  engine->set_innovation_gate("near", 0.999);
+  Message m(make_position(kSec, 0, 0, 0, Matrix::Identity(3, 3)), "src");
+  engine->update("far", m);  // chi2 = 3 * 100^2 / 5 = 6000 >> 16.3: rejected, state untouched
+  EXPECT_ALLCLOSE(*engine->get_state_block_estimate("c"), vec({0, 0, 0}));
+  auto st = engine->gate_stats("far");
+  ASSERT_TRUE(st);
+  EXPECT_EQ(st->rejected, 1u);
+  EXPECT_EQ(st->accepted, 0u);
+  EXPECT_NEAR(st->last_chi2, 6000.0, 1e-6);
+  EXPECT_EQ(med.count(api::LoggingLevel::WARN), 1u);
+  engine->update("near", m);  // chi2 = 3 / 5 = 0.6: accepted, posterior = 4/5 of z
+  EXPECT_ALLCLOSE(*engine->get_state_block_estimate("c"), vec({0.8, 0.8, 0.8}));
+  EXPECT_EQ(engine->gate_stats("near")->accepted, 1u);
+  // counters in the registry
+  auto kv = med.registry().batch("fusion/gating");
+  EXPECT_EQ(kv->get_value<std::int64_t>("far_rejected"), 1);
+  EXPECT_EQ(kv->get_value<std::int64_t>("near_accepted"), 1);
+  // removing the gate lets the outlier through (posterior P = 0.8 after the near update: K = 0.8 / 1.8)
+  engine->set_innovation_gate("far", 0.0);
+  engine->update("far", m);
+  EXPECT_NEAR((*engine->get_state_block_estimate("c"))(0), 0.8 + 0.8 / 1.8 * (100 - 0.8), 1e-9);
+  // default gate from the config
+  cobra::StandardFusionEngine gated(&med, false, false, 0.99);
+  gated.set_strategy(std::make_unique<cobra::EkfFusionStrategy>(&med));
+  gated.add_state_block(std::make_unique<cobra::ConstantStateBlock>("c", &med, std::size_t{3}, std::nullopt), ewc({0, 0, 0}, 4.0), std::nullopt);
+  gated.add_measurement_processor(std::make_unique<DirectProcessor>("far", std::vector<std::string>{"c"}, vec({100, 100, 100}), 1.0));
+  gated.update("far", m);
+  EXPECT_ALLCLOSE(*gated.get_state_block_estimate("c"), vec({0, 0, 0}));
+}

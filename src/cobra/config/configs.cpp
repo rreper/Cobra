@@ -246,6 +246,8 @@ void MeasurementProcessorConfig::write_base(ConfigWriter& w) const {
   w.strings("state_block_labels", state_block_labels);
   w.scalar("channel", channel);
   if (aux_channels) w.strings("aux_channels", *aux_channels);
+  w.optional("innovation_gate_probability", innovation_gate_probability);
+  w.optional("geoid_file", geoid_file);
 }
 
 bool MeasurementProcessorConfig::read_base(ConfigReader& r) {
@@ -255,6 +257,8 @@ bool MeasurementProcessorConfig::read_base(ConfigReader& r) {
   state_block_labels = req_strings(r, "state_block_labels");
   channel = r.require<std::string>("channel");
   aux_channels = r.optional<api::StringArray>("aux_channels");
+  innovation_gate_probability = r.optional<double>("innovation_gate_probability");
+  geoid_file = r.optional<std::string>("geoid_file");
   return r.ok();
 }
 
@@ -404,6 +408,7 @@ void FusionEngineConfig::to_registry(api::Mediator& m) const {
   ConfigWriter w(m, group_);
   w.scalar("save_x_and_p_after_prop", save_x_and_p_after_prop);
   w.scalar("save_x_and_p_after_update", save_x_and_p_after_update);
+  if (innovation_gate_probability > 0) w.scalar("innovation_gate_probability", innovation_gate_probability);
 }
 
 std::optional<FusionEngineConfig> FusionEngineConfig::from_registry(api::Mediator& m, const std::string& group) {
@@ -413,6 +418,7 @@ std::optional<FusionEngineConfig> FusionEngineConfig::from_registry(api::Mediato
   c.group_ = group;
   c.save_x_and_p_after_prop = r.optional<bool>("save_x_and_p_after_prop").value_or(false);
   c.save_x_and_p_after_update = r.optional<bool>("save_x_and_p_after_update").value_or(false);
+  c.innovation_gate_probability = r.optional<double>("innovation_gate_probability").value_or(0.0);
   if (!r.ok()) return std::nullopt;
   return c;
 }
@@ -680,6 +686,39 @@ PNTOS_PP_IMPL(
       c.lateral_vel_sigma = r.require<double>("lateral_vel_sigma");
       c.vertical_vel_sigma = r.require<double>("vertical_vel_sigma");
       c.output_channel = r.require<std::string>("output_channel");
+    })
+PNTOS_PP_IMPL(
+    SensorDegradationConfig,
+    {
+      w.scalar("seed", seed);
+      w.scalar("imu_expected_dt", imu_expected_dt);
+      w.vector("accel_noise_density", to_vector(accel_noise_density));
+      w.vector("gyro_noise_density", to_vector(gyro_noise_density));
+      w.vector("accel_bias", to_vector(accel_bias));
+      w.vector("gyro_bias", to_vector(gyro_bias));
+      w.vector("position_noise_sigma_ned", to_vector(position_noise_sigma_ned));
+      w.scalar("position_covariance_scale", position_covariance_scale);
+      w.vector("velocity_noise_sigma", to_vector(velocity_noise_sigma));
+      w.scalar("velocity_covariance_scale", velocity_covariance_scale);
+      api::Matrix jumps(static_cast<Eigen::Index>(position_jumps.size()), 4);
+      for (std::size_t i = 0; i < position_jumps.size(); ++i)
+        for (int k = 0; k < 4; ++k) jumps(static_cast<Eigen::Index>(i), k) = position_jumps[i][static_cast<std::size_t>(k)];
+      if (!position_jumps.empty()) w.matrix("position_jumps", jumps);
+    },
+    {
+      c.seed = r.optional<std::int64_t>("seed").value_or(1);
+      c.imu_expected_dt = r.optional<double>("imu_expected_dt").value_or(0.01);
+      c.accel_noise_density = read_arr<3>(r, "accel_noise_density").value_or(Vec3{0, 0, 0});
+      c.gyro_noise_density = read_arr<3>(r, "gyro_noise_density").value_or(Vec3{0, 0, 0});
+      c.accel_bias = read_arr<3>(r, "accel_bias").value_or(Vec3{0, 0, 0});
+      c.gyro_bias = read_arr<3>(r, "gyro_bias").value_or(Vec3{0, 0, 0});
+      c.position_noise_sigma_ned = read_arr<3>(r, "position_noise_sigma_ned").value_or(Vec3{0, 0, 0});
+      c.position_covariance_scale = r.optional<double>("position_covariance_scale").value_or(1.0);
+      c.velocity_noise_sigma = read_arr<3>(r, "velocity_noise_sigma").value_or(Vec3{0, 0, 0});
+      c.velocity_covariance_scale = r.optional<double>("velocity_covariance_scale").value_or(1.0);
+      if (auto m = r.optional<api::Matrix>("position_jumps"); m && m->cols() == 4)
+        for (Eigen::Index i = 0; i < m->rows(); ++i)
+          c.position_jumps.push_back({(*m)(i, 0), (*m)(i, 1), (*m)(i, 2), (*m)(i, 3)});
     })
 #undef PNTOS_PP_IMPL
 

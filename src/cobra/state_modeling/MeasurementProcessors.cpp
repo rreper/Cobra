@@ -415,9 +415,11 @@ std::optional<api::StandardMeasurementModel> PinsonBodyVelocityMeasurementProces
 // ============================================================ AltitudeMeasurementProcessor
 
 AltitudeMeasurementProcessor::AltitudeMeasurementProcessor(std::string label, std::vector<std::string> labels,
-                                                           api::Mediator* mediator, const Vector3& l_ps_p)
+                                                           api::Mediator* mediator, const Vector3& l_ps_p,
+                                                           std::shared_ptr<const nav::Geoid> geoid)
     : PinsonProcessorBase("AltitudeMeasurementProcessor", std::move(label), std::move(labels), mediator, 0),
-      l_ps_p_(l_ps_p) {}
+      l_ps_p_(l_ps_p),
+      geoid_(std::move(geoid)) {}
 
 void AltitudeMeasurementProcessor::receive_aux_data(const api::AuxData& aux) {
   if (aux.empty() || !aux[0]) {
@@ -462,8 +464,15 @@ std::optional<api::StandardMeasurementModel> AltitudeMeasurementProcessor::gener
     alt = a->get_altitude();
     variance = a->get_variance();
     if (a->get_reference() == ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_MSL) {
-      log(LoggingLevel::ERROR, name_ + ": MSL altitudes require a geoid model, which is not available in this build. Cannot process message.");
-      return std::nullopt;
+      if (!geoid_) {
+        log(LoggingLevel::ERROR, name_ + ": MSL altitudes require a geoid model (geoid_file in the processor config or PNTOS_GEOID_FILE). Cannot process message.");
+        return std::nullopt;
+      }
+      if (!inertial_time_) {
+        log(LoggingLevel::ERROR, name_ + " cannot convert an MSL altitude without the inertial position.");
+        return std::nullopt;
+      }
+      alt += geoid_->undulation(inertial_pos_(0), inertial_pos_(1));  // MSL -> HAE
     }
   } else if (auto p = message.as<aspn23_eigen::MeasurementPosition>();
              p && p->get_reference_frame() == ASPN23_MEASUREMENT_POSITION_REFERENCE_FRAME_GEODETIC) {

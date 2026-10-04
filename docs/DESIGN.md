@@ -624,6 +624,51 @@ not move. The corrected mode is therefore checked against `docs/limits_corrected
 (std: max(Python, 1.05 × measured); max: max(Python, 1.10 × measured); coverage: min(Python, measured − 2)), while the
 legacy mode keeps the Python limits; both are 12 / 12.
 
+### 7.15 Innovation gating (`StandardFusionEngine::set_innovation_gate`)
+
+A C++ addition the Python has no counterpart for. Before an update the engine computes the innovation
+ν = z − h(x) and S = H P Hᵀ + R over the full state (the same H and h it hands to the strategy) and the
+normalised innovation squared νᵀ S⁻¹ ν. If a gate is set for the processor and the value exceeds the
+chi-square quantile at the configured probability for the measurement's dimension, the measurement is
+dropped: the strategy is not called, a WARN names the processor, time, χ² and threshold, the trace gets an `R`
+line, and the counters `<label>_accepted`, `<label>_rejected`, `<label>_last_chi2` in registry group
+`fusion/gating` are updated (not from peek-ahead clones). The quantile uses the Wilson-Hilferty
+approximation with Acklam's normal quantile (within a few percent of the exact value, which is immaterial
+for a gate). Configuration: `MeasurementProcessorConfig::innovation_gate_probability` per processor, or
+`FusionEngineConfig::innovation_gate_probability` as the default for all; both default to off (Cobra
+behaviour, registry layout unchanged). With 0.999 on the position processor, a 50 m outlier injected into
+pos_ins is rejected and the solution is unaffected (`docs/DEGRADED_MATRIX.md`, row `jump_50m`).
+
+### 7.16 Sensor degradation and the degraded-sensor matrix (`SensorDegradationPreprocessor`)
+
+`SensorDegradationConfig` (identifier `sensor_degradation`, provided by `AdvancedPreprocessorPlugin`) turns
+the recorded sensors into worse ones on the fly: IMU white noise given as a density (per √Hz, scaled by √dt for
+integrated messages and 1/√dt for sampled ones) and constant biases (× dt for integrated), NED position
+noise, a position covariance scale, one-shot position jumps at times relative to the first fix (outliers the
+covariance does not know about), velocity noise on the present axes and a velocity covariance scale. The
+generator is seeded, so a row is reproducible. `tools/run_degraded_matrix.py` patches `configs/pos_ins.json`
+with it, widens the IMU model by the same factors (random walk × k, bias sigma × k′) so that the filter stays
+consistent with what it sees, runs each row through `cobra_run`, evaluates against truth like the acceptance
+tool and writes `docs/degraded_matrix.json` and `docs/DEGRADED_MATRIX.md`; `--derive-limits` records
+`docs/limits_degraded.json` (1.10 × std, 1.20 × max, coverage − 5) that later runs are checked against. The
+grades can only make the VN-100 data worse, never emulate a better IMU. First results (2026-10-04): the
+industrial and consumer grades raise yaw std from 0.83° to 1.5° and 4.1° with position almost unchanged (GNSS
+dominates position); 0.2 Hz and 0.1 Hz GNSS raise north position std to 0.96 m and 1.12 m; three 60 s outages
+raise east position std to 2.2 m; the `noisy_x3` row (3 m white noise, covariance × 9) drops the position
+sigma coverage to 46 %, which says the FOGM position-error block (τ = 300 s) is the wrong model for white
+receiver noise and a user with such a receiver should shrink its τ; the 50 m outlier is rejected by the gate
+and leaves the solution untouched.
+
+### 7.17 Geoid (`utils/geoid.hpp`)
+
+`nav::Geoid` loads `data/egm96_15min.bin`, the NGA EGM96 15-minute undulation grid converted to int16
+centimetres by `tools/make_geoid.py` (2 MB; the source `WW15MGH.GRD` is public domain), and interpolates
+bilinearly. `AltitudeMeasurementProcessor` takes a geoid and converts MSL altitudes to HAE with the inertial
+position; the provider loads the file named by `MeasurementProcessorConfig::geoid_file`, else the one named by
+`PNTOS_GEOID_FILE`, else `data/egm96_15min.bin` in the working directory. Without any, MSL measurements are
+still rejected as before. `configs/pos_ins_baro.json` runs the barometer through the barometer-to-altitude
+preprocessor, the geoid and the altitude processor.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -640,7 +685,8 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 8 | `UiMediatorInterface` publishes only count/type/last TOV, throttled | UI statistics are Tier 2; the gate semantics are complete. |
 | 9 | `SolutionCache` with typed entries instead of a generic cache | Type safety; same invalidation rules. |
 | 10 | Nested config lists read back as base types | No introspection; providers re-read their own groups (as the Python providers do anyway). |
-| 11 | MSL altitude measurements are rejected until a geoid model is wired in | navtk's geoid lookup is not ported yet (§9). |
+| 11 | MSL altitude measurements need a geoid grid (`geoid_file`, `PNTOS_GEOID_FILE` or `data/egm96_15min.bin`); without one they are rejected | §7.17; navtk's lookup is replaced by the bundled EGM96 15-minute grid. |
+| 17 | Innovation gating, sensor degradation preprocessor, config files, presets: C++ additions with no Python counterpart | §7.14–7.16; all off / absent by default, so the registry layout of a Python-equivalent configuration is unchanged. |
 | 13 | Preprocessors return modified copies instead of mutating the message in place | Messages are immutable shared objects in the port. |
 | 14 | *(resolved)* The mediator now uses the orchestration-reported effective time of immediate messages (§7.13) instead of the raw timestamp | Reproduces the Python side effect of in-place preprocessing (`COBRA_ANALYSIS.md` §12 #15) without mutable messages; epoch counts and the outage_sim statistics now match Python exactly. |
 | 15 | `UiLogPlottingPlugin` writes an error summary and a per-epoch CSV instead of opening matplotlib figures | No plotting library in the port (§7.10). |

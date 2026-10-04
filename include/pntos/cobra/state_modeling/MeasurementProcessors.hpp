@@ -8,6 +8,7 @@
 
 #include <pntos/api/state_modeling.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
+#include <pntos/cobra/utils/geoid.hpp>
 
 #include <aspn23/eigen/MeasurementAltitude.hpp>
 #include <aspn23/eigen/MeasurementDirection3DToPoints.hpp>
@@ -114,8 +115,11 @@ class PinsonBodyVelocityMeasurementProcessor final : public PinsonProcessorBase 
 /// a 1-state altitude bias block. MSL altitudes need a geoid model, which is not yet ported.
 class AltitudeMeasurementProcessor final : public PinsonProcessorBase {
  public:
+  /// `geoid` converts MSL altitudes to HAE (C++ addition); without one, MSL measurements are rejected.
   AltitudeMeasurementProcessor(std::string label, std::vector<std::string> state_block_labels,
-                               api::Mediator* mediator, const api::Vector3& l_ps_p);
+                               api::Mediator* mediator, const api::Vector3& l_ps_p,
+                               std::shared_ptr<const nav::Geoid> geoid = nullptr);
+  bool has_geoid() const { return geoid_ != nullptr; }
   void receive_aux_data(const api::AuxData& aux) override;
   std::optional<api::StandardMeasurementModel> generate_model(const api::Message& message,
                                                               const api::GenXandP& gen_x_and_p) override;
@@ -126,6 +130,7 @@ class AltitudeMeasurementProcessor final : public PinsonProcessorBase {
 
  private:
   api::Vector3 l_ps_p_;
+  std::shared_ptr<const nav::Geoid> geoid_;
   std::optional<api::Timestamp> inertial_time_;
   api::Vector3 inertial_pos_ = api::Vector3::Zero();
   api::Matrix3 C_platform_to_nav_ = api::Matrix3::Identity();

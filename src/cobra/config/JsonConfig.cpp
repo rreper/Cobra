@@ -319,6 +319,9 @@ void mp_base_from(const json& jc, MeasurementProcessorConfig& c) {
   c.channel = need(jc, "channel").get<std::string>();
   c.state_block_labels = need(jc, "state_block_labels").get<std::vector<std::string>>();
   if (jc.contains("aux_channels")) c.aux_channels = opt_strings(jc, "aux_channels");
+  if (jc.contains("innovation_gate_probability") && !jc.at("innovation_gate_probability").is_null())
+    c.innovation_gate_probability = jc.at("innovation_gate_probability").get<double>();
+  if (jc.contains("geoid_file") && !jc.at("geoid_file").is_null()) c.geoid_file = jc.at("geoid_file").get<std::string>();
 }
 void mp_base_to(const MeasurementProcessorConfig& c, json& o) {
   o["group"] = c.group_;
@@ -326,6 +329,8 @@ void mp_base_to(const MeasurementProcessorConfig& c, json& o) {
   o["channel"] = c.channel;
   o["state_block_labels"] = c.state_block_labels;
   if (c.aux_channels) o["aux_channels"] = *c.aux_channels;
+  if (c.innovation_gate_probability) o["innovation_gate_probability"] = *c.innovation_gate_probability;
+  if (c.geoid_file) o["geoid_file"] = *c.geoid_file;
 }
 
 std::shared_ptr<BaseConfig> mp_from(const MpKind& k, const json& jc) {
@@ -553,6 +558,7 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     if (jc.contains("group")) c->group_ = group_of(jc);
     c->save_x_and_p_after_prop = get_or(jc, "save_x_and_p_after_prop", false);
     c->save_x_and_p_after_update = get_or(jc, "save_x_and_p_after_update", false);
+    c->innovation_gate_probability = get_or(jc, "innovation_gate_probability", 0.0);
     return c;
   }
   if (type == "ControllerConfig") {
@@ -614,6 +620,26 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->lateral_vel_sigma = need(jc, "lateral_vel_sigma").get<double>();
     c->vertical_vel_sigma = need(jc, "vertical_vel_sigma").get<double>();
     c->output_channel = need(jc, "output_channel").get<std::string>();
+    return c;
+  }
+  if (type == "SensorDegradationConfig") {
+    auto c = std::make_shared<SensorDegradationConfig>();
+    pp_base_from(jc, *c);
+    c->seed = get_or<std::int64_t>(jc, "seed", 1);
+    c->imu_expected_dt = get_or(jc, "imu_expected_dt", 0.01);
+    if (jc.contains("accel_noise_density")) c->accel_noise_density = vec3(jc, "accel_noise_density");
+    if (jc.contains("gyro_noise_density")) c->gyro_noise_density = vec3(jc, "gyro_noise_density");
+    if (jc.contains("accel_bias")) c->accel_bias = vec3(jc, "accel_bias");
+    if (jc.contains("gyro_bias")) c->gyro_bias = vec3(jc, "gyro_bias");
+    if (jc.contains("position_noise_sigma_ned")) c->position_noise_sigma_ned = vec3(jc, "position_noise_sigma_ned");
+    c->position_covariance_scale = get_or(jc, "position_covariance_scale", 1.0);
+    if (jc.contains("velocity_noise_sigma")) c->velocity_noise_sigma = vec3(jc, "velocity_noise_sigma");
+    c->velocity_covariance_scale = get_or(jc, "velocity_covariance_scale", 1.0);
+    if (jc.contains("position_jumps"))
+      for (const auto& row : jc.at("position_jumps")) {
+        if (!row.is_array() || row.size() != 4) fail("position_jumps entries must be [time_s, north, east, down]");
+        c->position_jumps.push_back({row[0].get<double>(), row[1].get<double>(), row[2].get<double>(), row[3].get<double>()});
+      }
     return c;
   }
   if (type == "ManualAlignmentConfig") return std::make_shared<ManualAlignmentConfig>(manual_from(jc));
@@ -697,7 +723,8 @@ std::string type_name(const BaseConfig& c) {
   PNTOS_TN(PinsonErrorToStandardVSBConfig) PNTOS_TN(StateExtractorConfig) PNTOS_TN(FusionEngineConfig)
   PNTOS_TN(ControllerConfig) PNTOS_TN(Stream) PNTOS_TN(StreamConfig) PNTOS_TN(InertialConfig) PNTOS_TN(FeedbackConfig)
   PNTOS_TN(DownsamplerConfig) PNTOS_TN(ImuRotatorConfig) PNTOS_TN(TimeAdjusterConfig) PNTOS_TN(BarometerToAltitudeConfig)
-  PNTOS_TN(TimeBiasConfig) PNTOS_TN(OutageConfig) PNTOS_TN(ZeroVelocity2dGeneratorConfig) PNTOS_TN(ManualAlignmentConfig)
+  PNTOS_TN(TimeBiasConfig) PNTOS_TN(OutageConfig) PNTOS_TN(ZeroVelocity2dGeneratorConfig) PNTOS_TN(SensorDegradationConfig)
+  PNTOS_TN(ManualAlignmentConfig)
   PNTOS_TN(StaticAlignmentConfig) PNTOS_TN(ManualHeadingAlignmentConfig) PNTOS_TN(PvaMessageInitializationConfig)
   PNTOS_TN(StandardOrchestrationConfig) PNTOS_TN(TutorialOrchestrationConfig) PNTOS_TN(UiLogPlottingConfig)
   PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig)
@@ -769,7 +796,7 @@ json config_to_json(const BaseConfig& c) {
   }
   if (auto* p = dynamic_cast<const FusionEngineConfig*>(&c))
     return json{{"type", type}, {"group", p->group_}, {"save_x_and_p_after_prop", p->save_x_and_p_after_prop},
-                {"save_x_and_p_after_update", p->save_x_and_p_after_update}};
+                {"save_x_and_p_after_update", p->save_x_and_p_after_update}, {"innovation_gate_probability", p->innovation_gate_probability}};
   if (auto* p = dynamic_cast<const ControllerConfig*>(&c)) {
     json o{{"type", type}, {"group", p->group_}, {"buffer_length_sec", p->buffer_length_sec}, {"auto_shutdown", p->auto_shutdown}};
     o["publish_interval"] = p->publish_interval ? json(*p->publish_interval) : json(nullptr);
@@ -823,6 +850,24 @@ json config_to_json(const BaseConfig& c) {
     o["lateral_vel_sigma"] = p->lateral_vel_sigma;
     o["vertical_vel_sigma"] = p->vertical_vel_sigma;
     o["output_channel"] = p->output_channel;
+    return o;
+  }
+  if (auto* p = dynamic_cast<const SensorDegradationConfig*>(&c)) {
+    json o{{"type", type}};
+    pp_base_to(*p, o);
+    o["seed"] = p->seed;
+    o["imu_expected_dt"] = p->imu_expected_dt;
+    o["accel_noise_density"] = j(p->accel_noise_density);
+    o["gyro_noise_density"] = j(p->gyro_noise_density);
+    o["accel_bias"] = j(p->accel_bias);
+    o["gyro_bias"] = j(p->gyro_bias);
+    o["position_noise_sigma_ned"] = j(p->position_noise_sigma_ned);
+    o["position_covariance_scale"] = p->position_covariance_scale;
+    o["velocity_noise_sigma"] = j(p->velocity_noise_sigma);
+    o["velocity_covariance_scale"] = p->velocity_covariance_scale;
+    json jumps = json::array();
+    for (const auto& r : p->position_jumps) jumps.push_back(json::array({r[0], r[1], r[2], r[3]}));
+    o["position_jumps"] = jumps;
     return o;
   }
   if (auto* p = dynamic_cast<const ManualAlignmentConfig*>(&c)) return manual_to(*p);

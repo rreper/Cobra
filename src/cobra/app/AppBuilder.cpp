@@ -41,6 +41,7 @@ RunOptions parse_run_options(int argc, char** argv, int first_positional) {
     else if (s == "--dump-config") o.dump_config = value("--dump-config");
     else if (s == "--dump-registry") o.dump_registry = value("--dump-registry");
     else if (s == "--quiet") o.progress = false;
+    else if (s == "--no-record-input") o.record_input = false;
     else if (!s.empty() && s[0] == '-') throw std::runtime_error("unknown option " + s);
     else pos.push_back(s);
   }
@@ -90,6 +91,7 @@ AppConfig apply_overrides(const AppConfig& config, const RunOptions& options) {
     if (c.value("type", "") == "LcmLogTransportConfig") {
       if (options.input_log) c["input_file"] = *options.input_log;
       if (options.output_log) c["output_file"] = *options.output_log;
+      if (options.record_input) c["record_input_channels"] = *options.record_input;
       output_log = c.value("output_file", "");
     }
   });

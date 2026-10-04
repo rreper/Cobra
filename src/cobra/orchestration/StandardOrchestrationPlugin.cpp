@@ -1,4 +1,6 @@
 #include <pntos/cobra/orchestration/StandardOrchestrationPlugin.hpp>
+
+#include <pntos/cobra/fusion/StandardFusionPlugin.hpp>
 #include <pntos/cobra/utils/arrays.hpp>
 #include <pntos/cobra/utils/effective_time.hpp>
 #include <pntos/cobra/utils/logging.hpp>
@@ -203,6 +205,9 @@ bool StandardOrchestrationPlugin::add_measurement_processor(const Providers& pro
       return false;
     }
     fusion_engine_->add_measurement_processor(std::move(proc));
+    if (cfg.innovation_gate_probability)
+      if (auto* engine = dynamic_cast<StandardFusionEngine*>(fusion_engine_.get()))
+        engine->set_innovation_gate(cfg.label, *cfg.innovation_gate_probability);
     needs_inertial_pva_[cfg.label] = false;
     needs_inertial_f_and_r_[cfg.label] = false;
     if (cfg.aux_channels) {
@@ -285,6 +290,10 @@ void StandardOrchestrationPlugin::add_preprocessor(const std::vector<std::shared
     preprocessors_.emplace_back(std::move(pp), cfg.channels);
     return;
   }
+  // Python skips silently; a config that names a preprocessor no loaded plugin provides is almost always a
+  // missing plugin in the app list (e.g. "advanced" for sensor_degradation), so say so.
+  log(LoggingLevel::WARN, "No preprocessor plugin provides \"" + cfg.identifier + "\" (config group \"" + cfg.group_ +
+                              "\"); the preprocessor is skipped.");
 }
 
 bool StandardOrchestrationPlugin::set_up_fusion_engine(const StandardOrchestrationConfig& cfg) {

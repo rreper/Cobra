@@ -3,6 +3,8 @@
 #include <pntos/cobra/state_modeling/Pinson15NedBlock.hpp>
 #include <pntos/cobra/state_modeling/SimpleStateBlocks.hpp>
 #include <pntos/cobra/state_modeling/StandardStateModelingPlugin.hpp>
+
+#include <pntos/cobra/utils/geoid.hpp>
 #include <pntos/cobra/state_modeling/VirtualStateBlocks.hpp>
 
 namespace pntos::cobra {
@@ -70,8 +72,17 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
   if (id == mp::kPinsonWithLeverArmPosition)
     return std::make_unique<PinsonPositionMeasurementProcessor>(Kind::WithLeverArm, label, state_block_labels,
                                                                 mediator_, v3(c->lever_arm));
-  if (id == mp::kPinsonAltitude)
-    return std::make_unique<AltitudeMeasurementProcessor>(label, state_block_labels, mediator_, v3(c->lever_arm));
+  if (id == mp::kPinsonAltitude) {
+    std::shared_ptr<const nav::Geoid> geoid;
+    if (c->geoid_file) {
+      std::string err;
+      if (auto g = nav::Geoid::load(*c->geoid_file, &err)) geoid = std::make_shared<const nav::Geoid>(std::move(*g));
+      else if (mediator_) mediator_->log_message(LoggingLevel::ERROR, "Unable to load geoid grid: " + err);
+    } else {
+      geoid = nav::default_geoid();
+    }
+    return std::make_unique<AltitudeMeasurementProcessor>(label, state_block_labels, mediator_, v3(c->lever_arm), geoid);
+  }
   if (id == mp::kPinsonPosVel)
     return std::make_unique<PinsonPosVelMeasurementProcessor>(label, state_block_labels, mediator_, v3(c->lever_arm));
   if (id == mp::kPosition)

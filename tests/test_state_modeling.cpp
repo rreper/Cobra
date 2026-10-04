@@ -6,6 +6,7 @@
 #include <pntos/cobra/state_modeling/StandardStateModelingPlugin.hpp>
 #include <pntos/cobra/state_modeling/VirtualStateBlocks.hpp>
 #include <pntos/cobra/utils/navutils.hpp>
+#include <pntos/cobra/utils/geoid.hpp>
 
 #include "test_support.hpp"
 
@@ -16,6 +17,7 @@
 #include <aspn23/eigen/TypeRemotePoint.hpp>
 
 #include <cmath>
+#include <cstdlib>
 #include <numbers>
 
 using namespace pntos;
@@ -588,3 +590,65 @@ TEST_F(StateModelingTest, CloneBlockAndProcessorsAreIndependent) {
 }
 
 }  // namespace
+
+// ----------------------------------------------------------------------------- geoid (C++ addition)
+
+namespace {
+std::string source_path(const char* rel) {
+  const char* src = std::getenv("PNTOS_TEST_SRCDIR");
+  return std::string(src ? src : "..") + "/" + rel;
+}
+}  // namespace
+
+TEST(Geoid, LoadsAndInterpolatesEgm96) {
+  std::string err;
+  auto g = cobra::nav::Geoid::load(source_path("data/egm96_15min.bin"), &err);
+  ASSERT_TRUE(g) << err;
+  EXPECT_EQ(g->rows(), 721);
+  EXPECT_EQ(g->cols(), 1441);
+  const double d2r = M_PI / 180.0;
+  EXPECT_NEAR(g->undulation(90 * d2r, 0), 13.606, 0.011);           // north pole, grid value
+  EXPECT_NEAR(g->undulation(-90 * d2r, 123 * d2r), -29.534, 0.011);  // south pole
+  EXPECT_NEAR(g->undulation(0, 0), 17.162, 0.011);
+  EXPECT_NEAR(g->undulation(45 * d2r, 0), 47.14, 0.011);
+  EXPECT_NEAR(g->undulation(40 * d2r, 255 * d2r), -17.207, 0.011);
+  EXPECT_NEAR(g->undulation(40 * d2r, -105 * d2r), -17.207, 0.011);  // negative longitudes wrap
+  // between grid points: between the neighbours
+  const double a = g->undulation(40 * d2r, 255 * d2r), b = g->undulation(40.25 * d2r, 255 * d2r), m = g->undulation(40.125 * d2r, 255 * d2r);
+  EXPECT_NEAR(m, 0.5 * (a + b), 1e-9);
+  EXPECT_FALSE(cobra::nav::Geoid::load("/nonexistent.bin", &err));
+  EXPECT_NE(err.find("cannot open"), std::string::npos);
+}
+
+TEST(Geoid, AltitudeProcessorConvertsMslWithGeoid) {
+  TestMediator med;
+  auto g = cobra::nav::Geoid::load(source_path("data/egm96_15min.bin"));
+  ASSERT_TRUE(g);
+  auto geoid = std::make_shared<const cobra::nav::Geoid>(std::move(*g));
+  const double lat = 40 * M_PI / 180, lon = 255 * M_PI / 180, alt_hae = 1600.0;
+  Vector q(4);
+  q << 1, 0, 0, 0;
+  const std::int64_t kT = 1'700'000'000'000'000'000;
+  auto pva = make_pva(kT, lat, lon, alt_hae, 0, 0, 0, q);
+  auto gen = [](const std::vector<std::string>&) -> std::optional<EstimateWithCovariance> {
+    return EstimateWithCovariance{EstimateWithCovarianceType::EWC_GENERIC, Vector::Zero(16), Matrix::Identity(16, 16)};
+  };
+  auto msl = [&](Aspn23MeasurementAltitudeReference ref, double alt) {
+    return Message(std::make_shared<aspn23_eigen::MeasurementAltitude>(header(ASPN_MEASUREMENT_ALTITUDE), aspn23_eigen::TypeTimestamp(kT), ref, alt, 4.0,
+                                                                       ASPN23_MEASUREMENT_ALTITUDE_ERROR_MODEL_NONE, DynVector(0),
+                                                                       std::vector<aspn23_eigen::TypeIntegrity>{}),
+                   "/alt");
+  };
+  cobra::AltitudeMeasurementProcessor with(" alt", {"pinson15", "alt_fogm"}, &med, Vector3(0, 0, 1), geoid);
+  with.receive_aux_data(api::AuxData{Message(pva, "pva")});
+  // MSL 1617.207 m at N = -17.207 m is HAE 1600 m: zero innovation
+  auto model = with.generate_model(msl(ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_MSL, alt_hae - geoid->undulation(lat, lon)), gen);
+  ASSERT_TRUE(model);
+  EXPECT_NEAR(model->z(0), 0.0, 1e-9);
+  EXPECT_TRUE(with.has_geoid());
+  cobra::AltitudeMeasurementProcessor without("alt", {"pinson15", "alt_fogm"}, &med, Vector3(0, 0, 1));
+  without.receive_aux_data(api::AuxData{Message(pva, "pva")});
+  EXPECT_FALSE(without.generate_model(msl(ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_MSL, 1617.0), gen));
+  EXPECT_TRUE(med.has_error());
+  EXPECT_TRUE(without.generate_model(msl(ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_HAE, 1600.0), gen));
+}

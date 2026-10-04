@@ -49,6 +49,7 @@ cobra_sources = files(
   'cobra/presets/Presets.cpp',
   'cobra/config/JsonConfig.cpp',
   'cobra/app/AppBuilder.cpp',
+  'cobra/utils/geoid.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

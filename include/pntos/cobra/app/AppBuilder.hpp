@@ -20,11 +20,12 @@ struct RunOptions {
   std::optional<bool> joseph_form;
   std::optional<std::string> dump_config;    ///< write the effective config here and exit
   std::optional<std::string> dump_registry;  ///< write the registry contents here after init
+  std::optional<bool> record_input;          ///< --no-record-input: output log holds only broadcast messages
   bool progress = true;                      ///< print a percentage on stderr
 };
 
 /// Parses `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q] [--dump-config f]
-/// [--dump-registry f] [--quiet]`; positional arguments after a config file (see cobra_run).
+/// [--dump-registry f] [--no-record-input] [--quiet]`; positional arguments after a config file (see cobra_run).
 RunOptions parse_run_options(int argc, char** argv, int first_positional = 1);
 
 /// The config with the overrides applied (through the JSON form, so every config class is covered).

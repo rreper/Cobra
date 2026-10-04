@@ -129,6 +129,13 @@ struct MeasurementProcessorConfig : BaseConfig {
   std::vector<std::string> state_block_labels;
   std::string channel;
   std::optional<std::vector<std::string>> aux_channels;
+  /// C++ addition (not in Cobra): chi-square innovation gate. A measurement whose normalised innovation
+  /// squared exceeds the chi-square quantile at this probability (for its number of rows) is rejected and
+  /// counted in registry group `fusion/gating`. Absent: FusionEngineConfig::innovation_gate_probability.
+  std::optional<double> innovation_gate_probability;
+  /// C++ addition: EGM96 grid for processors that accept MSL altitudes (pinson_altitude). Absent: the
+  /// PNTOS_GEOID_FILE environment variable, then data/egm96_15min.bin; without any, MSL is rejected.
+  std::optional<std::string> geoid_file;
 
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;
@@ -230,6 +237,9 @@ struct FusionEngineConfig final : BaseConfig {
   bool save_x_and_p_after_prop = false;
   /// Record state_labels/time/estimate/sigma to the `diagnostics` group after every update.
   bool save_x_and_p_after_update = false;
+  /// C++ addition: default innovation gate probability for every measurement processor (0 = no gate,
+  /// Cobra behaviour). See MeasurementProcessorConfig::innovation_gate_probability.
+  double innovation_gate_probability = 0.0;
 
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;
@@ -377,6 +387,29 @@ struct ZeroVelocity2dGeneratorConfig final : PreprocessorConfig {
   ZeroVelocity2dGeneratorConfig() { identifier = kIdentifier; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<ZeroVelocity2dGeneratorConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// C++ addition (roadmap Phase 2): degrades IMU / position / velocity messages to emulate worse sensors.
+/// IMU: white noise with the given density (per sqrt(Hz)) and a constant bias are added (scaled by the
+/// sample interval for integrated messages). Position: NED noise, a covariance scale and one-shot jumps
+/// (outliers not reflected in the covariance) at times relative to the first position message. Velocity:
+/// noise on the present axes and a covariance scale. Deterministic for a given seed.
+struct SensorDegradationConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "sensor_degradation";
+  std::int64_t seed = 1;
+  double imu_expected_dt = 0.01;              ///< s, for integrated IMU messages
+  Vec3 accel_noise_density{0, 0, 0};          ///< m/s^2/sqrt(Hz)
+  Vec3 gyro_noise_density{0, 0, 0};           ///< rad/s/sqrt(Hz)
+  Vec3 accel_bias{0, 0, 0};                   ///< m/s^2
+  Vec3 gyro_bias{0, 0, 0};                    ///< rad/s
+  Vec3 position_noise_sigma_ned{0, 0, 0};     ///< m
+  double position_covariance_scale = 1.0;
+  Vec3 velocity_noise_sigma{0, 0, 0};         ///< m/s, per message axis
+  double velocity_covariance_scale = 1.0;
+  std::vector<std::array<double, 4>> position_jumps;  ///< {time_s, north_m, east_m, down_m}
+  SensorDegradationConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<SensorDegradationConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
 struct OutageConfig final : PreprocessorConfig {

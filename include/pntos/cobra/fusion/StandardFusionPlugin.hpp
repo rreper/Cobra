@@ -17,7 +17,21 @@ namespace pntos::cobra {
 class StandardFusionEngine final : public api::StandardFusionEngine {
  public:
   StandardFusionEngine(api::Mediator* mediator, bool save_x_and_p_after_prop = false,
-                       bool save_x_and_p_after_update = false);
+                       bool save_x_and_p_after_update = false, double default_gate_probability = 0.0);
+
+  /// Chi-square innovation gate for one processor (C++ addition, see MeasurementProcessorConfig):
+  /// `probability` in (0, 1) rejects measurements whose normalised innovation squared exceeds the
+  /// chi-square quantile at that probability for the measurement's dimension; 0 removes the gate.
+  void set_innovation_gate(const std::string& processor_label, double probability);
+  struct GateStats {
+    std::size_t accepted = 0;
+    std::size_t rejected = 0;
+    double last_chi2 = 0;
+    double last_threshold = 0;
+  };
+  std::optional<GateStats> gate_stats(const std::string& processor_label) const;
+  /// Chi-square quantile by the Wilson-Hilferty approximation (within a few percent for dof >= 1).
+  static double chi2_quantile(double probability, int dof);
 
   api::Timestamp time() const override { return time_; }
   void set_time(api::Timestamp time) override { time_ = time; }
@@ -119,6 +133,9 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
   bool save_after_prop_;
   bool save_after_update_;
   std::vector<std::string> saved_state_labels_;
+  double default_gate_probability_;
+  std::map<std::string, double> gates_;      ///< processor label -> probability (absent/0 = no gate)
+  std::map<std::string, GateStats> gate_stats_;
 };
 
 class StandardFusionPlugin final : public api::FusionPlugin {

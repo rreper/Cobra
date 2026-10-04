@@ -54,6 +54,8 @@ cobra::AppConfig sample_app_config() {
   mp->channel = "/pos";
   mp->state_block_labels = {"pinson15", "pos_sensor_error"};
   mp->lever_arm = {-0.5, 0.38, -0.05};
+  mp->innovation_gate_probability = 0.999;
+  mp->geoid_file = "data/egm96_15min.bin";
   auto bv = std::make_shared<LeverArmOrientationMPConfig>(mp::PinsonBodyVelocityMPConfig());
   bv->group_ = "config/bv";
   bv->label = "bv";
@@ -111,7 +113,16 @@ cobra::AppConfig sample_app_config() {
   zv->lateral_vel_sigma = 0.5;
   zv->vertical_vel_sigma = 1.0;
   zv->output_channel = "/generated/zero/velocity2d";
-  orch->preprocessor_configs = std::vector<std::shared_ptr<const PreprocessorConfig>>{ds, out, baro, zv};
+  auto deg = std::make_shared<SensorDegradationConfig>();
+  deg->group_ = "config/degradation";
+  deg->channels = std::vector<std::string>{"/imu", "/pos"};
+  deg->seed = 7;
+  deg->accel_noise_density = {1e-3, 1e-3, 1e-3};
+  deg->gyro_bias = {1e-4, 0, 0};
+  deg->position_noise_sigma_ned = {1, 1, 2};
+  deg->position_covariance_scale = 4.0;
+  deg->position_jumps = {{100.0, 50.0, 0.0, 0.0}, {200.0, 0.0, -50.0, 0.0}};
+  orch->preprocessor_configs = std::vector<std::shared_ptr<const PreprocessorConfig>>{ds, out, baro, zv, deg};
   orch->max_prop_interval = 1.0;
   Stream st;
   st.group_ = "config/stream0";
@@ -120,6 +131,7 @@ cobra::AppConfig sample_app_config() {
   orch->stream_config.override_streams->push_back(st);
   auto fusion = std::make_shared<FusionEngineConfig>();
   fusion->save_x_and_p_after_prop = true;
+  fusion->innovation_gate_probability = 0.99;
   auto ctrl = std::make_shared<ControllerConfig>();
   ctrl->publish_interval = std::nullopt;
   auto ui = std::make_shared<UiLogPlottingConfig>();
@@ -244,8 +256,9 @@ TEST(Presets, ImuTablesAreConsistent) {
 
 TEST(AppBuilder, OptionsOverridesAndPluginSets) {
   using namespace cobra;
-  const char* argv[] = {"app", "config.json", "out.log", "in.log", "--corrected-q", "--no-joseph", "--dump-registry", "r.json", "--quiet"};
-  auto o = app::parse_run_options(9, const_cast<char**>(argv), 2);
+  const char* argv[] = {"app", "config.json", "out.log", "in.log", "--corrected-q", "--no-joseph", "--dump-registry", "r.json", "--quiet", "--no-record-input"};
+  auto o = app::parse_run_options(10, const_cast<char**>(argv), 2);
+  EXPECT_FALSE(*o.record_input);
   EXPECT_EQ(*o.output_log, "out.log");
   EXPECT_EQ(*o.input_log, "in.log");
   EXPECT_FALSE(*o.legacy_q_rotation);
@@ -263,6 +276,7 @@ TEST(AppBuilder, OptionsOverridesAndPluginSets) {
       saw_transport = true;
       EXPECT_EQ(*t->input_file, "in.log");
       EXPECT_EQ(*t->output_file, "out.log");
+      EXPECT_FALSE(t->record_input_channels);
     }
     if (auto* orch = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) {
       saw_orch = true;

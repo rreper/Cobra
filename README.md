@@ -74,6 +74,17 @@ each has a config file in `configs/` that `cobra_run` executes identically (same
 All 12 pass their acceptance limits in both Pinson-Q modes (`docs/TEST_MATRIX.md` §4): the default corrected mode
 against limits derived once from the retuned filter, the `--legacy-q` mode against the Python integration-test limits.
 
+### Robustness features (C++ additions)
+
+- Innovation gating: `"innovation_gate_probability": 0.999` on a measurement processor (or on `FusionEngineConfig`
+  for all) rejects measurements whose normalised innovation exceeds the chi-square quantile; rejections are
+  counted in registry group `fusion/gating` and logged.
+- Sensor degradation: a `SensorDegradationConfig` preprocessor (IMU noise / bias, GNSS noise, covariance scaling,
+  outlier jumps) emulates worse sensors from the recorded ones; `tools/run_degraded_matrix.py` runs the
+  degraded-sensor acceptance matrix (`docs/DEGRADED_MATRIX.md`).
+- Geoid: MSL altitudes (barometer) are converted with the bundled EGM96 grid (`data/egm96_15min.bin`), see
+  `configs/pos_ins_baro.json`.
+
 ### Config files
 
 A config file is `{"app": {...}, "configs": [...]}`. `app` names the plugins (transport, initialization,

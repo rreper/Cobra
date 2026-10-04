@@ -58,11 +58,56 @@ std::string secs(Timestamp t) {
 }  // namespace
 
 StandardFusionEngine::StandardFusionEngine(api::Mediator* mediator, bool save_x_and_p_after_prop,
-                                           bool save_x_and_p_after_update)
+                                           bool save_x_and_p_after_update, double default_gate_probability)
     : mediator_(mediator),
       vsb_manager_(mediator),
       save_after_prop_(save_x_and_p_after_prop),
-      save_after_update_(save_x_and_p_after_update) {}
+      save_after_update_(save_x_and_p_after_update),
+      default_gate_probability_(default_gate_probability) {}
+
+void StandardFusionEngine::set_innovation_gate(const std::string& processor_label, double probability) {
+  if (probability <= 0 || probability >= 1) {
+    gates_.erase(processor_label);
+    if (probability >= 1) log(LoggingLevel::WARN, "Innovation gate probability must be in (0, 1); gate for \"" + processor_label + "\" removed.");
+    return;
+  }
+  gates_[processor_label] = probability;
+}
+
+std::optional<StandardFusionEngine::GateStats> StandardFusionEngine::gate_stats(const std::string& processor_label) const {
+  auto it = gate_stats_.find(processor_label);
+  if (it == gate_stats_.end()) return std::nullopt;
+  return it->second;
+}
+
+double StandardFusionEngine::chi2_quantile(double probability, int dof) {
+  // Acklam's rational approximation of the standard normal quantile (relative error < 1.2e-9).
+  auto norm_quantile = [](double p) {
+    static const double a[] = {-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+                               1.383577518672690e+02,  -3.066479806614716e+01, 2.506628277459239e+00};
+    static const double b[] = {-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+                               6.680131188771972e+01,  -1.328068155288572e+01};
+    static const double c[] = {-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+                               -2.549732539343734e+00, 4.374664141464968e+00,  2.938163982698783e+00};
+    static const double d[] = {7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00};
+    const double plow = 0.02425, phigh = 1 - plow;
+    if (p < plow) {
+      const double q = std::sqrt(-2 * std::log(p));
+      return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+    if (p > phigh) {
+      const double q = std::sqrt(-2 * std::log(1 - p));
+      return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+    const double q = p - 0.5, r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+           (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+  };
+  const double k = static_cast<double>(std::max(dof, 1));
+  const double z = norm_quantile(std::clamp(probability, 1e-9, 1 - 1e-9));
+  const double t = 1.0 - 2.0 / (9.0 * k) + z * std::sqrt(2.0 / (9.0 * k));
+  return k * t * t * t;
+}
 
 void StandardFusionEngine::log(LoggingLevel level, const std::string& msg) const {
   if (mediator_) mediator_->log_message(level, msg);
@@ -331,6 +376,8 @@ std::optional<std::vector<std::string>> StandardFusionEngine::measurement_proces
 }
 
 void StandardFusionEngine::add_measurement_processor(std::unique_ptr<api::StandardMeasurementProcessor> processor) {
+  if (processor && default_gate_probability_ > 0 && !gates_.count(processor->label()))
+    gates_[processor->label()] = default_gate_probability_;
   if (!processor) return;
   if (find_processor(processor->label())) {
     log(LoggingLevel::WARN,
@@ -491,6 +538,35 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
   };
 
   api::StandardMeasurementModel big{mm->z, full_h, full_H, mm->R};
+  if (auto g = gates_.find(processor_label); g != gates_.end()) {
+    auto x = strategy_->estimate();
+    auto P = strategy_->covariance();
+    if (x && P) {
+      const Vector nu = mm->z - full_h(*x);
+      const Matrix S = (full_H * *P * full_H.transpose() + mm->R).eval();
+      const double chi2 = nu.dot(S.ldlt().solve(nu));
+      const double threshold = chi2_quantile(g->second, static_cast<int>(nu.size()));
+      GateStats& st = gate_stats_[processor_label];
+      st.last_chi2 = chi2;
+      st.last_threshold = threshold;
+      const bool reject = !(chi2 <= threshold);  // NaN rejects too
+      reject ? ++st.rejected : ++st.accepted;
+      if (mediator_ && g_in_peek == 0) {
+        auto kv = mediator_->registry().batch("fusion/gating");
+        kv->set(processor_label + "_accepted", static_cast<std::int64_t>(st.accepted));
+        kv->set(processor_label + "_rejected", static_cast<std::int64_t>(st.rejected));
+        kv->set(processor_label + "_last_chi2", chi2);
+      }
+      if (reject) {
+        std::ostringstream os;
+        os << "Innovation gate rejected a measurement from processor \"" << processor_label << "\" at time " << std::fixed
+           << std::setprecision(3) << tov->seconds() << "s: chi2 " << chi2 << " > " << threshold << " (dof " << nu.size() << ")";
+        log(LoggingLevel::WARN, os.str());
+        trace_state("R", processor_label, *tov, time_, strategy_.get());
+        return;
+      }
+    }
+  }
   strategy_->update(big);
   trace_state("U", processor_label, *tov, time_, strategy_.get());
   if (save_after_update_) save_x_and_p_to_registry();
@@ -632,7 +708,8 @@ std::unique_ptr<api::StandardFusionEngine> StandardFusionPlugin::new_fusion_engi
   if (mediator_ && mediator_->registry().has_group(FusionEngineConfig::kGroup)) {
     if (auto c = FusionEngineConfig::from_registry(*mediator_)) cfg = *c;
   }
-  return std::make_unique<StandardFusionEngine>(mediator_, cfg.save_x_and_p_after_prop, cfg.save_x_and_p_after_update);
+  return std::make_unique<StandardFusionEngine>(mediator_, cfg.save_x_and_p_after_prop, cfg.save_x_and_p_after_update,
+                                                cfg.innovation_gate_probability);
 }
 
 }  // namespace pntos::cobra

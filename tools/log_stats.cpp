@@ -1,6 +1,6 @@
 // Prints, as JSON, the error statistics of a solution channel in an LCM log against a truth PVA
 // channel, with no Python dependency (used by tools/ci_acceptance.py on the 60 s test log).
-//   log_stats out.log [--solution /solution/pntos/pva] [--truth /sensor/ins-d/pva]
+//   log_stats out.log [--solution /solution/pntos/pva] [--truth /sensor/ins-d/pva] [--truth-log in.log]
 #include <pntos/cobra/transport/LcmConversions.hpp>
 #include <pntos/cobra/transport/LcmLog.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
@@ -26,28 +26,33 @@ int main(int argc, char** argv) {
     std::cerr << "usage: log_stats out.log [--solution ch] [--truth ch]\n";
     return 2;
   }
-  std::string solution = "/solution/pntos/pva", truth_ch = "/sensor/ins-d/pva";
+  std::string solution = "/solution/pntos/pva", truth_ch = "/sensor/ins-d/pva", truth_log = argv[1];
   for (int i = 2; i + 1 < argc; i += 2) {
     const std::string s = argv[i];
     if (s == "--solution") solution = argv[i + 1];
     else if (s == "--truth") truth_ch = argv[i + 1];
+    else if (s == "--truth-log") truth_log = argv[i + 1];
   }
   std::vector<Sample> sol, truth;
   std::size_t nan_count = 0;
   try {
-    cobra::lcm::LcmLogReader reader(argv[1]);
-    while (auto ev = reader.next()) {
-      const bool is_sol = ev->channel == solution, is_truth = ev->channel == truth_ch;
-      if (!is_sol && !is_truth) continue;
-      auto pva = std::dynamic_pointer_cast<const cobra::utils::PVA>(cobra::lcm::decode(ev->data));
-      if (!pva) continue;
-      auto q = cobra::utils::quaternion(*pva);
-      if (!q) continue;
-      Sample s{pva->get_time_of_validity().get_elapsed_nsec() * 1e-9, cobra::utils::position(*pva), cobra::utils::velocity(*pva),
-               cobra::nav::quat_to_dcm(*q)};
-      if (is_sol && (!s.llh.allFinite() || !s.vel.allFinite() || !s.C.allFinite())) ++nan_count;
-      (is_sol ? sol : truth).push_back(s);
-    }
+    auto scan = [&](const std::string& path, bool want_sol, bool want_truth) {
+      cobra::lcm::LcmLogReader reader(path);
+      while (auto ev = reader.next()) {
+        const bool is_sol = want_sol && ev->channel == solution, is_truth = want_truth && ev->channel == truth_ch;
+        if (!is_sol && !is_truth) continue;
+        auto pva = std::dynamic_pointer_cast<const cobra::utils::PVA>(cobra::lcm::decode(ev->data));
+        if (!pva) continue;
+        auto q = cobra::utils::quaternion(*pva);
+        if (!q) continue;
+        Sample s{pva->get_time_of_validity().get_elapsed_nsec() * 1e-9, cobra::utils::position(*pva), cobra::utils::velocity(*pva),
+                 cobra::nav::quat_to_dcm(*q)};
+        if (is_sol && (!s.llh.allFinite() || !s.vel.allFinite() || !s.C.allFinite())) ++nan_count;
+        (is_sol ? sol : truth).push_back(s);
+      }
+    };
+    scan(argv[1], true, truth_log == argv[1]);
+    if (truth_log != argv[1]) scan(truth_log, false, true);
   } catch (const std::exception& e) {
     std::cerr << "log_stats: " << e.what() << "\n";
     return 1;
