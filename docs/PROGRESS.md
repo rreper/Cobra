@@ -58,7 +58,7 @@ Newest first. Each entry: what changed, what was verified, what is next.
   rotation (68.2 % of yaw errors inside 1σ, yaw std 0.831° vs 0.845° untuned and 0.805° legacy); the mode flag swaps
   rotation and tuning together, so `--legacy-q` still reproduces Python exactly. Corrected-mode limits derived once
   into `docs/limits_corrected.json`. **Acceptance: corrected 12/12, legacy 12/12, through config files 12/12 + 12/12.**
-- **CI.** `ci/github-ci.yml` (to be moved to `.github/workflows/` once the push token has the `workflow` scope, see `ci/README.md`), `tools/ci_acceptance.py`, `tools/log_stats` (C++), `testdata/example_60s.log`.
+- **CI.** `.github/workflows/ci.yml`, `tools/ci_acceptance.py`, `tools/log_stats` (C++), `testdata/example_60s.log`.
 - 20 suites, 191 tests green (new `json_config`). JSON for Modern C++ v3.11.3 vendored (MIT).
 
 ## 2026-10-03 — All 12 log-replay apps ported and passing; legacy Pinson-Q is the app default

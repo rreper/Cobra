@@ -228,7 +228,7 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 4. **Not replayable here**: `pos_ins_network` (network LCM transport), `pos_ins_ros`, `pos_ins_ui` — see
    DESIGN.md §9.6.
 5. **Performance** — DONE: 1.4–5.5 s wall per app against 22–40 s for Python (same machine, same log).
-6. **CI** — `ci/github-ci.yml` (to be moved to `.github/workflows/` once the push token has the `workflow` scope, see `ci/README.md`) builds with meson on Ubuntu, runs the unit suites and
+6. **CI** — `.github/workflows/ci.yml` builds with meson on Ubuntu, runs the unit suites and
    `python3 tools/ci_acceptance.py` (and `--runner`) on `testdata/example_60s.log`: exit code 0, no `[ERROR]`,
    at least 40 epochs (50 for the tutorial apps), position RMS under 5 m (30 m for direction_to_points, 10 m for
    leverarm) and yaw RMS under 3°. The cut is too short for the Python limits; the full run stays local.

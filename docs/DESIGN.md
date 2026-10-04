@@ -833,7 +833,7 @@ checks (per-axis std and max limits, 1/2/3σ coverage, epoch count ±5, NaNs, st
 | either, through `cobra_run configs/*.json` | same | 12 / 12 | same | every number identical to the compiled app |
 
 Timing: 1.4–5.5 s wall per app on the 43-minute log against 22–40 s for Python; `pos_ins` peak RSS 8 MB vs
-196 MB. CI (`ci/github-ci.yml` (to be moved to `.github/workflows/` once the push token has the `workflow` scope, see `ci/README.md`)) builds, runs the unit suites and `tools/ci_acceptance.py`, which replays
+196 MB. CI (`.github/workflows/ci.yml`) builds, runs the unit suites and `tools/ci_acceptance.py`, which replays
 every app on `testdata/example_60s.log` through the compiled apps and through `cobra_run` and checks exit codes,
 error logs, epoch counts and loose RMS bounds with `build/tools/log_stats` (no Python packages needed).
 
