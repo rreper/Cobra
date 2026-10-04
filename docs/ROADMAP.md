@@ -90,3 +90,11 @@ are attached: each phase ends when its gate holds.
 - The UI server plugin and registry views.
 - Buscat controller and other multi-process concurrency models.
 - Per-vehicle tuning beyond presets.
+
+## After the three phases (4 October 2026)
+
+Cobra v0.2.1–v0.2.3 added what a plugin built outside this repository needs and nothing application-specific:
+virtual per-step methods on the standard orchestration, `app::register_orchestration` with a generic
+`RegistryConfig` entry and `app::cobra_run_main`, a side-effect-free innovation probe on the fusion engine, and
+degradation ramps plus a synthesised second position source. Next in Cobra: keep those hooks stable across tags
+(consumers pin tags), a second recorded dataset, and the ROS 2 / UI items when an environment exists.

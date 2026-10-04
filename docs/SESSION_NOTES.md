@@ -237,3 +237,21 @@ interface, a browser maintenance UI with authentication on a second interface, b
 - UI log plugin writes a summary and CSV rather than figures.
 - Registry permanency does not persist Message values.
 - One dataset only; the Phase 2 degraded-sensor matrix is synthetic until more logs exist.
+
+## Hooks for out-of-tree plugins (v0.2.1–v0.2.3, 4 October 2026)
+
+The degraded matrix showed the limit of gating alone: a 0.5 m/s GNSS pull passes the chi-square gate and drags
+pos_ins 231 m (`docs/DEGRADED_MATRIX.md`, row `ramp05_gnss`), while a 2 m/s pull and a 30 m step are caught.
+Countering a slow pull needs a second source and a consistency monitor; that monitor is developed outside this
+repository. Cobra gained only generic hooks:
+
+| Addition | Tag | Where |
+| --- | --- | --- |
+| `StandardOrchestrationPlugin` no longer final; per-step methods protected virtual | v0.2.1 | DESIGN §7.9 |
+| Degradation position ramps and a derived position source; `configs/pos_ins_two_sources.json`; five two-source matrix rows | v0.2.1 | DESIGN §7.16 |
+| `app::register_orchestration` / `register_extra_plugin`, `AppSpec.extra_plugins`, `RegistryConfig`, `app::cobra_run_main` | v0.2.2 | DESIGN §7.14 |
+| `StandardFusionEngine::innovation_statistic` (with innovation and S), `set_registry_reporting`; `clone()` carries gates | v0.2.2–v0.2.3 | DESIGN §7.15 |
+
+State after v0.2.3: 22 suites / 207 tests, acceptance 24/24 both modes, degraded matrix 16/16, CI and release
+workflows green for every tag. An external plugin registers under a name, and a config file selects it with
+`"orchestration": "<name>"` plus one `RegistryConfig` entry for its own settings.
