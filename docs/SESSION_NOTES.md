@@ -217,8 +217,10 @@ the full unit suite and the acceptance run before its push (details in PROGRESS.
 | 2 Robustness | chi-square innovation gating with registry counters, sensor-degradation preprocessor, 11-row degraded matrix with recorded limits, EGM96 geoid for MSL altitudes, small acceptance logs | 50 m outlier rejected with the solution unchanged; consumer-grade IMU emulation raises yaw std 0.83° → 4.1°; barometer altitudes accepted; 195 tests |
 | 3 Integration | `cobra::Filter` push API on a start/stop controller, log runner rebuilt on it, C ABI + C example, LCM over UDP multicast (no liblcm) + log player, CSV transport + exporter, `meson install` + pkg-config, GETTING_STARTED.md | push replay identical to the log transport in both modes; network replay of the full log reproduces pos_ins exactly (2570 epochs); CSV run equals the LCM run; 22 suites, 202 tests |
 
-CI: the GitHub token was given the `workflow` scope on 4 Oct and `.github/workflows/ci.yml` is live (first run:
-see §11). Still deferred: the ROS 2 adapter (no ROS environment here) and the UI server plugin.
+CI: the GitHub token was given the `workflow` scope on 4 Oct and `.github/workflows/ci.yml` is live. The first
+run failed only because `*.log` in `.gitignore` had kept `testdata/example_60s.log` out of the repository; with
+the file tracked, run 2 passed every step (build, 22 suites, short acceptance through the compiled apps, the
+config files and the push API, and the C example). Still deferred: the ROS 2 adapter (no ROS environment here) and the UI server plugin.
 
 ## 11. Open items and limitations
 

@@ -1,5 +1,7 @@
 # pntos-cpp — C++ rewrite of the pntOS "Cobra" reference implementation
 
+[![ci](https://github.com/rreper/Cobra/actions/workflows/ci.yml/badge.svg)](https://github.com/rreper/Cobra/actions/workflows/ci.yml)
+
 Repository: https://github.com/rreper/Cobra (C++ rewrite; the Python original is the `Cobra/` submodule).
 
 A C++20 implementation of the [pntOS](https://github.com/Open-PNT/pntOS-C) plugin architecture for

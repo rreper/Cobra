@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — CI live on GitHub Actions
+
+- Token given the `workflow` scope; `ci/github-ci.yml` moved to `.github/workflows/ci.yml`. First run failed
+  because `*.log` in `.gitignore` had excluded `testdata/example_60s.log`; now tracked explicitly. Second run
+  green: build, 22 suites, short acceptance (compiled apps, config files via `cobra_run`, push API) and the C
+  example. Session notes (repo and shared page) updated with the roadmap execution summary.
+
 ## 2026-10-04 — Roadmap Phase 3: push API, C ABI, network LCM, CSV, packaging
 
 - **Push API** (`app/Filter.hpp`, DESIGN.md §7.18): `StandardControllerPlugin::start()/stop()` split out of
