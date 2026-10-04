@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
   gen->output_channel = zerovel_channel;
   b.orch->preprocessor_configs =
       std::vector<std::shared_ptr<const PreprocessorConfig>>{b.imu_rotator, b.time_adjuster, b.time_bias, gen};
-  return run_standard_app("pos_ins_zerovel2d", args, b.all(),
-                          {std::make_shared<AdvancedPreprocessorPlugin>("Cobra Extras Preprocessor Plugin")});
+  AppSpec spec = app::standard_app_spec("pos_ins_zerovel2d");
+  spec.preprocessors = {"standard", "advanced"};
+  return run_standard_app("pos_ins_zerovel2d", args, b.all(), spec);
 }

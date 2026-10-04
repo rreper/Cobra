@@ -431,9 +431,10 @@ Full app matrix: see §14 (13/13 pass).
    rotation reproduced, yaw error std 0.805° and 68.1 % of yaw errors inside 1σ (= Python); with a fresh copy
    per call, yaw std 0.845° and 64.9 % inside 1σ, position/velocity within 1 %. The Python integration-test
    tilt limits (std < 0.81°) were therefore tuned on the buggy behaviour and the corrected filter fails them by
-   4 %. The port exposes both: `PinsonStateBlockConfig::legacy_q_rotation` (struct default false = corrected;
-   **the apps default to true** for parity with Python, `--corrected-q` switches). Same code in
-   `TutorialPinson15NedBlock` (C++: `Pinson15NedBlock` with `tutorial_model`, same flag).
+   4 %. The port exposes both: `PinsonStateBlockConfig::legacy_q_rotation` (default false = corrected, with the yaw
+   gyro random walk retuned to 6e-4 rad/√s, preset `vn100_corrected`; `--legacy-q` restores the Python rotation and
+   tuning and reproduces the Python results exactly). Same code in `TutorialPinson15NedBlock` (C++:
+   `Pinson15NedBlock` with `tutorial_model`, same flag).
 2. `EkfFusionStrategy.update` uses `(I−KH)P` and explicit `inv()`; port should use Joseph form or at least a
    Cholesky solve, and keep the symmetrization. Unit tests compare against the simple form, so golden tests must
    allow for that or be regenerated.

@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
   feedback.group_ = "config/inertial_feedback";
   feedback.pos_error_threshold = 100.0;
   b.orch->feedback_config = feedback;
-  const std::string hdf5 = hdf5_path_for(args.output_log);
-  return run_standard_app("pos_ins_record_states", args, b.all(),
-                          {std::make_shared<DiagnosticLogPlugin>("Cobra HDF5 Diagnostic Log Plugin", hdf5)});
+  AppSpec spec = app::standard_app_spec("pos_ins_record_states");
+  spec.diagnostic_log = true;  // file: <output log>.hdf5
+  return run_standard_app("pos_ins_record_states", args, b.all(), spec);
 }

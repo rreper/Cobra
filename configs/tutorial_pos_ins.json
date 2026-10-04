@@ -1,0 +1,238 @@
+{
+  "app": {
+    "diagnostic_log": false,
+    "diagnostic_log_file": "",
+    "initialization": "manual",
+    "joseph_form": true,
+    "legacy_q_rotation": false,
+    "logging_level": "INFO",
+    "name": "tutorial_pos_ins",
+    "orchestration": "tutorial_pos",
+    "preprocessors": [
+      "standard"
+    ],
+    "state_modeling": "tutorial",
+    "transport": "lcm_log",
+    "ui_log_plotting": true
+  },
+  "configs": [
+    {
+      "group": "config/lcm_log_transport",
+      "input_file": "cobra_gps_ins_example_data.log",
+      "output_file": "pntos_output.log",
+      "record_input_channels": true,
+      "type": "LcmLogTransportConfig"
+    },
+    {
+      "auto_shutdown": true,
+      "buffer_length_sec": 2.0,
+      "group": "config/controller",
+      "publish_interval": 1.0,
+      "type": "ControllerConfig"
+    },
+    {
+      "group": "config/fusion_engine",
+      "save_x_and_p_after_prop": false,
+      "save_x_and_p_after_update": false,
+      "type": "FusionEngineConfig"
+    },
+    {
+      "accel_bias_initial_sigma": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "group": "config/inertial_state",
+      "gyro_bias_initial_sigma": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "preset": "vn100_corrected",
+      "type": "ImuConfig"
+    },
+    {
+      "group": "config/default/alignment",
+      "initial_accel_bias": [
+        -0.0023383,
+        0.00085563,
+        -0.05412892
+      ],
+      "initial_accel_bias_var": [
+        0.0052,
+        0.0052,
+        0.0052
+      ],
+      "initial_accel_scale_factor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_accel_scale_factor_var": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_gyro_bias": [
+        -0.00160958,
+        -0.00204483,
+        -0.00267885
+      ],
+      "initial_gyro_bias_var": [
+        9e-06,
+        9e-06,
+        9e-06
+      ],
+      "initial_gyro_scale_factor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_gyro_scale_factor_var": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_pos": [
+        0.6938996038254822,
+        -1.4679920679462133,
+        225.493
+      ],
+      "initial_pos_var": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "initial_rpy": [
+        -0.014713125594312194,
+        -0.040718531449027706,
+        0.06895795874629593
+      ],
+      "initial_tilt_var": [
+        0.0005,
+        0.0005,
+        0.0005
+      ],
+      "initial_time": 1747680879.5397997,
+      "initial_vel": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_vel_var": [
+        0.001,
+        0.001,
+        0.001
+      ],
+      "type": "ManualAlignmentConfig"
+    },
+    {
+      "group": "config/gp3d_state_modeling",
+      "lever_arm": [
+        -0.5,
+        0.38,
+        -0.05
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "MountingConfig"
+    },
+    {
+      "C_imu_to_platform": [
+        [
+          0.99802515,
+          0.01772605,
+          0.06026269
+        ],
+        [
+          -0.01742059,
+          0.99983262,
+          -0.00559042
+        ],
+        [
+          -0.0603517,
+          0.00452957,
+          0.9981669
+        ]
+      ],
+      "channels": [
+        "/sensor/vn-100/imu"
+      ],
+      "expected_dt": 0.01,
+      "group": "config/inertial",
+      "inertial_buffer_length": 10.0,
+      "type": "InertialConfig"
+    },
+    {
+      "group": "config/pos_sensor_error",
+      "sigma": [
+        1.5,
+        1.5,
+        2.0
+      ],
+      "tau": [
+        300.0,
+        300.0,
+        200.0
+      ],
+      "type": "FogmConfig"
+    },
+    {
+      "group": "config/orchestration",
+      "position_channel": "/sensor/ublox-ZED-F9T/position",
+      "type": "TutorialOrchestrationConfig",
+      "velocity_channel": "unused"
+    },
+    {
+      "channels": [
+        "/sensor/vn-100/imu"
+      ],
+      "expected_dt_nsec": 10000000,
+      "group": "config/time_adjuster",
+      "type": "TimeAdjusterConfig"
+    },
+    {
+      "group": "config/ui_logfile_plotting",
+      "logfile": "pntos_output.log",
+      "solution_channel": "/solution/pntos/pva",
+      "truth_channel": "/sensor/ins-d/pva",
+      "type": "UiLogPlottingConfig"
+    },
+    {
+      "C_imu_to_platform": [
+        [
+          0.99802515,
+          0.01772605,
+          0.06026269
+        ],
+        [
+          -0.01742059,
+          0.99983262,
+          -0.00559042
+        ],
+        [
+          -0.0603517,
+          0.00452957,
+          0.9981669
+        ]
+      ],
+      "channels": [
+        "/sensor/vn-100/imu"
+      ],
+      "group": "config/imu_rotator",
+      "type": "ImuRotatorConfig"
+    },
+    {
+      "channels": [
+        "/sensor/ublox-ZED-F9T/position"
+      ],
+      "group": "config/time_bias",
+      "time_bias": 150000000,
+      "type": "TimeBiasConfig"
+    }
+  ]
+}

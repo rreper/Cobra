@@ -32,6 +32,7 @@ SUITES = {
     'tutorial': ('test_orchestration.py (tutorial cases) + new', 'tutorial state model / orchestration / UI summary plugin'),
     'extras': ('— (Python covers it via the zerovel2d app)', 'ZeroVelocity2dGenerator + AdvancedPreprocessorPlugin'),
     'diagnostics': ('test_diagnostic_log_plugin.py, test_hdf5utils.py (write half)', 'DiagnosticLogPlugin + dependency-free HDF5 writer; files verified with h5py by run_acceptance'),
+    'json_config': ('— (new: config files, presets, app builder)', 'JSON round trip preserves the registry; presets; command-line overrides; plugin sets'),
 }
 
 # Python test file -> (C++ suite or None, coverage note)
@@ -175,7 +176,7 @@ def main():
     for v in acc.values():
         if 'python_test' in v:
             by_test.setdefault(v['python_test'], {})[v.get('mode', 'corrected')] = v
-    L[-2] = '| Python integration test | C++ legacy Q (app default, Python-compatible) | C++ corrected Q (`--corrected-q`) | Notes |'
+    L[-2] = '| Python integration test | C++ corrected Q (app default, retuned VN-100) | C++ legacy Q (`--legacy-q`, Python-compatible) | Notes |'
     L[-1] = '|---|---|---|---|'
     def cell(r):
         if r is None: return '—'
@@ -192,15 +193,20 @@ def main():
             if r.get('hdf5'):
                 h = r['hdf5']
                 note += f"; HDF5 {'ok' if h.get('ok') else 'BAD'} ({h.get('records', '?')} records x {h.get('states', '?')} states, read back with h5py)"
-            L.append(f'| {name} | {cell(modes.get("legacy"))} | {cell(modes.get("corrected"))} | {note} |')
+            c = modes.get('corrected')
+            if c and c.get('limits_source', '').startswith('derived'): note += '; corrected limits derived'
+            L.append(f'| {name} | {cell(modes.get("corrected"))} | {cell(modes.get("legacy"))} | {note} |')
         else:
             L.append(f'| {name} | {status} | {status} | {note} |')
     L.append('')
-    L.append('Values are per-axis error standard deviations (N/E/D or roll/pitch/yaw) checked against the Python '
-             "integration-test limits together with max-error and sigma-coverage checks. 'Legacy Q' (the app default) reproduces the Python "
-             'process-noise rotation bug (`PinsonStateBlockConfig::legacy_q_rotation`, app flag `--legacy-q`) and is the '
-             "apples-to-apples comparison; the limits were tuned on that behaviour. 'Corrected Q' (`--corrected-q`) applies the "
-             'configured sigmas as written and fails most of the tilt limits, which were set with the inflated yaw noise.\n')
+    L.append('Values are per-axis error standard deviations (N/E/D or roll/pitch/yaw) checked together with max-error and '
+             "sigma-coverage limits. 'Legacy Q' (`--legacy-q`) reproduces the Python process-noise rotation bug "
+             '(`PinsonStateBlockConfig::legacy_q_rotation`) with the original VN-100 tuning and is checked against the Python '
+             "integration-test limits: the apples-to-apples comparison with Python. 'Corrected Q' (the app default) applies the "
+             'configured sigmas as written with the yaw gyro random walk retuned (preset `vn100_corrected`) and is checked against '
+             '`docs/limits_corrected.json`, derived once from a corrected run (std: max(Python, 1.05 x measured); max: max(Python, '
+             '1.10 x measured); coverage: min(Python, measured - 2)). Both modes run through the compiled apps and, identically, '
+             'through `cobra_run configs/<app>.json`.\n')
     if acc:
         L.append(f'App results from `{a.acceptance}` (generated {json.load(open(a.acceptance))["generated"]}; '
                  'regenerate with `Cobra/.venv/bin/python tools/run_acceptance.py`). Limits are the Python integration test limits; '

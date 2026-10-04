@@ -103,8 +103,13 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   diagnostics/                DiagnosticLogPlugin (records the `diagnostics` registry group to HDF5)
   extras/                     AdvancedPreprocessorPlugin (ZeroVelocity2dGenerator)
   dummy/                      the dummy plugins
+  presets/                    IMU error-model and GNSS receiver presets by name
+  app/                        AppBuilder: plugin set from an AppSpec, command-line overrides, run
   utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins, hdf5 (writer), effective_time
+  config/JsonConfig.hpp       JSON config files (Python class and field names), AppSpec, registry dump
 src/                          mirrors include/ one-to-one
+configs/                      one JSON file per app, written by the apps' --dump-config
+testdata/                     example_60s.log, the first 60 s of the example log, for CI
 tests/                        test_<suite>.cpp + test_support.hpp
 apps/                         dummy/minimal, standard/* (9 apps), tutorial/* (2), extras/pos_ins_zerovel2d
 third_party/                  vendored header-only code (lcm_coretypes.h, lcm-gen ASPN classes), see NOTICE.md
@@ -563,13 +568,69 @@ mediator uses it in place of the raw time for that message. This is what makes t
 the outage_sim statistics identical to Python; without it the solution grid drifted by up to 0.4 s over the
 run (former deviation 14).
 
+### 7.14 Config files, presets and the app builder (`config/JsonConfig.hpp`, `presets/`, `app/`)
+
+The Python apps are Python files that build a config list and a plugin list. The port keeps the compiled form
+(`apps/standard/*.cpp`) and adds a data form: a JSON file with an `app` section (the plugin list as names) and a
+`configs` list (the config objects with the Python dataclass names as `"type"` and the Python field names).
+`jsoncfg::config_from_json` / `config_to_json` cover every config class; nested configs with an implied type
+(`imu_model`, `fogm_model`, `inertial_config`, `feedback_config`, `stream_config`, `pinson_sb_config`) may omit
+`"type"`. Matrices are nested arrays, vectors flat arrays, an `EstimateWithCovariance` is
+`{"type": "EWC_GENERIC", "estimate": [...], "covariance": [[...]] | "covariance_diag": [...]}`, stream message
+types are names (`MEASUREMENT_IMU`). Comments (`//`) are allowed in the files.
+
+`AppSpec` names the plugins: `transport` (lcm_log), `initialization` (manual_heading_align | static_align | manual |
+pva_message), `state_modeling` (standard | tutorial), `orchestration` (standard | tutorial_pos | tutorial_pos_vel),
+`preprocessors` (standard, advanced), `diagnostic_log`, `ui_log_plotting`, `logging_level`, `joseph_form`,
+`legacy_q_rotation`. `app::build_plugins` instantiates them and `app::run_app` runs the controller; the compiled apps
+and `cobra_run config.json` share this path, and `--dump-config` writes the compiled app's effective config, which is
+how `configs/*.json` were produced. `--dump-registry` writes every group/key/value of the registry; the files are
+byte-identical between a compiled app and its config file in both Pinson-Q modes (checked for all 12 apps), and
+`tools/run_acceptance.py --runner build/apps/cobra_run` reproduces every acceptance number to all printed digits.
+
+Command-line overrides (`app::apply_overrides`) are applied on the JSON form: output and input log, `--legacy-q` /
+`--corrected-q`, `--no-joseph`. The Pinson-Q flag also swaps the IMU model between the two Cobra-tuned VN-100 presets
+(below), so `--legacy-q` reproduces the Python run exactly and the default uses the retuned model.
+
+`presets::imu_presets()` holds named `ImuConfig`s: `vn100` (the Python apps' values; pairs with the legacy rotation),
+`vn100_corrected` (same with the yaw gyro random walk raised from 6.7e-5 to 6.0e-4 rad/√s; pairs with the corrected
+rotation), and datasheet-derived starting points converted by `imu_from_datasheet` (`stim300`, `adis16488`, `hg1700`,
+`hg4930`, `consumer_mems`, `vn100_datasheet`). The conversion is 1 °/√h = 2.909e-4 rad/√s, 1 °/h = 4.848e-6 rad/s,
+1 mg = 9.807e-3 m/s², velocity random walk in m/s/√h divided by 60; the initial bias sigma is the turn-on
+repeatability or three times the in-run stability, whichever is larger. The datasheet presets are untuned: Cobra's
+own VN-100 numbers differ from the VN-100 datasheet by orders of magnitude in places (empirical tuning for a vehicle
+with vibration), so treat the datasheet presets as the Phase 2 starting point, not as validated models. `config_to_json`
+writes an `ImuConfig` whose six model fields equal a preset as `{"preset": ...}`. `gnss_presets()` records what each
+receiver family emits (position / velocity / PVA streams) and its latency; the orchestration still needs the processor
+configs spelled out.
+
+**Retune of the corrected mode (2026-10-04).** With the corrected rotation and the original tuning, 64.7 % of pos_ins
+yaw errors fall inside one sigma (yaw std 0.845°). Sweeping the yaw gyro random walk on the example log
+(`cobra_run configs/pos_ins.json … --corrected-q` with a patched config):
+
+| yaw gyro RW [rad/√s] | yaw std [°] | yaw inside 1σ / 2σ / 3σ [%] |
+|---|---|---|
+| 6.7e-5 (original) | 0.845 | 64.7 / 97.2 / 99.3 |
+| 3.0e-4 | 0.841 | 65.3 / 97.2 / 99.3 |
+| 5.0e-4 | 0.835 | 67.1 / 97.3 / 99.7 |
+| **6.0e-4 (chosen)** | **0.831** | **68.2 / 97.4 / 99.8** |
+| 7.0e-4 | 0.827 | 69.6 / 97.4 / 99.8 |
+| 9.9e-4 (isotropic) | 0.814 | 73.6 / 97.5 / 100 |
+| legacy rotation, original tuning | 0.805 | 68.1 / 97.5 / 99.8 |
+
+6.0e-4 gives a consistent filter (68 % coverage). Its yaw std stays 3 % above the legacy run: the in-place rotation is
+not equivalent to any fixed yaw sigma, and on this dataset it happens to do slightly better. Position and velocity do
+not move. The corrected mode is therefore checked against `docs/limits_corrected.json`, derived once from this run
+(std: max(Python, 1.05 × measured); max: max(Python, 1.10 × measured); coverage: min(Python, measured − 2)), while the
+legacy mode keeps the Python limits; both are 12 / 12.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
 
 | # | Deviation | Why |
 |---|---|---|
-| 1 | Pinson15 process-noise matrix is rotated from a copy when `PinsonStateBlockConfig::legacy_q_rotation = false`; the apps default to `true` (Python-compatible, `--corrected-q` switches) | Python bug (`COBRA_ANALYSIS.md` §12 #1). The bug inflates yaw process noise, and the Python integration limits were tuned with it; legacy mode reproduces Python's results to three digits, the corrected mode fails the pos_ins tilt limit by 4 %. Tests `QIsNotMutatedAcrossCalls`, `LegacyQRotationReproducesThePythonMutation`. |
+| 1 | Pinson15 process-noise matrix is rotated from a copy by default (`PinsonStateBlockConfig::legacy_q_rotation = false`, retuned VN-100 model); `--legacy-q` restores the Python rotation and tuning | Python bug (`COBRA_ANALYSIS.md` §12 #1). The bug inflates yaw process noise, and the Python integration limits were tuned with it; legacy mode reproduces Python's results to three digits, the corrected mode fails the pos_ins tilt limit by 4 %. Tests `QIsNotMutatedAcrossCalls`, `LegacyQRotationReproducesThePythonMutation`. |
 | 2 | Fusion engine `update` uses the virtual block width for a VSB-targeted processor | Python bug (§12 #14). Test `UpdateThroughRealAndVirtualBlocks`. |
 | 3 | EKF uses Joseph form + LDLT by default | Numerical robustness; `set_joseph_form(false)` restores Python's arithmetic for parity tests. |
 | 4 | Shape errors throw instead of raising inside numpy | C++ idiom; same observable effect (crash on programmer error). |
@@ -654,22 +715,26 @@ ported (it needs liblcm's UDP/TCP providers); its config exists for registry com
 nine standard apps (`pos_ins`, `pos_vel_ins`, `posvel_ins`, `pos_ins_leverarm`, `pos_ins_bodyvel`,
 `outage_sim`, `pos_ins_vsb`, `direction_to_points`, `pos_ins_record_states`), the two tutorial apps
 (`tutorial_pos_ins`, `tutorial_pos_vel_ins`) and the extras app (`pos_ins_zerovel2d`), plus `dummy/minimal`.
-All take `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q]`; the input defaults to the
-dataset inside the Cobra venv. **The apps default to the Python-compatible Pinson-Q mode** (`--legacy-q`),
-because the goal is to reproduce the Python results; `--corrected-q` applies the configured sigmas as written.
+All take `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q] [--dump-config f] [--dump-registry f]`;
+the input defaults to the dataset inside the Cobra venv, and `cobra_run configs/<app>.json …` runs the same app from
+its config file (§7.14). **The apps default to the corrected Pinson-Q rotation with the retuned VN-100 model**;
+`--legacy-q` reproduces the Python run exactly (Python rotation and tuning).
 
 `tools/run_acceptance.py` (Cobra venv) replays every app in both modes and applies the Python integration-test
 checks (per-axis std and max limits, 1/2/3σ coverage, epoch count ±5, NaNs, start/end within 3 s, and for
 `pos_ins_record_states` an h5py read-back of the diagnostics file); it writes `docs/acceptance.json`, which
 `tools/test_matrix.py` renders into `docs/TEST_MATRIX.md` §4. Result (2026-10-03, example log):
 
-| Mode | Apps passing the Python limits | Epochs | Notes |
-|---|---|---|---|
-| legacy (default) | **12 / 12** | 2570 (tutorial 2593) = Python | pos_ins yaw std 0.805°, outage_sim pos std 305.5 m — identical to the Python run to the printed digits |
-| corrected (`--corrected-q`) | 3 / 12 (leverarm, outage_sim, tutorial_pos_ins) | same | fails only tilt (and for the velocity apps, velocity) limits that were set with the inflated yaw noise |
+| Mode | Limits | Apps passing | Epochs | Notes |
+|---|---|---|---|---|
+| corrected (default, `vn100_corrected`) | `docs/limits_corrected.json` (derived, §7.14) | **12 / 12** | 2570 (tutorial 2593) | pos_ins yaw std 0.831°, 68.2 % inside 1σ |
+| legacy (`--legacy-q`, `vn100`) | Python integration-test limits | **12 / 12** | = Python | pos_ins yaw std 0.805°, outage_sim pos std 305.5 m — identical to the Python run to the printed digits |
+| either, through `cobra_run configs/*.json` | same | 12 / 12 | same | every number identical to the compiled app |
 
 Timing: 1.4–5.5 s wall per app on the 43-minute log against 22–40 s for Python; `pos_ins` peak RSS 8 MB vs
-196 MB.
+196 MB. CI (`ci/github-ci.yml` (to be moved to `.github/workflows/` once the push token has the `workflow` scope, see `ci/README.md`)) builds, runs the unit suites and `tools/ci_acceptance.py`, which replays
+every app on `testdata/example_60s.log` through the compiled apps and through `cobra_run` and checks exit codes,
+error logs, epoch counts and loose RMS bounds with `build/tools/log_stats` (no Python packages needed).
 
 History of the gap-closing (kept because the tools are reusable): position agreed to 0.4 % from the first run,
 yaw RMS was 4.6 % high. Parity harnesses (`tools/parity_check.py`, `tools/inertial_parity_check.py`) proved
@@ -686,10 +751,10 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Geoid model (MSL altitude), the UI server plugin and registry views (`pos_ins_ui` app), network LCM transport
-(`pos_ins_network`, needs liblcm or a UDP multicast implementation), ROS transport, Buscat controller, the
-C ABI shim. If the corrected Pinson-Q mode is ever to become the default, re-tune the yaw gyro random-walk sigma
-(the configured value is optimistic: 65 % instead of 68 % of yaw errors inside 1σ) and the tilt limits.
+See `docs/ROADMAP.md`. Phase 1 (config files, presets, corrected default, CI) is done; Phase 2 is innovation
+gating, a degraded-sensor test matrix and the geoid model; Phase 3 the library push API, C ABI and transport
+adapters (network LCM, CSV, ROS). Still out of scope: the UI server plugin and registry views (`pos_ins_ui`),
+the Buscat controller.
 
 ## 10. Recipes
 

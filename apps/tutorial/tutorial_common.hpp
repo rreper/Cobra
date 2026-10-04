@@ -15,7 +15,7 @@ inline std::vector<std::shared_ptr<const cobra::BaseConfig>> tutorial_configs(co
   transport->input_file = args.input_log;
   transport->output_file = args.output_log;  // no channel filter: the tutorial transport replays everything
 
-  auto imu = std::make_shared<ImuConfig>(imu_model());
+  auto imu = std::make_shared<ImuConfig>(imu_model(args.legacy_q));
   imu->accel_bias_initial_sigma = {0, 0, 0};  // the tutorial ImuConfig has no initial-sigma fields
   imu->gyro_bias_initial_sigma = {0, 0, 0};
 
@@ -83,35 +83,21 @@ inline std::vector<std::shared_ptr<const cobra::BaseConfig>> tutorial_configs(co
 }
 
 inline int run_tutorial_app(const char* name, const Args& args, bool with_velocity) {
-  auto configs = tutorial_configs(args, with_velocity);
-  auto transport = std::make_shared<TutorialLcmLogTransportPlugin>("Cobra Tutorial LCM Log Transport Plugin");
-  transport->set_progress_callback([name](std::uint64_t done, std::uint64_t total) {
-    std::cerr << "\r[" << name << "] " << (100 * done / std::max<std::uint64_t>(total, 1)) << "%" << std::flush;
-  });
-  std::shared_ptr<api::CommonPlugin> orchestration;
-  if (with_velocity)
-    orchestration = std::make_shared<TutorialPosVelOrchestrationPlugin>("Cobra Tutorial Orchestration Plugin");
-  else
-    orchestration = std::make_shared<TutorialPosOrchestrationPlugin>("Cobra Tutorial Orchestration Plugin");
-  api::PluginList plugins{
-      transport,
-      std::make_shared<EkfFusionStrategyPlugin>("Cobra EKF Fusion Strategy Plugin", args.joseph),
-      std::make_shared<StandardFusionPlugin>("Cobra Standard Fusion Plugin"),
-      std::make_shared<TutorialPosInsStateModelingPlugin>("Cobra Tutorial State Modeling Plugin", args.legacy_q),
-      std::make_shared<StandardInertialPlugin>("Cobra Standard Inertial Plugin"),
-      std::make_shared<TutorialInitializationPlugin>("Cobra Manual Initialization Plugin"),
-      std::make_shared<StandardLoggingPlugin>("Cobra Standard Logging Plugin", true, api::LoggingLevel::INFO),
-      std::make_shared<StandardRegistryPlugin>("Cobra Standard Registry Plugin", configs),
-      std::make_shared<StandardPreprocessorPlugin>("Cobra Standard Preprocessor Plugin"),
-      std::make_shared<UiLogPlottingPlugin>("Cobra UI Logfile Plotting Plugin"),
-      orchestration,
-  };
-  StandardControllerPlugin::install_sigint_handler();
-  StandardControllerPlugin controller("Cobra Standard Controller Plugin");
-  controller.init_plugin(std::nullopt, nullptr);
-  controller.take_control(plugins);
-  std::cerr << "\n";
-  return controller.exit_code() == ExitCode::SUCCESS ? 0 : 1;
+  AppConfig config;
+  config.app.name = name;
+  config.app.initialization = "manual";
+  config.app.state_modeling = "tutorial";
+  config.app.orchestration = with_velocity ? "tutorial_pos_vel" : "tutorial_pos";
+  config.app.ui_log_plotting = true;
+  config.app.joseph_form = args.joseph;
+  config.app.legacy_q_rotation = args.legacy_q;
+  config.configs = tutorial_configs(args, with_velocity);
+  try {
+    return app::run_app(config, args.options);
+  } catch (const std::exception& e) {
+    std::cerr << name << ": " << e.what() << "\n";
+    return 2;
+  }
 }
 
 }  // namespace pntos::apps

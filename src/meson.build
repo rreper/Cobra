@@ -4,7 +4,7 @@ pntos_api_dep = declare_dependency(
   dependencies: [eigen_dep, aspn_eigen_dep, aspn_c_dep, thread_dep])
 
 # Header-only third-party code (see third_party/NOTICE.md).
-third_party_inc = include_directories('../third_party/lcm', '../third_party/aspn23_lcm')
+third_party_inc = include_directories('../third_party/lcm', '../third_party/aspn23_lcm', '../third_party')
 
 # Cobra plugin implementations.
 cobra_sources = files(
@@ -46,6 +46,9 @@ cobra_sources = files(
   'cobra/tutorial/TutorialStateModelingPlugin.cpp',
   'cobra/tutorial/TutorialOrchestrationPlugin.cpp',
   'cobra/tutorial/UiLogPlottingPlugin.cpp',
+  'cobra/presets/Presets.cpp',
+  'cobra/config/JsonConfig.cpp',
+  'cobra/app/AppBuilder.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,

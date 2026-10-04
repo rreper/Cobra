@@ -25,7 +25,9 @@ include/pntos/api/      the pntOS plugin API in C++ (mirrors pntOS-C headers / C
 include/pntos/cobra/    public headers of the Cobra plugin implementations
 src/                    implementation
 tests/                  GoogleTest unit tests (ported from Cobra's pytest suite) + golden vectors
-apps/                   runnable apps: dummy/minimal, standard/* (9), tutorial/* (2), extras/pos_ins_zerovel2d
+apps/                   cobra_run (generic runner) + the 12 compiled apps (standard, tutorial, extras) and dummy/minimal
+configs/                one JSON config file per app, executed by cobra_run
+testdata/               60 s cut of the example log for CI
 docs/                   analysis, progress log, diagrams
 subprojects/            meson wraps: eigen, gtest, aspn-generated, pntos-c, (navtoolkit)
 Cobra/                  the Python original, as a submodule, used for golden-vector generation
@@ -53,18 +55,32 @@ All dependencies are fetched as meson subprojects on first `setup`; nothing need
 
 ```bash
 .venv/bin/meson compile -C build
-./build/apps/pos_ins out.log                      # input defaults to the Cobra example dataset in Cobra/.venv
-./build/apps/pos_ins out.log in.log --corrected-q # Pinson Q rotated from a copy (default: --legacy-q, Python-compatible)
-./build/apps/pos_ins_record_states out.log        # also writes out.hdf5 (filter states after every propagate/update)
-./build/apps/tutorial_pos_ins out.log             # tutorial stack; logs RMS errors vs truth and writes out/pva_errors.csv
-Cobra/.venv/bin/python tools/compare_to_truth.py out.log   # NED position / velocity / RPY RMS vs truth
-Cobra/.venv/bin/python tools/run_acceptance.py             # all 12 apps, both modes, Python integration limits
+./build/apps/cobra_run configs/pos_ins.json out.log in.log   # any app from its config file (configs/*.json)
+./build/apps/cobra_run --list-presets                        # IMU and GNSS presets usable as "imu_model": {"preset": "stim300"}
+./build/apps/pos_ins out.log                                 # the same app compiled in; input defaults to the Cobra example dataset
+./build/apps/pos_ins out.log in.log --legacy-q               # Python-compatible Pinson-Q rotation and tuning (default: corrected)
+./build/apps/pos_ins out.log in.log --dump-config my.json    # write the effective config instead of running
+./build/apps/pos_ins_record_states out.log                   # also writes out.hdf5 (filter states after every propagate/update)
+./build/apps/tutorial_pos_ins out.log                        # tutorial stack; logs RMS errors vs truth and writes out/pva_errors.csv
+./build/tools/log_stats out.log                              # epoch count and RMS errors vs truth as JSON, no Python needed
+Cobra/.venv/bin/python tools/compare_to_truth.py out.log     # NED position / velocity / RPY RMS vs truth
+Cobra/.venv/bin/python tools/run_acceptance.py               # all 12 apps, both modes, against the integration limits
+python3 tools/ci_acceptance.py                               # what CI runs: every app on testdata/example_60s.log
 ```
 
 Apps: `pos_ins`, `pos_vel_ins`, `posvel_ins`, `pos_ins_leverarm`, `pos_ins_bodyvel`, `outage_sim`, `pos_ins_vsb`,
-`direction_to_points`, `pos_ins_record_states`, `tutorial_pos_ins`, `tutorial_pos_vel_ins`, `pos_ins_zerovel2d`.
-In the default (Python-compatible) mode all 12 pass the Python integration-test limits with Python's epoch counts
-(`docs/TEST_MATRIX.md` §4).
+`direction_to_points`, `pos_ins_record_states`, `tutorial_pos_ins`, `tutorial_pos_vel_ins`, `pos_ins_zerovel2d`;
+each has a config file in `configs/` that `cobra_run` executes identically (same registry contents, same results).
+All 12 pass their acceptance limits in both Pinson-Q modes (`docs/TEST_MATRIX.md` §4): the default corrected mode
+against limits derived once from the retuned filter, the `--legacy-q` mode against the Python integration-test limits.
+
+### Config files
+
+A config file is `{"app": {...}, "configs": [...]}`. `app` names the plugins (transport, initialization,
+state_modeling, orchestration, preprocessors, diagnostic_log, ui_log_plotting, logging_level, joseph_form,
+legacy_q_rotation); `configs` is the Python app's config list with the Python class names as `"type"` and the
+Python field names. An IMU model can be a preset: `"imu_model": {"preset": "stim300", "group": "config/inertial_state"}`.
+`DESIGN.md` §7.14 documents the format; `configs/pos_ins.json` is the shortest complete example.
 
 ## Acceptance
 

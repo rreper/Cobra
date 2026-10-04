@@ -78,8 +78,20 @@ def check(err, sig, lim):
                 rms=[float(x) for x in np.sqrt(np.mean(err**2, axis=0))],
                 pct_within_1_2_3_sigma=pct, limits=lim)
 
-def evaluate(app, log_path, truth, tsig_unused):
+CORRECTED_LIMITS = {}
+
+
+def limits_for(app, mode):
     name, n_expected, start_off, pl, vl, tl = LIMITS[app]
+    if mode == 'corrected' and app in CORRECTED_LIMITS:
+        c = CORRECTED_LIMITS[app]
+        pick = lambda m: dict(std=m['std'], max=m['max'], p1=m['p1'], p2=m['p2'], p3=m['p3'])
+        pl, vl, tl = (pick(c['pos']), pick(c['vel']), pick(c['tilt']))
+    return name, n_expected, start_off, pl, vl, tl
+
+
+def evaluate(app, log_path, truth, tsig_unused, mode='legacy'):
+    name, n_expected, start_off, pl, vl, tl = limits_for(app, mode)
     sol, sig = read_pva(log_path, SOLUTION)
     out = dict(python_test=name, epochs=int(len(sol)), expected_epochs=n_expected, checks={})
     if len(sol) == 0:
@@ -130,10 +142,21 @@ def main():
     ap.add_argument('--only', default=None)
     ap.add_argument('--no-run', action='store_true')
     ap.add_argument('--input-log', default=None)
-    ap.add_argument('--modes', default='legacy,corrected',
-                    help='comma list of: legacy (app default, Python-compatible Pinson Q rotation, --legacy-q), '
-                         'corrected (Q rotated from a copy as the config intends, --corrected-q)')
+    ap.add_argument('--runner', default=None,
+                    help='run every app through this generic runner with configs/<app>.json instead of the compiled app '
+                         '(e.g. build/apps/cobra_run); results must match the compiled apps')
+    ap.add_argument('--configs', default='configs')
+    ap.add_argument('--modes', default='corrected,legacy',
+                    help='comma list of: corrected (app default: Q rotated from a copy, retuned VN-100 model, --corrected-q), '
+                         'legacy (Python-compatible Pinson Q rotation and tuning, --legacy-q)')
+    ap.add_argument('--corrected-limits', default='docs/limits_corrected.json',
+                    help='limits for the corrected mode (derived from a corrected run; the Python limits are used where it is missing)')
+    ap.add_argument('--derive-corrected-limits', action='store_true',
+                    help='after running, write --corrected-limits from the corrected results: std limits max(Python, 1.05 x measured), '
+                         'max limits max(Python, 1.10 x measured), sigma-coverage limits min(Python, measured - 2)')
     a = ap.parse_args()
+    if a.corrected_limits and os.path.exists(a.corrected_limits) and not a.derive_corrected_limits:
+        CORRECTED_LIMITS.update(json.load(open(a.corrected_limits))['limits'])
     if a.input_log is None:
         from pntos_python_datasets_lcm import EXAMPLE_LCM_LOG
         a.input_log = EXAMPLE_LCM_LOG
@@ -149,11 +172,13 @@ def main():
         exe = os.path.join(a.build, 'apps', app)
         log = os.path.join(a.workdir, key.replace('@', '_') + '.log')
         rec = dict(app=app, mode=mode)
+        if a.runner:
+            exe = a.runner; rec['runner'] = a.runner; rec['config'] = os.path.join(a.configs, app + '.json')
         if not os.path.exists(exe):
             rec.update(passed=False, reason='binary not built'); results[key] = rec; continue
         if not a.no_run:
             t0 = time.time()
-            cmd = [exe, log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q'])
+            cmd = [exe] + ([rec['config']] if a.runner else []) + [log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q'])
             p = subprocess.run(cmd, capture_output=True, text=True)
             rec['wall_s'] = round(time.time() - t0, 2)
             rec['exit_code'] = p.returncode
@@ -163,7 +188,8 @@ def main():
             if errs: rec['first_error'] = errs[0][:200]
             if p.returncode != 0:
                 rec['passed'] = False; rec['reason'] = f'exit code {p.returncode}'; results[key] = rec; continue
-        rec.update(evaluate(app, log, truth, None))
+        rec.update(evaluate(app, log, truth, None, mode))
+        rec['limits_source'] = 'derived (docs/limits_corrected.json)' if mode == 'corrected' and app in CORRECTED_LIMITS else 'python'
         if app == 'pos_ins_record_states' and not a.no_run:
             rec['hdf5'] = check_hdf5(log[:-4] + '.hdf5')
             if not rec['hdf5'].get('ok'):
@@ -179,6 +205,25 @@ def main():
         print(f"{key:30s} {'PASS' if rec['passed'] else 'FAIL':4s} epochs={rec.get('epochs','-')} wall={rec.get('wall_s','-')}s "
               f"pos std {fmt('pos','std')} max {fmt('pos','max')} | vel std {fmt('vel','std')} | tilt std {fmt('tilt','std')}"
               + (f"  ({rec.get('reason')})" if not rec['passed'] else ''), flush=True)
+    if a.derive_corrected_limits:
+        derived = {}
+        for key, rec in results.items():
+            if rec.get('mode') != 'corrected' or not rec.get('checks'):
+                continue
+            app = rec['app']; _, _, _, pl, vl, tl = LIMITS[app]; out = {}
+            for metric, py in (('pos', pl), ('vel', vl), ('tilt', tl)):
+                c = rec['checks'][metric]
+                meas_std = max(c['std']); meas_max = max(c['max']); p1, p2, p3 = c['pct_within_1_2_3_sigma']
+                out[metric] = dict(std=round(max(py['std'], 1.05 * meas_std), 4), max=round(max(py['max'], 1.10 * meas_max), 3),
+                                   p1=min(py['p1'], math.floor(p1) - 2), p2=min(py['p2'], math.floor(p2) - 2), p3=min(py['p3'], math.floor(p3) - 2),
+                                   measured=dict(std=[round(v, 4) for v in c['std']], max=[round(v, 3) for v in c['max']],
+                                                 pct=[round(v, 1) for v in (p1, p2, p3)]))
+            derived[app] = out
+        with open(a.corrected_limits, 'w') as f:
+            json.dump(dict(generated=time.strftime('%Y-%m-%dT%H:%M:%S%z'), rule='std: max(python, 1.05*measured); max: max(python, 1.10*measured); '
+                           'pct: min(python, floor(measured)-2); measured with the retuned VN-100 model (preset vn100_corrected)',
+                           limits=derived), f, indent=2)
+        print('wrote', a.corrected_limits)
     summary = dict(generated=time.strftime('%Y-%m-%dT%H:%M:%S%z'), input_log=a.input_log, results=results)
     with open(a.out, 'w') as f:
         json.dump(summary, f, indent=2)

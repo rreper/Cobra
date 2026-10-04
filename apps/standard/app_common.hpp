@@ -15,6 +15,8 @@
 #include <pntos/cobra/transport/LcmLogTransportPlugin.hpp>
 #include <pntos/cobra/diagnostics/DiagnosticLogPlugin.hpp>
 #include <pntos/cobra/extras/AdvancedPreprocessorPlugin.hpp>
+#include <pntos/cobra/app/AppBuilder.hpp>
+#include <pntos/cobra/presets/Presets.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -41,18 +43,11 @@ inline Mat3 C_imu_to_platform() {
   return {{{0.99802515, 0.01772605, 0.06026269}, {-0.01742059, 0.99983262, -0.00559042}, {-0.0603517, 0.00452957, 0.9981669}}};
 }
 
-inline ImuConfig imu_model() {
-  ImuConfig m;
-  m.group_ = "config/inertial_state";
-  m.accel_bias_sigma = {2.4e-3, 2.4e-3, 2.4e-3};
-  m.accel_bias_tau = {300.0, 300.0, 300.0};
-  m.accel_random_walk_sigma = {3.887e-6, 3.887e-6, 3.887e-6};
-  m.gyro_bias_sigma = {2e-4, 2e-4, 2e-4};
-  m.gyro_bias_tau = {500.0, 500.0, 500.0};
-  m.gyro_random_walk_sigma = {9.9e-4, 9.9e-4, 6.7e-5};
-  m.accel_bias_initial_sigma = {0.072, 0.072, 0.072};
-  m.gyro_bias_initial_sigma = {0.003, 0.003, 0.003};
-  return m;
+/// The Cobra-tuned VN-100 model (preset "vn100", the Python apps' values) for the legacy Pinson-Q
+/// rotation, or its retuned variant (preset "vn100_corrected", yaw gyro random walk 6e-4) for the
+/// corrected rotation. See presets/Presets.hpp and DESIGN.md section 9.5.
+inline ImuConfig imu_model(bool legacy_q = false) {
+  return *presets::imu_preset(legacy_q ? "vn100" : "vn100_corrected", "config/inertial_state");
 }
 
 /// 3-state NED position-error FOGM block ("pos_sensor_error") as configured by pos_ins.
@@ -86,6 +81,7 @@ struct BaseConfig {
 };
 
 inline BaseConfig base_config(const std::string& input_log, const std::string& output_log, bool legacy_q = false) {
+  // `legacy_q` selects both the Pinson-Q rotation and the matching VN-100 tuning.
   BaseConfig b;
   b.transport->input_file = input_log;
   b.transport->output_file = output_log;
@@ -97,7 +93,7 @@ inline BaseConfig base_config(const std::string& input_log, const std::string& o
   o.alignment_channels = {kPosChannel, kImuChannel};
   o.pinson_sb_config.group_ = "config/pinson_block";
   o.pinson_sb_config.label = "pinson15";
-  o.pinson_sb_config.imu_model = imu_model();
+  o.pinson_sb_config.imu_model = imu_model(legacy_q);
   o.pinson_sb_config.legacy_q_rotation = legacy_q;
   o.additional_sb_configs = std::vector<std::shared_ptr<const StateBlockConfig>>{pos_fogm_block()};
   o.inertial_config.group_ = "config/inertial";
@@ -108,7 +104,7 @@ inline BaseConfig base_config(const std::string& input_log, const std::string& o
 
   b.alignment->group_ = "config/default/alignment";
   b.alignment->static_time = 10.0;
-  b.alignment->imu_model = imu_model();
+  b.alignment->imu_model = imu_model(legacy_q);
   b.alignment->heading = 0.06895795874629593;
   b.alignment->heading_sigma = 0.02236067977;
   o.alignment_config = b.alignment;
@@ -127,29 +123,23 @@ inline BaseConfig base_config(const std::string& input_log, const std::string& o
   return b;
 }
 
-/// Parses `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q]`.
+/// Command line: `[output.log] [input.log] [--no-joseph] [--legacy-q|--corrected-q] [--dump-config f]
+/// [--dump-registry f] [--quiet]`. The defaults are the Cobra example log, `pntos_output.log`, Joseph
+/// form and the corrected Pinson-Q rotation (`--legacy-q` reproduces the Python results exactly).
 struct Args {
   std::string output_log = "pntos_output.log";
   std::string input_log = default_input_log();
   bool joseph = true;
-  bool legacy_q = true;  ///< default: Python-compatible Pinson process-noise rotation; --corrected-q turns it off
+  bool legacy_q = false;  ///< default: corrected Pinson-Q rotation with the retuned VN-100 model; --legacy-q reproduces Python
+  app::RunOptions options;
 };
 inline Args parse_args(int argc, char** argv) {
   Args a;
-  std::vector<std::string> pos;
-  for (int i = 1; i < argc; ++i) {
-    std::string s = argv[i];
-    if (s == "--no-joseph")
-      a.joseph = false;
-    else if (s == "--legacy-q")
-      a.legacy_q = true;
-    else if (s == "--corrected-q")
-      a.legacy_q = false;
-    else
-      pos.push_back(s);
-  }
-  if (!pos.empty()) a.output_log = pos[0];
-  if (pos.size() > 1) a.input_log = pos[1];
+  a.options = app::parse_run_options(argc, argv, 1);
+  if (a.options.output_log) a.output_log = *a.options.output_log;
+  if (a.options.input_log) a.input_log = *a.options.input_log;
+  if (a.options.joseph_form) a.joseph = *a.options.joseph_form;
+  if (a.options.legacy_q_rotation) a.legacy_q = *a.options.legacy_q_rotation;
   return a;
 }
 
@@ -161,34 +151,23 @@ inline std::string hdf5_path_for(const std::string& output_log) {
   return (has_ext ? output_log.substr(0, dot) : output_log) + ".hdf5";
 }
 
-/// Builds the standard plugin set around `configs` (plus any `extra` plugins, appended after the
-/// orchestration plugin like the Python apps do) and runs the controller. Returns the exit code.
+/// Runs the plugin set `spec` describes (default: the standard set) around `configs` through
+/// app::run_app, which is also what `cobra_run config.json` does. Returns the exit code.
 inline int run_standard_app(const char* name, const Args& args,
                             const std::vector<std::shared_ptr<const cobra::BaseConfig>>& configs,
-                            const api::PluginList& extra = {}) {
-  auto transport = std::make_shared<LcmLogTransportPlugin>("Cobra LCM Log Transport Plugin");
-  transport->set_progress_callback([name](std::uint64_t done, std::uint64_t total) {
-    std::cerr << "\r[" << name << "] " << (100 * done / std::max<std::uint64_t>(total, 1)) << "%" << std::flush;
-  });
-  api::PluginList plugins{
-      transport,
-      std::make_shared<EkfFusionStrategyPlugin>("Cobra EKF Fusion Strategy Plugin", args.joseph),
-      std::make_shared<StandardFusionPlugin>("Cobra Standard Fusion Plugin"),
-      std::make_shared<StandardStateModelingPlugin>("Cobra Standard State Modeling Plugin"),
-      std::make_shared<StandardInertialPlugin>("Cobra Standard Inertial Plugin"),
-      std::make_shared<ManualHeadingAlignInitializationPlugin>("Cobra Manual Heading Static Align Initialization Plugin"),
-      std::make_shared<StandardLoggingPlugin>("Cobra Standard Logging Plugin", true, api::LoggingLevel::INFO),
-      std::make_shared<StandardRegistryPlugin>("Cobra Standard Registry Plugin", configs),
-      std::make_shared<StandardPreprocessorPlugin>("Cobra Standard Preprocessor Plugin"),
-      std::make_shared<StandardOrchestrationPlugin>("Cobra Standard Orchestration Plugin"),
-  };
-  plugins.insert(plugins.end(), extra.begin(), extra.end());
-  StandardControllerPlugin::install_sigint_handler();
-  StandardControllerPlugin controller("Cobra Standard Controller Plugin");
-  controller.init_plugin(std::nullopt, nullptr);
-  controller.take_control(plugins);
-  std::cerr << "\n";
-  return controller.exit_code() == ExitCode::SUCCESS ? 0 : 1;
+                            std::optional<AppSpec> spec = std::nullopt) {
+  AppConfig config;
+  config.app = spec.value_or(app::standard_app_spec(name));
+  config.app.name = name;
+  config.app.joseph_form = args.joseph;
+  config.app.legacy_q_rotation = args.legacy_q;
+  config.configs = configs;
+  try {
+    return app::run_app(config, args.options);
+  } catch (const std::exception& e) {
+    std::cerr << name << ": " << e.what() << "\n";
+    return 2;
+  }
 }
 
 }  // namespace pntos::apps
