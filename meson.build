@@ -1,5 +1,5 @@
-project('pntos-cpp', 'cpp',
-  version: '0.1.0',
+project('pntos-cpp', ['cpp', 'c'],
+  version: '0.2.0',
   license: 'Apache-2.0',
   meson_version: '>=1.3',
   default_options: [
@@ -58,4 +58,5 @@ endif
 if get_option('apps')
   subdir('apps')
   subdir('tools')
+  subdir('examples')
 endif

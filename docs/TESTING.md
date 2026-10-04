@@ -31,7 +31,7 @@ executable `build/tests/test_<name>` linked against `cobra_dep`, `gtest_main` an
 protocol is `gtest`, so individual test names show up in `build/meson-logs/testlog.txt` and in
 `testlog.junit.xml`.
 
-Current status: **20 suites, 191 tests, all green** (2026-10-04). A test run takes about a second.
+Current status: **22 suites, 202 tests, all green** (2026-10-04). A test run takes a few seconds.
 
 The `diagnostics` suite writes small HDF5 files; set `PNTOS_TEST_OUT=<dir>` to choose where (default: the
 system temp directory) and open them with h5py to double-check the writer (`tools/run_acceptance.py` does this
@@ -92,6 +92,8 @@ no config).
 | `extras` | 4 | — (Python has no unit test; covered by the zerovel2d app) | `ZeroVelocity2dGeneratorConfig` round trip incl. base-type read-back; plugin index / config errors; first-trigger, trigger_dt gating, channel filter, NaN x, 2×2 R, generated message independence; `SensorDegradation`: noise sigma and bias scaling for sampled and integrated IMU, NED position noise and covariance scale, one-shot jump, velocity noise on present axes only, determinism per seed, registry round trip |
 | `diagnostics` | 5 | `test_diagnostic_log_plugin.py`, `test_hdf5utils.py` (write half) | HDF5 superblock / EOF address / file bytes; bad dataset names; store serialisation incl. 1-D squeeze and mixed-type abandonment; plugin records every notification (incl. unchanged re-sets, as Python) and writes the file at shutdown; no-mediator error path |
 | `json_config` | 5 | — (new) | JSON round trip of a config set covering every class reproduces the registry byte for byte; presets and overrides; error messages name the field; datasheet conversion constants; command-line overrides incl. the vn100 ↔ vn100_corrected swap; plugin sets per AppSpec and rejection of unknown names |
+| `filter` | 3 | — (new) | the 60 s log through `run_app` and `run_app_via_push` gives identical solutions; direct `Filter` use (push, queue, callback, on-demand solution, registry, idempotent stop); the C ABI end to end (create, push LCM bytes, poll, typed push, errors, stop) |
+| `transports` | 4 | — (new) | LCM udpm URL parsing, short and fragmented datagrams with out-of-order reassembly, loopback delivery between two plugins (skipped without multicast), CSV reading (header-matched columns, merging, defaults, empty cells, missing-column error) and solution writing, a full CSV run equal to the LCM run |
 | `orchestration` | 12 | `test_orchestration.py` (standard cases) | init with real fusion/EKF/state-modeling plugins and mock inertial/initializer; config round trip; one channel → many processors; VSB-chain aux; outage propagation; alignment after N messages; `request_solutions` in all forms; end-to-end position update with feedback |
 
 Python tests that correspond to components not yet ported are listed in §9.
@@ -240,6 +242,9 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 | `PNTOS_TRACE_FILE=path ./build/apps/pos_ins …` and `tools/trace_python_pos_ins.py in out trace` | One line per propagate/update with trace(P) and selected states (`PNTOS_TRACE_FULL=1` for all), from both implementations; diff them to find the first diverging step. |
 | `tools/run_acceptance.py` | Runs every app on the example log in `legacy` (default) and `corrected` Pinson-Q modes and applies the Python integration-test limits; for `pos_ins_record_states` it also opens the HDF5 diagnostics file with h5py; writes `docs/acceptance.json` for the matrix. |
 | `build/tools/log_stats out.log [--truth-log in.log]` | Epoch count, NaN count, start/end and RMS NED position / velocity / RPY errors against the truth channel as JSON, in C++ (what `ci_acceptance.py` uses). |
+| `Cobra/.venv/bin/python tools/run_network_acceptance.py` | Plays the example log over UDP multicast (`build/tools/lcm_log_player`) into `cobra_run configs/pos_ins_network.json` and evaluates the recorded solutions like pos_ins. |
+| `build/tools/lcm_to_csv in.log prefix` | Exports IMU / position / velocity / truth channels to the CSV layout of the CSV transport. |
+| `--via-push` on any app or `cobra_run` | Replays the LCM log through `cobra::Filter` instead of the log transport (identical results; `run_acceptance.py --runner build/apps/cobra_run --extra-args=--via-push`). |
 | `Cobra/.venv/bin/python tools/run_degraded_matrix.py` | Degraded-sensor matrix (DESIGN.md §7.16): IMU grades × GNSS conditions × sensor sets through `cobra_run`; `--derive-limits` records `docs/limits_degraded.json`; writes `docs/DEGRADED_MATRIX.md`. |
 | `--no-record-input` on any app or `cobra_run` | Output log holds only the broadcast solutions (about 1 MB instead of a copy of the 476 MB input); the acceptance tools use it, with truth read from the input log. |
 | `--dump-registry f` on any app or `cobra_run` | Every registry group/key/value as JSON; diff a compiled app against its config file. |

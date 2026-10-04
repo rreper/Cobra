@@ -49,13 +49,31 @@ cobra_sources = files(
   'cobra/presets/Presets.cpp',
   'cobra/config/JsonConfig.cpp',
   'cobra/app/AppBuilder.cpp',
+  'cobra/app/Filter.cpp',
+  'cobra/transport/LcmUdpTransportPlugin.cpp',
+  'cobra/transport/CsvTransportPlugin.cpp',
+  'cobra/capi/cobra_c.cpp',
   'cobra/utils/geoid.cpp',
 )
 
 cobra_lib = library('pntos-cobra', cobra_sources,
   include_directories: [pntos_inc, third_party_inc],
   dependencies: [pntos_api_dep],
+  version: meson.project_version(),
   install: true)
+
+# Installation: headers, the geoid grid, the example configs and a pkg-config file.
+install_subdir('../include/pntos', install_dir: get_option('includedir'))
+install_subdir('../third_party/nlohmann', install_dir: get_option('includedir') / 'pntos' / 'third_party')
+install_data('../data/egm96_15min.bin', install_dir: get_option('datadir') / 'pntos-cobra')
+install_subdir('../configs', install_dir: get_option('datadir') / 'pntos-cobra')
+pkg = import('pkgconfig')
+pkg.generate(cobra_lib,
+  name: 'pntos-cobra',
+  description: 'C++ port of the Cobra pntOS navigation filter (Pinson15 GNSS/INS EKF, plugins, config files, C ABI)',
+  url: 'https://github.com/rreper/Cobra',
+  subdirs: ['pntos/third_party'],
+  requires: ['eigen3'])
 
 cobra_dep = declare_dependency(
   link_with: cobra_lib,

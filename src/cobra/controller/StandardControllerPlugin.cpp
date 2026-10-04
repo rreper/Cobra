@@ -82,6 +82,20 @@ StandardControllerPlugin::Sorted StandardControllerPlugin::sort_and_validate(con
 void StandardControllerPlugin::take_control(const api::PluginList& plugins,
                                             const api::ResourceLocations& plugin_resources_locations,
                                             const std::optional<std::string>& initial_config) {
+  if (!start(plugins, plugin_resources_locations, initial_config)) return;
+  main_loop();
+  stop();
+}
+
+void StandardControllerPlugin::stop() {
+  if (!running_) return;
+  running_ = false;
+  ctx_->exit_event.set(ctx_->exit_event.exit_code());
+  shutdown_plugin();
+}
+
+bool StandardControllerPlugin::start(const api::PluginList& plugins, const api::ResourceLocations& plugin_resources_locations,
+                                     const std::optional<std::string>& initial_config) {
   plugins_ = plugins;
   Sorted sorted = sort_and_validate(plugins);
   registry_plugin_ = sorted.registry;
@@ -137,7 +151,7 @@ void StandardControllerPlugin::take_control(const api::PluginList& plugins,
   if (!config) {
     log(LoggingLevel::ERROR,
         "Could not extract ControllerConfig from group \"controller\". Cannot initialize controller plugin.");
-    return;
+    return false;
   }
   shutdown_token_ = ctx_->registry->batch("controller/flags")
                         ->request_notify("ready_to_shutdown", [this](const std::string&, const std::vector<std::string>& keys,
@@ -155,12 +169,12 @@ void StandardControllerPlugin::take_control(const api::PluginList& plugins,
   auto_shutdown_ = config->auto_shutdown;
 
   log(LoggingLevel::INFO, "Press Ctrl + C at any time to shut down pntOS...");
-  main_loop();
-  shutdown_plugin();
+  running_ = true;
+  for (const auto& t : transport_plugins_) t->start_listening();
+  return true;
 }
 
 void StandardControllerPlugin::main_loop() {
-  for (const auto& t : transport_plugins_) t->start_listening();
 
   std::vector<std::shared_ptr<api::UiPlugin>> needing_main;
   for (const auto& ui : ui_plugins_)

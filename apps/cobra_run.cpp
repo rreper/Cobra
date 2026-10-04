@@ -1,6 +1,6 @@
 // Generic runner: builds the app a JSON config file describes and runs it.
 //   cobra_run config.json [output.log] [input.log] [--legacy-q|--corrected-q] [--no-joseph]
-//             [--dump-config out.json] [--dump-registry out.json] [--no-record-input] [--quiet]
+//             [--dump-config out.json] [--dump-registry out.json] [--no-record-input] [--via-push] [--quiet]
 // The example files in configs/ reproduce every app in apps/ (they were written by those apps'
 // --dump-config); `cobra_run --list-presets` prints the IMU and GNSS preset names.
 #include <pntos/cobra/app/AppBuilder.hpp>
@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
   using namespace pntos::cobra;
   if (argc < 2 || std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help") {
     std::cerr << "usage: cobra_run config.json [output.log] [input.log] [--legacy-q|--corrected-q] [--no-joseph]\n"
-                 "                 [--dump-config out.json] [--dump-registry out.json] [--no-record-input] [--quiet]\n"
+                 "                 [--dump-config out.json] [--dump-registry out.json] [--no-record-input] [--via-push] [--quiet]\n"
                  "       cobra_run --list-presets\n";
     return argc < 2 ? 2 : 0;
   }

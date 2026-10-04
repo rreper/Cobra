@@ -1,5 +1,9 @@
 #include <pntos/cobra/app/AppBuilder.hpp>
 
+#include <pntos/cobra/app/Filter.hpp>
+#include <pntos/cobra/transport/LcmConversions.hpp>
+#include <pntos/cobra/transport/LcmLog.hpp>
+
 #include <pntos/cobra/EkfFusionStrategyPlugin.hpp>
 #include <pntos/cobra/StandardLoggingPlugin.hpp>
 #include <pntos/cobra/StandardRegistryPlugin.hpp>
@@ -13,10 +17,13 @@
 #include <pntos/cobra/preprocessing/StandardPreprocessorPlugin.hpp>
 #include <pntos/cobra/presets/Presets.hpp>
 #include <pntos/cobra/state_modeling/StandardStateModelingPlugin.hpp>
+#include <pntos/cobra/transport/CsvTransportPlugin.hpp>
 #include <pntos/cobra/transport/LcmLogTransportPlugin.hpp>
+#include <pntos/cobra/transport/LcmUdpTransportPlugin.hpp>
 #include <pntos/cobra/tutorial/TutorialPlugins.hpp>
 
 #include <algorithm>
+#include <set>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -42,6 +49,7 @@ RunOptions parse_run_options(int argc, char** argv, int first_positional) {
     else if (s == "--dump-registry") o.dump_registry = value("--dump-registry");
     else if (s == "--quiet") o.progress = false;
     else if (s == "--no-record-input") o.record_input = false;
+    else if (s == "--via-push") o.via_push = true;
     else if (!s.empty() && s[0] == '-') throw std::runtime_error("unknown option " + s);
     else pos.push_back(s);
   }
@@ -88,10 +96,20 @@ AppConfig apply_overrides(const AppConfig& config, const RunOptions& options) {
   json root = jsoncfg::app_config_to_json(config);
   std::string output_log;
   for_each_config(root, [&](json& c) {
-    if (c.value("type", "") == "LcmLogTransportConfig") {
+    const std::string type = c.value("type", "");
+    if (type == "LcmLogTransportConfig") {
       if (options.input_log) c["input_file"] = *options.input_log;
       if (options.output_log) c["output_file"] = *options.output_log;
       if (options.record_input) c["record_input_channels"] = *options.record_input;
+      output_log = c.value("output_file", "");
+    }
+    if (type == "LcmTransportConfig" && options.output_log) {
+      c["output_file"] = *options.output_log;
+      output_log = *options.output_log;
+    }
+    if (type == "CsvTransportConfig") {
+      if (options.output_log) c["output_file"] = *options.output_log;
+      if (options.input_log) c["imu_file"] = *options.input_log;  // single-file CSV input
       output_log = c.value("output_file", "");
     }
   });
@@ -117,8 +135,14 @@ api::PluginList build_plugins(const AppConfig& config, const std::function<void(
     auto t = std::make_shared<LcmLogTransportPlugin>("Cobra LCM Log Transport Plugin");
     if (progress) t->set_progress_callback(progress);
     plugins.push_back(t);
+  } else if (s.transport == "push") {
+    plugins.push_back(std::make_shared<PushTransportPlugin>("Cobra Push Transport Plugin"));
+  } else if (s.transport == "lcm_udp") {
+    plugins.push_back(std::make_shared<LcmUdpTransportPlugin>("Cobra LCM Transport Plugin"));
+  } else if (s.transport == "csv") {
+    plugins.push_back(std::make_shared<CsvTransportPlugin>("Cobra CSV Transport Plugin"));
   } else {
-    throw std::runtime_error("unknown transport \"" + s.transport + "\" (lcm_log)");
+    throw std::runtime_error("unknown transport \"" + s.transport + "\" (lcm_log | lcm_udp | csv | push)");
   }
 
   plugins.push_back(std::make_shared<EkfFusionStrategyPlugin>("Cobra EKF Fusion Strategy Plugin", s.joseph_form));
@@ -183,6 +207,7 @@ int run_app(const AppConfig& input, const RunOptions& options) {
     std::cerr << "wrote " << *options.dump_config << "\n";
     return 0;
   }
+  if (options.via_push) return run_app_via_push(config, options);
   const std::string name = config.app.name;
   std::function<void(std::uint64_t, std::uint64_t)> progress;
   if (options.progress)
@@ -228,6 +253,55 @@ AppSpec standard_app_spec(const std::string& name) {
   AppSpec s;
   s.name = name;
   return s;
+}
+
+}  // namespace pntos::cobra::app
+
+namespace pntos::cobra::app {
+
+int run_app_via_push(const AppConfig& input, const RunOptions& options) {
+  AppConfig config = apply_overrides(input, options);
+  const LcmLogTransportConfig* tc = nullptr;
+  for (const auto& c : config.configs)
+    if (auto* t = dynamic_cast<const LcmLogTransportConfig*>(c.get())) tc = t;
+  if (!tc || !tc->input_file) throw std::runtime_error("run_app_via_push needs an LcmLogTransportConfig with an input_file");
+  lcm::LcmLogReader reader(*tc->input_file);
+  std::unique_ptr<lcm::LcmLogWriter> writer;
+  if (tc->output_file) writer = std::make_unique<lcm::LcmLogWriter>(*tc->output_file);
+  std::optional<std::set<std::string>> channels;
+  if (tc->channels_to_process) channels = std::set<std::string>(tc->channels_to_process->begin(), tc->channels_to_process->end());
+
+  RunOptions quiet = options;
+  Filter filter(config, quiet);  // the Filter replaces the transport with the push transport
+  if (writer)
+    filter.set_solution_callback([&](const api::Message& sol) {
+      if (auto bytes = lcm::encode(*sol.wrapped_message)) writer->write(lcm::now_us(), sol.source_identifier, *bytes);
+    });
+  const std::string name = config.app.name;
+  const std::uint64_t total = reader.size();
+  std::uint64_t next_report = total / 100;
+  std::size_t pushed = 0;
+  while (auto ev = reader.next()) {
+    if (writer && tc->record_input_channels) writer->write(lcm::now_us(), ev->channel, ev->data);
+    if (channels && !channels->count(ev->channel)) continue;
+    std::shared_ptr<api::AspnBase> msg;
+    try {
+      msg = lcm::decode(ev->data);
+    } catch (const std::exception&) {
+      msg = nullptr;
+    }
+    if (!msg) continue;
+    filter.push(api::Message(msg, ev->channel));
+    ++pushed;
+    if (options.progress && reader.tell() >= next_report) {
+      std::cerr << "\r[" << name << " via push] " << (100 * reader.tell() / std::max<std::uint64_t>(total, 1)) << "%" << std::flush;
+      next_report += std::max<std::uint64_t>(total / 100, 1);
+    }
+  }
+  const int code = filter.stop();
+  if (writer) writer->close();
+  if (options.progress) std::cerr << "\n";
+  return code;
 }
 
 }  // namespace pntos::cobra::app

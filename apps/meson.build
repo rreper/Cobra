@@ -5,4 +5,4 @@ endforeach
 executable('tutorial_pos_ins', 'tutorial/pos_ins.cpp', dependencies: [cobra_dep])
 executable('tutorial_pos_vel_ins', 'tutorial/pos_vel_ins.cpp', dependencies: [cobra_dep])
 executable('pos_ins_zerovel2d', 'extras/pos_ins_zerovel2d.cpp', dependencies: [cobra_dep])
-executable('cobra_run', 'cobra_run.cpp', dependencies: [cobra_dep])
+executable('cobra_run', 'cobra_run.cpp', dependencies: [cobra_dep], install: true)

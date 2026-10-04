@@ -1,6 +1,7 @@
 #include <pntos/cobra/config/JsonConfig.hpp>
 
 #include <pntos/cobra/presets/Presets.hpp>
+#include <pntos/cobra/transport/CsvTransportPlugin.hpp>
 
 #include <fstream>
 #include <map>
@@ -700,11 +701,29 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->record_input_channels = get_or(jc, "record_input_channels", true);
     return c;
   }
+  if (type == "CsvTransportConfig") {
+    auto c = std::make_shared<CsvTransportConfig>();
+    if (jc.contains("group")) c->group_ = group_of(jc);
+    c->imu_file = need(jc, "imu_file").get<std::string>();
+    if (jc.contains("position_file") && !jc.at("position_file").is_null()) c->position_file = jc.at("position_file").get<std::string>();
+    if (jc.contains("velocity_file") && !jc.at("velocity_file").is_null()) c->velocity_file = jc.at("velocity_file").get<std::string>();
+    c->imu_channel = get_or<std::string>(jc, "imu_channel", c->imu_channel);
+    c->position_channel = get_or<std::string>(jc, "position_channel", c->position_channel);
+    c->velocity_channel = get_or<std::string>(jc, "velocity_channel", c->velocity_channel);
+    c->imu_integrated = get_or(jc, "imu_integrated", false);
+    c->time_unit = get_or<std::string>(jc, "time_unit", "s");
+    if (jc.contains("default_position_sigma")) c->default_position_sigma = vec3(jc, "default_position_sigma");
+    if (jc.contains("default_velocity_sigma")) c->default_velocity_sigma = vec3(jc, "default_velocity_sigma");
+    if (jc.contains("output_file") && !jc.at("output_file").is_null()) c->output_file = jc.at("output_file").get<std::string>();
+    return c;
+  }
   if (type == "LcmTransportConfig") {
     auto c = std::make_shared<LcmTransportConfig>();
     if (jc.contains("group")) c->group_ = group_of(jc);
     c->url = get_or<std::string>(jc, "url", c->url);
     c->subscribe_to = get_or<std::string>(jc, "subscribe_to", c->subscribe_to);
+    c->idle_timeout_sec = get_or(jc, "idle_timeout_sec", 0.0);
+    if (jc.contains("output_file") && !jc.at("output_file").is_null()) c->output_file = jc.at("output_file").get<std::string>();
     return c;
   }
   fail("unknown config type \"" + type + "\"");
@@ -727,7 +746,7 @@ std::string type_name(const BaseConfig& c) {
   PNTOS_TN(ManualAlignmentConfig)
   PNTOS_TN(StaticAlignmentConfig) PNTOS_TN(ManualHeadingAlignmentConfig) PNTOS_TN(PvaMessageInitializationConfig)
   PNTOS_TN(StandardOrchestrationConfig) PNTOS_TN(TutorialOrchestrationConfig) PNTOS_TN(UiLogPlottingConfig)
-  PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig)
+  PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig) PNTOS_TN(CsvTransportConfig)
 #undef PNTOS_TN
   return "BaseConfig";
 }
@@ -896,8 +915,20 @@ json config_to_json(const BaseConfig& c) {
     if (p->channels_to_process) o["channels_to_process"] = *p->channels_to_process;
     return o;
   }
-  if (auto* p = dynamic_cast<const LcmTransportConfig*>(&c))
-    return json{{"type", type}, {"group", p->group_}, {"url", p->url}, {"subscribe_to", p->subscribe_to}};
+  if (auto* p = dynamic_cast<const CsvTransportConfig*>(&c)) {
+    json o{{"type", type}, {"group", p->group_}, {"imu_file", p->imu_file}, {"imu_channel", p->imu_channel},
+           {"position_channel", p->position_channel}, {"velocity_channel", p->velocity_channel}, {"imu_integrated", p->imu_integrated},
+           {"time_unit", p->time_unit}, {"default_position_sigma", j(p->default_position_sigma)}, {"default_velocity_sigma", j(p->default_velocity_sigma)}};
+    if (p->position_file) o["position_file"] = *p->position_file;
+    if (p->velocity_file) o["velocity_file"] = *p->velocity_file;
+    if (p->output_file) o["output_file"] = *p->output_file;
+    return o;
+  }
+  if (auto* p = dynamic_cast<const LcmTransportConfig*>(&c)) {
+    json o{{"type", type}, {"group", p->group_}, {"url", p->url}, {"subscribe_to", p->subscribe_to}, {"idle_timeout_sec", p->idle_timeout_sec}};
+    if (p->output_file) o["output_file"] = *p->output_file;
+    return o;
+  }
   fail("config_to_json: unsupported config class");
 }
 

@@ -19,6 +19,8 @@ test_sources = {
   'extras': files('test_extras.cpp'),
   'diagnostics': files('test_diagnostics.cpp'),
   'json_config': files('test_json_config.cpp'),
+  'filter': files('test_filter.cpp'),
+  'transports': files('test_transports.cpp'),
 }
 
 foreach name, srcs : test_sources

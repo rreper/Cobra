@@ -30,6 +30,10 @@ jobs:
         run: python3 tools/ci_acceptance.py
       - name: Short acceptance (60 s log, config files through cobra_run)
         run: python3 tools/ci_acceptance.py --runner
+      - name: Short acceptance (60 s log, push API)
+        run: python3 tools/ci_acceptance.py --via-push --workdir build/ci_acceptance_push
+      - name: C example
+        run: ./build/examples/c_run_log configs/pos_ins.json testdata/example_60s.log
       - name: Test logs
         if: always()
         uses: actions/upload-artifact@v4

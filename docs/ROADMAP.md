@@ -55,9 +55,12 @@ suites green; `docs/DEGRADED_MATRIX.md` records 11 rows with limits in `docs/lim
 
 Gate to Phase 3: unit suite green, acceptance across the degraded matrix recorded in the test matrix document.
 
-## Phase 3, Integration
+## Phase 3, Integration — DONE 2026-10-04 (ROS deferred)
 
-Lets integrators embed the filter without LCM logs.
+Lets integrators embed the filter without LCM logs. Gate held: 22 suites green; the push API reproduces every
+acceptance number of the log transport in both modes; the C example runs the example log; the network
+transport replays the full log over UDP multicast (see PROGRESS.md for the numbers); the CSV run equals the
+LCM run on the 60 s log. ROS 2 remains a thin adapter to write when a ROS environment is available.
 
 | Work item | What it delivers | Done when |
 |---|---|---|

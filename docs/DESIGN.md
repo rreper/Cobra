@@ -98,13 +98,14 @@ include/pntos/cobra/          Cobra plugin implementations (public headers) name
   inertial/                   Mechanization, BufferedImu, StandardInertialPlugin  namespace pntos::cobra::inertial
   initialization/             Alignment (ImuModel, static/manual-heading), InitializationPlugins
   preprocessing/              StandardPreprocessorPlugin (six preprocessors)
-  transport/                  LcmLog (reader/writer), LcmConversions, LcmLogTransportPlugin  namespace pntos::cobra::lcm
+  transport/                  LcmLog (reader/writer), LcmConversions, LcmLogTransportPlugin, LcmUdpTransportPlugin, CsvTransportPlugin  namespace pntos::cobra::lcm
+  capi/                       cobra.h, the C ABI over the push API
   tutorial/                   TutorialStateModelingPlugin, TutorialOrchestrationPlugin, UiLogPlottingPlugin, TutorialPlugins.hpp
   diagnostics/                DiagnosticLogPlugin (records the `diagnostics` registry group to HDF5)
   extras/                     AdvancedPreprocessorPlugin (ZeroVelocity2dGenerator)
   dummy/                      the dummy plugins
   presets/                    IMU error-model and GNSS receiver presets by name
-  app/                        AppBuilder: plugin set from an AppSpec, command-line overrides, run
+  app/                        AppBuilder (plugin set from an AppSpec, overrides, run, run via push), Filter (push API)
   utils/                      navutils (nav::), aspn helpers (utils::), arrays, logging, plugins, hdf5 (writer), effective_time
   config/JsonConfig.hpp       JSON config files (Python class and field names), AppSpec, registry dump
 src/                          mirrors include/ one-to-one
@@ -669,6 +670,59 @@ position; the provider loads the file named by `MeasurementProcessorConfig::geoi
 still rejected as before. `configs/pos_ins_baro.json` runs the barometer through the barometer-to-altitude
 preprocessor, the geoid and the altitude processor.
 
+### 7.18 Push API (`app/Filter.hpp`) and the library mode of the controller
+
+`StandardControllerPlugin::start()` does everything `take_control()` does before it blocks (validate, create
+the mediators, initialise the plugins, hand the orchestration its plugins, read `ControllerConfig`, start the
+transports) and returns; `stop()` shuts the plugins down. `take_control()` is now `start()` + the wait loop +
+`stop()`, so the apps are unchanged. `cobra::Filter` builds the plugin set of an `AppConfig` with a
+`PushTransportPlugin` in place of the configured transport, starts the controller and exposes `push(message)`
+(delivered to the mediator on the caller's thread, immediate or buffered per the stream config),
+`take_solutions()` / a solution callback (what the transport would have broadcast, once per publish interval
+of message time), `solution(time)` on demand, the registry, and `stop()`. `app::run_app_via_push` is the LCM
+log runner rebuilt on it (`--via-push` on every app and `cobra_run`): it reads the log, pushes the selected
+channels and writes the published solutions (and the input events when configured) to the output log. The
+acceptance tool run through it (`run_acceptance.py --runner build/apps/cobra_run --extra-args=--via-push`)
+reproduces every number of the log transport in both modes, and the `filter` suite checks the 60 s log
+solution by solution.
+
+### 7.19 C ABI (`capi/cobra.h`)
+
+`cobra_filter_create(config_json_path, overrides_json)` loads a config file and starts a `Filter`;
+`cobra_filter_push_imu / _position / _velocity_ned` build the ASPN messages from plain doubles,
+`cobra_filter_push_lcm` accepts any ASPN-23 message in its LCM encoding, `cobra_filter_poll_solution` dequeues
+published solutions into a `cobra_pva` struct (geodetic position, NED velocity, quaternion, 9×9 covariance),
+`cobra_filter_solution_at` asks on demand, `cobra_filter_stop / _destroy` end the run; `cobra_last_error()` holds
+the message of the last failed call. `examples/c/run_log.c` is a plain C program that reads an LCM log with a
+30-line reader and pushes it; it is built as `build/examples/c_run_log` (meson links it with the C++ linker
+against the static library).
+
+### 7.20 Transports: LCM over UDP multicast and CSV (`transport/LcmUdpTransportPlugin.hpp`, `CsvTransportPlugin.hpp`)
+
+`LcmUdpTransportPlugin` implements the LCM wire protocol itself (no liblcm): a UDP socket joined to the
+multicast group of `LcmTransportConfig::url` (`udpm://239.255.76.67:7667?ttl=0`; Cobra's `tcpq://` falls back
+to that with a WARN), short datagrams (magic `LC02`) and fragmented ones (`LC03`, reassembled per sender and
+sequence number, stale partials dropped after 2 s), channels filtered by the `subscribe_to` regex, ASPN-23
+decoding, and broadcasts encoded and sent on their channel. C++ additions on the config: `idle_timeout_sec`
+(request shutdown after that long without a message once something arrived, which is how a replayed log ends
+a run) and `output_file` (an LCM log of everything received and sent, so the result can be evaluated with the
+same tools). `tools/lcm_log_player` replays a log over the group at a chosen speed; `configs/pos_ins_network.json`
+and `tools/run_network_acceptance.py` run pos_ins that way. The `transports` suite checks datagram encoding,
+out-of-order fragment reassembly and a loopback delivery between two plugins on a private port.
+
+`CsvTransportPlugin` reads IMU, position and velocity CSV files (columns matched by header name, `time` in s,
+ms or ns, sigma columns optional with configured defaults), merges them in time order, delivers them on the
+configured channels, and writes published solutions to a CSV (time to the nanosecond, degrees, NED velocity,
+roll/pitch/yaw, position sigmas). `tools/lcm_to_csv` exports an LCM log into that layout; `configs/pos_ins_csv.json`
+is the example. The test exports the 60 s log, runs it and compares with the LCM run: solution times identical,
+latitudes within 2 cm (the CSV carries only the diagonal of the receiver's position covariance).
+
+### 7.21 Packaging
+
+`meson install` installs the library (versioned, `pntos-cobra.pc` for pkg-config), the headers under
+`include/pntos` (with the vendored JSON header under `pntos/third_party`), `cobra_run`, the geoid grid and the
+example configs under `share/pntos-cobra`. `docs/GETTING_STARTED.md` is the user guide.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -686,7 +740,8 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 9 | `SolutionCache` with typed entries instead of a generic cache | Type safety; same invalidation rules. |
 | 10 | Nested config lists read back as base types | No introspection; providers re-read their own groups (as the Python providers do anyway). |
 | 11 | MSL altitude measurements need a geoid grid (`geoid_file`, `PNTOS_GEOID_FILE` or `data/egm96_15min.bin`); without one they are rejected | §7.17; navtk's lookup is replaced by the bundled EGM96 15-minute grid. |
-| 17 | Innovation gating, sensor degradation preprocessor, config files, presets: C++ additions with no Python counterpart | §7.14–7.16; all off / absent by default, so the registry layout of a Python-equivalent configuration is unchanged. |
+| 17 | Innovation gating, sensor degradation preprocessor, config files, presets, push API, C ABI, CSV transport: C++ additions with no Python counterpart | §7.14–7.20; all off / absent by default, so the registry layout of a Python-equivalent configuration is unchanged. |
+| 18 | `LcmTransportPlugin` is `LcmUdpTransportPlugin`: UDP multicast only (no `tcpq://`), with `idle_timeout_sec` and `output_file` added | §7.20; liblcm is not used. |
 | 13 | Preprocessors return modified copies instead of mutating the message in place | Messages are immutable shared objects in the port. |
 | 14 | *(resolved)* The mediator now uses the orchestration-reported effective time of immediate messages (§7.13) instead of the raw timestamp | Reproduces the Python side effect of in-place preprocessing (`COBRA_ANALYSIS.md` §12 #15) without mutable messages; epoch counts and the outage_sim statistics now match Python exactly. |
 | 15 | `UiLogPlottingPlugin` writes an error summary and a per-epoch CSV instead of opening matplotlib figures | No plotting library in the port (§7.10). |
@@ -797,10 +852,10 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-See `docs/ROADMAP.md`. Phase 1 (config files, presets, corrected default, CI) is done; Phase 2 is innovation
-gating, a degraded-sensor test matrix and the geoid model; Phase 3 the library push API, C ABI and transport
-adapters (network LCM, CSV, ROS). Still out of scope: the UI server plugin and registry views (`pos_ins_ui`),
-the Buscat controller.
+See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
+geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport
+(a thin adapter over the push API once a ROS environment exists), the UI server plugin and registry views
+(`pos_ins_ui`), the Buscat controller.
 
 ## 10. Recipes
 

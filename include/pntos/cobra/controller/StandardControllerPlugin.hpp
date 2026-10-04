@@ -23,6 +23,15 @@ class StandardControllerPlugin final : public api::ControllerPlugin {
   void take_control(const api::PluginList& plugins, const api::ResourceLocations& plugin_resources_locations = std::nullopt,
                     const std::optional<std::string>& initial_config = std::nullopt) override;
 
+  /// Library mode (C++ addition): everything take_control does before it blocks — validate, create the
+  /// mediators, initialise the plugins, hand the orchestration its plugins, read ControllerConfig and start
+  /// the transports — then return. Pair with stop(). Returns false (after logging) if the config is unusable.
+  bool start(const api::PluginList& plugins, const api::ResourceLocations& plugin_resources_locations = std::nullopt,
+             const std::optional<std::string>& initial_config = std::nullopt);
+  /// Stops the transports and shuts every plugin down. Idempotent.
+  void stop();
+  bool running() const { return running_; }
+
   /// ExitCode::ERROR if any plugin logged an ERROR through its mediator (Python: sys.exit(1)).
   ExitCode exit_code() const { return ctx_->exit_event.exit_code(); }
   /// Request shutdown from another thread (what Ctrl+C does).
@@ -55,6 +64,7 @@ class StandardControllerPlugin final : public api::ControllerPlugin {
   std::vector<std::shared_ptr<api::UiPlugin>> ui_plugins_;
   std::vector<std::unique_ptr<StandardMediator>> mediators_;
   bool auto_shutdown_ = true;
+  bool running_ = false;
   std::optional<api::NotifyToken> shutdown_token_;
 };
 

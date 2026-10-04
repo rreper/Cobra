@@ -560,12 +560,15 @@ struct LcmLogTransportConfig final : BaseConfig {
   static std::optional<LcmLogTransportConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
 };
 
-/// LcmTransportPlugin (network LCM; not ported, config kept for registry compatibility).
+/// LcmUdpTransportPlugin (network LCM over UDP multicast, transport/LcmUdpTransportPlugin.hpp).
+/// `url` and `subscribe_to` are Cobra's; `idle_timeout_sec` and `output_file` are C++ additions.
 struct LcmTransportConfig final : BaseConfig {
   static constexpr const char* kGroup = "config/lcm_transport";
   std::string group_ = kGroup;
-  std::string url = "tcpq://";
+  std::string url = "udpm://239.255.76.67:7667?ttl=0";
   std::string subscribe_to = "^((?!pntos).)*$";
+  double idle_timeout_sec = 0;             ///< > 0: request shutdown after this long without a message
+  std::optional<std::string> output_file;  ///< LCM log recording what was received and broadcast
 
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;

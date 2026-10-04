@@ -148,6 +148,7 @@ def main():
                     help='run every app through this generic runner with configs/<app>.json instead of the compiled app '
                          '(e.g. build/apps/cobra_run); results must match the compiled apps')
     ap.add_argument('--configs', default='configs')
+    ap.add_argument('--extra-args', default='', help='extra command-line flags for every run, e.g. "--via-push"')
     ap.add_argument('--modes', default='corrected,legacy',
                     help='comma list of: corrected (app default: Q rotated from a copy, retuned VN-100 model, --corrected-q), '
                          'legacy (Python-compatible Pinson Q rotation and tuning, --legacy-q)')
@@ -181,7 +182,7 @@ def main():
         if not a.no_run:
             t0 = time.time()
             cmd = [exe] + ([rec['config']] if a.runner else []) + [log, a.input_log] + (['--legacy-q'] if mode == 'legacy' else ['--corrected-q']) \
-                + ([] if a.record_input else ['--no-record-input', '--quiet'])
+                + ([] if a.record_input else ['--no-record-input', '--quiet']) + a.extra_args.split()
             p = subprocess.run(cmd, capture_output=True, text=True)
             rec['wall_s'] = round(time.time() - t0, 2)
             rec['exit_code'] = p.returncode

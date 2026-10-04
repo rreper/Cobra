@@ -1,0 +1,212 @@
+{
+  "app": {
+    "diagnostic_log": false,
+    "diagnostic_log_file": "",
+    "initialization": "manual_heading_align",
+    "joseph_form": true,
+    "legacy_q_rotation": false,
+    "logging_level": "INFO",
+    "name": "pos_ins_network",
+    "orchestration": "standard",
+    "preprocessors": [
+      "standard"
+    ],
+    "state_modeling": "standard",
+    "transport": "lcm_udp",
+    "ui_log_plotting": false
+  },
+  "configs": [
+    {
+      "type": "LcmTransportConfig",
+      "group": "config/lcm_transport",
+      "url": "udpm://239.255.76.67:7667?ttl=0",
+      "subscribe_to": "^(/sensor/vn-100/imu|/sensor/ublox-ZED-F9T/position)$",
+      "idle_timeout_sec": 3.0,
+      "output_file": "pntos_output.log"
+    },
+    {
+      "auto_shutdown": true,
+      "buffer_length_sec": 2.0,
+      "group": "config/controller",
+      "publish_interval": 1.0,
+      "type": "ControllerConfig"
+    },
+    {
+      "group": "config/fusion_engine",
+      "save_x_and_p_after_prop": false,
+      "save_x_and_p_after_update": false,
+      "type": "FusionEngineConfig"
+    },
+    {
+      "additional_sb_configs": [
+        {
+          "estimate_with_covariance": {
+            "covariance_diag": [
+              9.0,
+              9.0,
+              9.0
+            ],
+            "estimate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "type": "EWC_GENERIC"
+          },
+          "fogm_model": {
+            "group": "config/pos_sensor_error",
+            "sigma": [
+              1.5,
+              1.5,
+              2.0
+            ],
+            "tau": [
+              300.0,
+              300.0,
+              200.0
+            ],
+            "type": "FogmConfig"
+          },
+          "group": "config/pos_fogm_block",
+          "label": "pos_sensor_error",
+          "type": "FogmStateBlockConfig"
+        }
+      ],
+      "alignment_channels": [
+        "/sensor/ublox-ZED-F9T/position",
+        "/sensor/vn-100/imu"
+      ],
+      "alignment_config": {
+        "group": "config/default/alignment",
+        "heading": 0.06895795874629593,
+        "heading_sigma": 0.02236067977,
+        "imu_model": {
+          "group": "config/inertial_state",
+          "preset": "vn100_corrected",
+          "type": "ImuConfig"
+        },
+        "static_time": 10.0,
+        "type": "ManualHeadingAlignmentConfig"
+      },
+      "best_sol_channel": "/solution/pntos/pva",
+      "group": "config/orchestration",
+      "imu_sol_channel": "/solution/pntos-imu/pva",
+      "inertial_config": {
+        "C_imu_to_platform": [
+          [
+            0.99802515,
+            0.01772605,
+            0.06026269
+          ],
+          [
+            -0.01742059,
+            0.99983262,
+            -0.00559042
+          ],
+          [
+            -0.0603517,
+            0.00452957,
+            0.9981669
+          ]
+        ],
+        "channels": [
+          "/sensor/vn-100/imu"
+        ],
+        "expected_dt": 0.01,
+        "group": "config/inertial",
+        "inertial_buffer_length": 10.0,
+        "type": "InertialConfig"
+      },
+      "max_filter_lag": 2.0,
+      "max_prop_interval": 2.0,
+      "mp_configs": [
+        {
+          "aux_channels": [
+            "INERTIAL_PVA"
+          ],
+          "channel": "/sensor/ublox-ZED-F9T/position",
+          "group": "config/pos_measurement_processor",
+          "label": "pos",
+          "lever_arm": [
+            -0.5,
+            0.38,
+            -0.05
+          ],
+          "state_block_labels": [
+            "pinson15",
+            "pos_sensor_error"
+          ],
+          "type": "PinsonWithNedFogmPositionMPConfig"
+        }
+      ],
+      "pinson_sb_config": {
+        "group": "config/pinson_block",
+        "imu_model": {
+          "group": "config/inertial_state",
+          "preset": "vn100_corrected",
+          "type": "ImuConfig"
+        },
+        "label": "pinson15",
+        "legacy_q_rotation": false,
+        "type": "PinsonStateBlockConfig"
+      },
+      "preprocessor_configs": [
+        {
+          "C_imu_to_platform": [
+            [
+              0.99802515,
+              0.01772605,
+              0.06026269
+            ],
+            [
+              -0.01742059,
+              0.99983262,
+              -0.00559042
+            ],
+            [
+              -0.0603517,
+              0.00452957,
+              0.9981669
+            ]
+          ],
+          "channels": [
+            "/sensor/vn-100/imu"
+          ],
+          "group": "config/imu_rotator",
+          "type": "ImuRotatorConfig"
+        },
+        {
+          "channels": [
+            "/sensor/vn-100/imu"
+          ],
+          "expected_dt_nsec": 10000000,
+          "group": "config/time_adjuster",
+          "type": "TimeAdjusterConfig"
+        },
+        {
+          "channels": [
+            "/sensor/ublox-ZED-F9T/position"
+          ],
+          "group": "config/time_bias",
+          "time_bias": 150000000,
+          "type": "TimeBiasConfig"
+        }
+      ],
+      "publish_after_update": false,
+      "publish_before_update": false,
+      "stream_config": {
+        "default_buffer_mode": "SEQUENCED",
+        "group": "config/stream_config",
+        "override_streams": [
+          {
+            "group": "config/imu_stream",
+            "message_type": "MEASUREMENT_IMU",
+            "type": "Stream"
+          }
+        ],
+        "type": "StreamConfig"
+      },
+      "type": "StandardOrchestrationConfig"
+    }
+  ]
+}

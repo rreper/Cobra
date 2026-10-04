@@ -2,6 +2,28 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — Roadmap Phase 3: push API, C ABI, network LCM, CSV, packaging
+
+- **Push API** (`app/Filter.hpp`, DESIGN.md §7.18): `StandardControllerPlugin::start()/stop()` split out of
+  `take_control()`; `PushTransportPlugin`; `cobra::Filter` with `push`, `take_solutions`, a solution callback,
+  `solution(time)`, `registry`, `stop`. `run_app_via_push` (flag `--via-push`) is the LCM log runner on top of it:
+  **all 12 apps × 2 modes identical to the log transport to every printed digit.**
+- **C ABI** (`capi/cobra.h`, §7.19): create / push imu, position, velocity, raw LCM / poll, solution_at / stop,
+  destroy, last_error; `examples/c/run_log.c` replays the example log from plain C (`build/examples/c_run_log`).
+- **Network LCM** (`transport/LcmUdpTransportPlugin.hpp`, §7.20): the LCM UDP multicast wire protocol (short and
+  fragmented datagrams) without liblcm; `idle_timeout_sec`, `output_file`; `tools/lcm_log_player`;
+  `configs/pos_ins_network.json`; `tools/run_network_acceptance.py`: the full log at 25× speed reproduces pos_ins
+  exactly (2570 epochs, pos std 0.916 / 0.706 / 1.39 m, yaw std 0.831°), 262 806 datagrams, no loss.
+- **CSV transport** (`transport/CsvTransportPlugin.hpp`): header-matched IMU / position / velocity files merged
+  in time, solutions to CSV; `tools/lcm_to_csv`; `configs/pos_ins_csv.json`; the 60 s run equals the LCM run
+  (times identical, latitudes within 2 cm from the diagonal-only covariance).
+- **Packaging** (§7.21): versioned library, `meson install` (headers, `cobra_run`, geoid, configs), `pntos-cobra.pc`,
+  `docs/GETTING_STARTED.md`. Project version 0.2.0.
+- Verification: 22 suites / 202 tests green (new `filter`, `transports`); acceptance 24/24 compiled, 24/24 via push;
+  CI script PASS (compiled, config files, push); network acceptance PASS.
+- Deferred: ROS 2 adapter (no ROS environment), UI server plugin. The GitHub token still needs the `workflow`
+  scope before `ci/github-ci.yml` can move to `.github/workflows/`.
+
 ## 2026-10-04 — Roadmap Phase 2: innovation gating, degraded-sensor matrix, geoid
 
 - **Innovation gating** (`StandardFusionEngine::set_innovation_gate`, DESIGN.md §7.15): chi-square gate per

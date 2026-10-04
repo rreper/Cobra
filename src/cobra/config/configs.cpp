@@ -959,6 +959,8 @@ void LcmTransportConfig::to_registry(api::Mediator& m) const {
   ConfigWriter w(m, group_);
   w.scalar("url", url);
   w.scalar("subscribe_to", subscribe_to);
+  if (idle_timeout_sec > 0) w.scalar("idle_timeout_sec", idle_timeout_sec);
+  w.optional("output_file", output_file);
 }
 
 std::optional<LcmTransportConfig> LcmTransportConfig::from_registry(api::Mediator& m, const std::string& group) {
@@ -966,8 +968,10 @@ std::optional<LcmTransportConfig> LcmTransportConfig::from_registry(api::Mediato
   if (!r.ok()) return std::nullopt;
   LcmTransportConfig c;
   c.group_ = group;
-  c.url = r.optional<std::string>("url").value_or("tcpq://");
+  c.url = r.optional<std::string>("url").value_or(c.url);
   c.subscribe_to = r.optional<std::string>("subscribe_to").value_or("^((?!pntos).)*$");
+  c.idle_timeout_sec = r.optional<double>("idle_timeout_sec").value_or(0.0);
+  c.output_file = r.optional<std::string>("output_file");
   if (!r.ok()) return std::nullopt;
   return c;
 }

@@ -40,7 +40,7 @@ Cobra/                  the Python original, as a submodule, used for golden-vec
 python3 -m venv .venv && .venv/bin/pip install meson ninja
 .venv/bin/meson setup build
 .venv/bin/meson compile -C build
-.venv/bin/meson test -C build
+.venv/bin/meson test -C build          # 22 suites
 ```
 
 All dependencies are fetched as meson subprojects on first `setup`; nothing needs to be installed system-wide.
@@ -84,6 +84,18 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   degraded-sensor acceptance matrix (`docs/DEGRADED_MATRIX.md`).
 - Geoid: MSL altitudes (barometer) are converted with the bundled EGM96 grid (`data/egm96_15min.bin`), see
   `configs/pos_ins_baro.json`.
+
+### Feeding the filter (Phase 3)
+
+- Push API: `cobra::Filter` (`include/pntos/cobra/app/Filter.hpp`) runs the whole stack in-process; `push()`
+  measurements, read solutions from a queue, a callback or on demand. Every app and `cobra_run` accept
+  `--via-push` to replay a log through it (identical results).
+- C ABI: `include/pntos/cobra/capi/cobra.h`; `examples/c/run_log.c` (`build/examples/c_run_log`) replays a log from plain C.
+- Network LCM: `"transport": "lcm_udp"` (`configs/pos_ins_network.json`), UDP multicast without liblcm;
+  `build/tools/lcm_log_player in.log --speed 25` replays a log for it.
+- CSV: `"transport": "csv"` (`configs/pos_ins_csv.json`); `build/tools/lcm_to_csv` shows the column layout.
+- `docs/GETTING_STARTED.md` walks through building, describing your sensors and feeding your data;
+  `meson install` installs the library, headers, `cobra_run`, the geoid grid and the configs with a pkg-config file.
 
 ### Config files
 

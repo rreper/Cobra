@@ -21,6 +21,7 @@ struct RunOptions {
   std::optional<std::string> dump_config;    ///< write the effective config here and exit
   std::optional<std::string> dump_registry;  ///< write the registry contents here after init
   std::optional<bool> record_input;          ///< --no-record-input: output log holds only broadcast messages
+  bool via_push = false;                     ///< --via-push: replay the LCM log through cobra::Filter instead of the log transport
   bool progress = true;                      ///< print a percentage on stderr
 };
 
@@ -37,6 +38,11 @@ api::PluginList build_plugins(const AppConfig& config, const std::function<void(
 
 /// Builds, runs the controller to completion and returns the process exit code (0 = success).
 int run_app(const AppConfig& config, const RunOptions& options);
+
+/// The LCM log runner on top of the push API: reads the log named by the LcmLogTransportConfig, pushes
+/// every selected event through a cobra::Filter and writes the published solutions (and, if configured,
+/// the input events) to the output log. Produces the same solutions as the log transport.
+int run_app_via_push(const AppConfig& config, const RunOptions& options);
 
 /// The AppSpec every standard app uses (lcm_log, manual-heading alignment, standard everything).
 AppSpec standard_app_spec(const std::string& name);

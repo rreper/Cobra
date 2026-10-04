@@ -21,6 +21,7 @@ def main():
     ap.add_argument('--log', default='testdata/example_60s.log')
     ap.add_argument('--workdir', default='build/ci_acceptance')
     ap.add_argument('--runner', action='store_true', help='run through build/apps/cobra_run with configs/<app>.json')
+    ap.add_argument('--via-push', action='store_true', help='replay through the push API (cobra::Filter) instead of the log transport')
     ap.add_argument('--modes', default='corrected,legacy')
     a = ap.parse_args()
     os.makedirs(a.workdir, exist_ok=True)
@@ -34,6 +35,8 @@ def main():
                 cmd = [os.path.join(a.build, 'apps', 'cobra_run'), os.path.join('configs', app + '.json'), out, a.log, flag, '--quiet', '--no-record-input']
             else:
                 cmd = [os.path.join(a.build, 'apps', app), out, a.log, flag, '--quiet', '--no-record-input']
+            if a.via_push:
+                cmd.append('--via-push')
             p = subprocess.run(cmd, capture_output=True, text=True)
             errors = [l for l in (p.stdout + p.stderr).splitlines() if '[ERROR]' in l]
             s = json.loads(subprocess.check_output([stats_exe, out, '--truth-log', a.log], text=True)) if p.returncode == 0 else {}
