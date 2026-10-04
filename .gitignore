@@ -25,3 +25,6 @@ registry_permanency_files/
 .vscode/
 .idea/
 *.swp
+
+# the 60 s cut of the example log used by CI is tracked despite *.log
+!testdata/example_60s.log

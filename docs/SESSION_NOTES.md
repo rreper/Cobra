@@ -206,11 +206,27 @@ Working loop:
 When a result moves without an obvious cause: parity harnesses first, then the step trace, then an
 epoch-by-epoch comparison of solution logs.
 
-## 10. Open items and limitations
+## 10. Roadmap execution, 4 October 2026
 
-- Corrected Pinson-Q mode passes 3 of 12 apps against limits set with the inflated yaw noise (Phase 1 retune).
-- MSL altitude rejected until a geoid model is wired in.
-- Not ported: network LCM transport, ROS transport, UI server plugin and registry views, Buscat controller.
+After these notes were first written, the three roadmap phases were executed in the same session, each gated by
+the full unit suite and the acceptance run before its push (details in PROGRESS.md and ROADMAP.md).
+
+| Phase | Delivered | Verified by |
+|---|---|---|
+| 1 Foundation | JSON config files (Python class and field names), `cobra_run`, 12 example configs written by the apps, IMU / GNSS presets, corrected Pinson-Q default with yaw gyro RW retuned to 6.0e-4 rad/√s, derived corrected-mode limits, CI script + 60 s log | registry byte-identical between every compiled app and its config file in both modes; acceptance 12 / 12 in both modes, also through the config files; 20 suites |
+| 2 Robustness | chi-square innovation gating with registry counters, sensor-degradation preprocessor, 11-row degraded matrix with recorded limits, EGM96 geoid for MSL altitudes, small acceptance logs | 50 m outlier rejected with the solution unchanged; consumer-grade IMU emulation raises yaw std 0.83° → 4.1°; barometer altitudes accepted; 195 tests |
+| 3 Integration | `cobra::Filter` push API on a start/stop controller, log runner rebuilt on it, C ABI + C example, LCM over UDP multicast (no liblcm) + log player, CSV transport + exporter, `meson install` + pkg-config, GETTING_STARTED.md | push replay identical to the log transport in both modes; network replay of the full log reproduces pos_ins exactly (2570 epochs); CSV run equals the LCM run; 22 suites, 202 tests |
+
+CI: the GitHub token was given the `workflow` scope on 4 Oct and `.github/workflows/ci.yml` is live (first run:
+see §11). Still deferred: the ROS 2 adapter (no ROS environment here) and the UI server plugin.
+
+## 11. Open items and limitations
+
+- Corrected Pinson-Q mode is the default with derived limits (`docs/limits_corrected.json`); the legacy switch
+  reproduces Python; the upstream answer to the reported bug decides where Python parity moves.
+- Not ported: ROS transport (thin adapter over the push API when a ROS environment exists), UI server plugin and
+  registry views, Buscat controller.
+- Datasheet IMU presets are untuned starting points; validate them on new datasets.
 - HDF5 writer: booleans as uint8 without the 'bool' attribute; Message values skipped.
 - UI log plugin writes a summary and CSV rather than figures.
 - Registry permanency does not persist Message values.
