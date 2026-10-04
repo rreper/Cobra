@@ -550,7 +550,7 @@ std::optional<StandardFusionEngine::InnovationStatistic> StandardFusionEngine::i
   if (!x || !P) return std::nullopt;
   const Vector nu = model->z - model->h(*x);
   const Matrix S = (model->H * *P * model->H.transpose() + model->R).eval();
-  return InnovationStatistic{nu.dot(S.ldlt().solve(nu)), static_cast<int>(nu.size()), nu};
+  return InnovationStatistic{nu.dot(S.ldlt().solve(nu)), static_cast<int>(nu.size()), nu, S};
 }
 
 void StandardFusionEngine::update(const std::string& processor_label, const api::Message& message) {

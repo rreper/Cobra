@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — v0.2.3: innovation covariance in the probe
+
+- `StandardFusionEngine::InnovationStatistic` also carries S = H P Hᵀ + R, so a consistency monitor can
+  normalise innovation sequences itself. 22 suites / 207 tests green.
+
 ## 2026-10-04 — Hooks for out-of-tree plugins, v0.2.2
 
 - `RegistryConfig`: a generic JSON config type whose values go verbatim into a registry group, so a plugin that

@@ -202,6 +202,7 @@ TEST_F(FusionEngineTest, InnovationStatisticIsSideEffectFree) {
   EXPECT_EQ(st->dof, 3);
   EXPECT_NEAR(st->chi2, 3 * (2.0 * 2.0) / (4.0 + 4.0), 1e-12);  // nu = 2 per axis, S = P + R = 8
   EXPECT_ALLCLOSE(st->innovation, vec({2, 2, 2}));
+  EXPECT_ALLCLOSE(st->innovation_covariance, Matrix(Matrix::Identity(3, 3) * 8.0));
   // nothing moved: time, estimate and covariance unchanged, no registry gating group
   EXPECT_EQ(engine->time().elapsed_nsec, 0);
   EXPECT_ALLCLOSE(*engine->get_state_block_estimate("c"), vec({0, 0, 0}));

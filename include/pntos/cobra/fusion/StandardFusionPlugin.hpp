@@ -38,7 +38,8 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
   struct InnovationStatistic {
     double chi2;
     int dof;
-    api::Vector innovation;
+    api::Vector innovation;             ///< z - h(x)
+    api::Matrix innovation_covariance;  ///< S = H P H' + R
   };
   std::optional<InnovationStatistic> innovation_statistic(const std::string& processor_label, const api::Message& message);
   /// When false, this engine neither writes registry groups (`fusion/gating`, saved x and P) nor warns on gate
