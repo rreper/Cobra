@@ -16,7 +16,8 @@ namespace pntos::cobra {
 /// Extension points (C++ addition): the per-epoch steps are protected virtuals so that a derived
 /// orchestration (e.g. an integrity-monitoring one that runs a bank of fusion engines) can wrap them:
 /// propagate_to_time, send_inertial_aux_to_pinson, send_inertial_aux_to_measurement_processor,
-/// perform_measurement_update, apply_inertial_feedback, initialize_filter.
+/// perform_measurement_update, apply_inertial_feedback, initialize_filter, send_message_as_aux_data,
+/// send_inertial_aux_to_vsbs.
 class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
  public:
   explicit StandardOrchestrationPlugin(std::string identifier) : identifier_(std::move(identifier)) {}
@@ -73,11 +74,11 @@ class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
                                                   std::optional<api::Timestamp> t2 = std::nullopt);
   virtual void send_inertial_aux_to_measurement_processor(const std::string& mp_label);
   virtual void send_inertial_aux_to_pinson();
-  void send_inertial_aux_to_vsbs(const std::string& mp_label);
+  virtual void send_inertial_aux_to_vsbs(const std::string& mp_label);
   bool ready_to_apply_feedback();
   virtual void apply_inertial_feedback();
   virtual void perform_measurement_update(const api::Message& message, const std::string& target_mp);
-  void send_message_as_aux_data(const api::Message& message);
+  virtual void send_message_as_aux_data(const api::Message& message);
   /// Runs the preprocessor chain. `effective_tov` (optional) receives the time the original message
   /// would carry after Python's in-place preprocessing (utils/effective_time.hpp).
   std::optional<std::vector<api::Message>> preprocess_message(const api::Message& message,

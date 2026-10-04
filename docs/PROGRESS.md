@@ -2,6 +2,18 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — Hooks for out-of-tree plugins, v0.2.2
+
+- `RegistryConfig`: a generic JSON config type whose values go verbatim into a registry group, so a plugin that
+  lives outside this library can be configured from the same config file (DESIGN §7.14).
+- `app::cobra_run_main`: the cobra_run command line as a library function; `apps/cobra_run.cpp` is one line.
+- `StandardFusionEngine::innovation_statistic` (side-effect-free NIS probe) and `set_registry_reporting`
+  (quiet shadow engines); `clone()` now carries the gate configuration (DESIGN §7.15). `update()` builds its
+  full-state model through a shared helper; outputs unchanged (short acceptance 12/12 both modes).
+- Two more orchestration hooks virtual (`send_message_as_aux_data`, `send_inertial_aux_to_vsbs`).
+- 22 suites / 207 tests green. Tagged `v0.2.2`. The v0.2.1 CI and release runs passed
+  (`pntos-cobra-v0.2.1-linux-x86_64.tar.gz`).
+
 ## 2026-10-04 — Degradation extensions, orchestration extension points, plugin registration, v0.2.1
 
 - **Orchestration extension points**: `StandardOrchestrationPlugin` is no longer `final`; its per-step methods

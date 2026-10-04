@@ -639,6 +639,11 @@ plugins without touching the app builder: `app::register_orchestration(name, fac
 appears in `AppSpec.extra_plugins` (JSON `app.extra_plugins`). Factories receive the `AppConfig` being built, so a
 plugin can read its own config group. This is how out-of-tree orchestrations derived from
 `StandardOrchestrationPlugin` (whose per-step methods are virtual, see §7.9) plug into `cobra_run` and the push API.
+Such a plugin's own settings travel in a `RegistryConfig` (`{"type": "RegistryConfig", "group": "config/x",
+"values": {...}}`): strings, bools, integers, numbers, string arrays, numeric arrays (column vectors) and
+matrices are written verbatim into that registry group, and `RegistryConfig::from_registry` reads them back.
+`app::cobra_run_main(argc, argv, program)` is the whole cobra_run command line as a library function, so an
+executable that registers extra plugins offers the same interface (`apps/cobra_run.cpp` is one line).
 
 ### 7.15 Innovation gating (`StandardFusionEngine::set_innovation_gate`)
 
@@ -654,6 +659,13 @@ for a gate). Configuration: `MeasurementProcessorConfig::innovation_gate_probabi
 `FusionEngineConfig::innovation_gate_probability` as the default for all; both default to off (Cobra
 behaviour, registry layout unchanged). With 0.999 on the position processor, a 50 m outlier injected into
 pos_ins is rejected and the solution is unaffected (`docs/DEGRADED_MATRIX.md`, row `jump_50m`).
+
+Two related engine additions serve consistency monitors built outside this library:
+`StandardFusionEngine::innovation_statistic(processor, message)` returns the normalised innovation squared, its
+dimension and the innovation vector that a message *would* produce, computed on a private clone so the engine,
+the registry and the gate counters are untouched; and `set_registry_reporting(false)` silences an engine's
+registry writes (`fusion/gating`, saved x and P) and gate warnings, for shadow engines that run beside the main
+one. `clone()` copies the gate configuration (not its counters) and the reporting flag.
 
 ### 7.16 Sensor degradation and the degraded-sensor matrix (`SensorDegradationPreprocessor`)
 

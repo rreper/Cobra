@@ -57,4 +57,9 @@ void register_extra_plugin(const std::string& name, ExtraPluginFactory factory);
 std::vector<std::string> registered_orchestrations();
 std::vector<std::string> registered_extra_plugins();
 
+/// The whole of the cobra_run command line (config file, run options, --list-presets) as a library function, so
+/// that a program linking extra plugins can offer the same interface after registering them. `program` names the
+/// executable in usage and error text.
+int cobra_run_main(int argc, char** argv, const char* program = "cobra_run");
+
 }  // namespace pntos::cobra::app

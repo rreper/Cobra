@@ -364,3 +364,32 @@ TEST(AppBuilder, RegisteredOrchestrationsAndExtraPlugins) {
   a.app.extra_plugins = {"nope"};
   EXPECT_THROW(app::build_plugins(a), std::runtime_error);
 }
+
+TEST(JsonConfig, RegistryConfigRoundTrip) {
+  using namespace cobra;
+  auto jc = json::parse(R"({"type":"RegistryConfig","group":"config/integrity","values":{
+      "sources":["/a","/b"],"probability":0.999,"consecutive":3,"enabled":true,"name":"x",
+      "sigma":[1.0,2.0,3.0],"m":[[1.0,0.0],[0.0,1.0]]}})");
+  auto c = jsoncfg::config_from_json(jc);
+  auto* r = dynamic_cast<const RegistryConfig*>(c.get());
+  ASSERT_NE(r, nullptr);
+  EXPECT_EQ(r->group(), "config/integrity");
+  EXPECT_EQ(std::get<api::StringArray>(r->values.at("sources")).size(), 2u);
+  EXPECT_EQ(std::get<std::int64_t>(r->values.at("consecutive")), 3);
+  EXPECT_EQ(std::get<api::Matrix>(r->values.at("sigma")).rows(), 3);
+  EXPECT_EQ(std::get<api::Matrix>(r->values.at("m")).cols(), 2);
+  json back = jsoncfg::config_to_json(*c);
+  EXPECT_EQ(back["values"]["sigma"], json::parse("[1.0,2.0,3.0]"));
+  EXPECT_EQ(back["values"]["m"][1][1], 1.0);
+  EXPECT_EQ(back["values"]["name"], "x");
+  // through the registry and back
+  TestMediator med;
+  StandardRegistryPlugin reg("r", {c});
+  reg.init_plugin(std::nullopt, &med);
+  med.set_registry(reg.new_registry());
+  auto got = RegistryConfig::from_registry(med, "config/integrity");
+  ASSERT_TRUE(got);
+  EXPECT_EQ(std::get<double>(got->values.at("probability")), 0.999);
+  EXPECT_EQ(std::get<api::StringArray>(got->values.at("sources"))[1], "/b");
+  EXPECT_FALSE(RegistryConfig::from_registry(med, "config/nope"));
+}

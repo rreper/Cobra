@@ -192,6 +192,35 @@ TEST_F(FusionEngineTest, UpdateThroughRealAndVirtualBlocks) {
   EXPECT_FALSE(engine->virtual_state_block_target_labels().has_value());
 }
 
+TEST_F(FusionEngineTest, InnovationStatisticIsSideEffectFree) {
+  engine->add_state_block(constant("c", 3), ewc({0, 0, 0}, 4.0));
+  engine->add_measurement_processor(
+      std::make_unique<DirectProcessor>("real", std::vector<std::string>{"c"}, vec({2, 2, 2}), 4.0));
+  Message m(make_position(kSec, 0, 0, 0, Matrix::Identity(3, 3)), "src");
+  auto st = engine->innovation_statistic("real", m);
+  ASSERT_TRUE(st);
+  EXPECT_EQ(st->dof, 3);
+  EXPECT_NEAR(st->chi2, 3 * (2.0 * 2.0) / (4.0 + 4.0), 1e-12);  // nu = 2 per axis, S = P + R = 8
+  EXPECT_ALLCLOSE(st->innovation, vec({2, 2, 2}));
+  // nothing moved: time, estimate and covariance unchanged, no registry gating group
+  EXPECT_EQ(engine->time().elapsed_nsec, 0);
+  EXPECT_ALLCLOSE(*engine->get_state_block_estimate("c"), vec({0, 0, 0}));
+  EXPECT_NEAR((*engine->strategy()->covariance())(0, 0), 4.0, 1e-12);
+  EXPECT_FALSE(med.registry().has_group("fusion/gating"));
+  EXPECT_FALSE(engine->innovation_statistic("missing", m));
+  // a quiet clone neither reports gating to the registry nor loses the gate itself
+  engine->set_innovation_gate("real", 0.5);
+  auto quiet = engine->clone();
+  auto* q = dynamic_cast<cobra::StandardFusionEngine*>(quiet.get());
+  ASSERT_NE(q, nullptr);
+  q->set_registry_reporting(false);
+  q->update("real", m);
+  EXPECT_FALSE(med.registry().has_group("fusion/gating"));
+  ASSERT_TRUE(q->gate_stats("real"));
+  EXPECT_EQ(q->gate_stats("real")->accepted + q->gate_stats("real")->rejected, 1u);
+  EXPECT_EQ(engine->time().elapsed_nsec, 0);
+}
+
 TEST_F(FusionEngineTest, AuxDataRouting) {
   engine->add_state_block(constant("c", 1), ewc({0}, 1.0));
   auto proc = std::make_unique<DirectProcessor>("p", std::vector<std::string>{"c"}, vec({1}), 1.0);

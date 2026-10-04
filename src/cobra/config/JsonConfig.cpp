@@ -735,6 +735,24 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     if (jc.contains("output_file") && !jc.at("output_file").is_null()) c->output_file = jc.at("output_file").get<std::string>();
     return c;
   }
+  if (type == "RegistryConfig") {
+    auto c = std::make_shared<RegistryConfig>();
+    c->group_ = need(jc, "group").get<std::string>();
+    for (const auto& [k, v] : need(jc, "values").items()) {
+      if (v.is_string()) c->values[k] = v.get<std::string>();
+      else if (v.is_boolean()) c->values[k] = v.get<bool>();
+      else if (v.is_number_integer()) c->values[k] = v.get<std::int64_t>();
+      else if (v.is_number()) c->values[k] = v.get<double>();
+      else if (v.is_array() && (v.empty() || v.front().is_string())) c->values[k] = v.get<api::StringArray>();
+      else if (v.is_array() && v.front().is_number()) {
+        api::Matrix col(static_cast<Eigen::Index>(v.size()), 1);
+        for (std::size_t i = 0; i < v.size(); ++i) col(static_cast<Eigen::Index>(i), 0) = v[i].get<double>();
+        c->values[k] = col;
+      } else if (v.is_array() && v.front().is_array()) c->values[k] = matrix(v, k.c_str());
+      else fail("RegistryConfig value \"" + k + "\" must be a string, bool, number, string array or numeric array");
+    }
+    return c;
+  }
   fail("unknown config type \"" + type + "\"");
 }
 
@@ -755,13 +773,36 @@ std::string type_name(const BaseConfig& c) {
   PNTOS_TN(ManualAlignmentConfig)
   PNTOS_TN(StaticAlignmentConfig) PNTOS_TN(ManualHeadingAlignmentConfig) PNTOS_TN(PvaMessageInitializationConfig)
   PNTOS_TN(StandardOrchestrationConfig) PNTOS_TN(TutorialOrchestrationConfig) PNTOS_TN(UiLogPlottingConfig)
-  PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig) PNTOS_TN(CsvTransportConfig)
+  PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig) PNTOS_TN(CsvTransportConfig) PNTOS_TN(RegistryConfig)
 #undef PNTOS_TN
   return "BaseConfig";
 }
 
 json config_to_json(const BaseConfig& c) {
   const std::string type = type_name(c);
+  if (auto* p = dynamic_cast<const RegistryConfig*>(&c)) {
+    json values = json::object();
+    for (const auto& [k, v] : p->values)
+      std::visit(
+          [&](const auto& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, api::Matrix>) {
+              if (x.cols() == 1) {
+                json col = json::array();
+                for (Eigen::Index i = 0; i < x.rows(); ++i) col.push_back(x(i, 0));
+                values[k] = col;
+              } else {
+                values[k] = j(x);
+              }
+            } else if constexpr (std::is_same_v<T, api::Message>) {
+              fail("RegistryConfig value \"" + k + "\" holds a message and cannot be written as JSON");
+            } else {
+              values[k] = x;
+            }
+          },
+          v);
+    return json{{"type", type}, {"group", p->group_}, {"values", values}};
+  }
   if (auto* p = dynamic_cast<const ImuConfig*>(&c)) return imu_to(*p);
   if (auto* p = dynamic_cast<const FogmConfig*>(&c)) return fogm_to(*p);
   if (auto* p = dynamic_cast<const MountingConfig*>(&c))

@@ -50,6 +50,7 @@ cobra_sources = files(
   'cobra/config/JsonConfig.cpp',
   'cobra/app/AppBuilder.cpp',
   'cobra/app/Filter.cpp',
+  'cobra/app/RunMain.cpp',
   'cobra/transport/LcmUdpTransportPlugin.cpp',
   'cobra/transport/CsvTransportPlugin.cpp',
   'cobra/capi/cobra_c.cpp',

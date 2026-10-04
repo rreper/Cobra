@@ -32,6 +32,19 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
   std::optional<GateStats> gate_stats(const std::string& processor_label) const;
   /// Chi-square quantile by the Wilson-Hilferty approximation (within a few percent for dof >= 1).
   static double chi2_quantile(double probability, int dof);
+  /// Normalised innovation squared (and its dimension) that `message` would produce through `processor_label`
+  /// at the message time, without changing this engine, the registry or the gate statistics (C++ addition:
+  /// the probe behind consistency / readmission tests). nullopt if the model cannot be built.
+  struct InnovationStatistic {
+    double chi2;
+    int dof;
+    api::Vector innovation;
+  };
+  std::optional<InnovationStatistic> innovation_statistic(const std::string& processor_label, const api::Message& message);
+  /// When false, this engine neither writes registry groups (`fusion/gating`, saved x and P) nor warns on gate
+  /// rejections: for engines that shadow a main one (C++ addition). Default true; clone() copies it.
+  void set_registry_reporting(bool on) { report_ = on; }
+  bool registry_reporting() const { return report_; }
 
   api::Timestamp time() const override { return time_; }
   void set_time(api::Timestamp time) override { time_ = time; }
@@ -122,6 +135,9 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
   /// Resolves a (possibly virtual) label to its real block, logging as the Python does.
   const StateBlockInfo* resolve(const std::string& label, bool& is_real, const char* what);
   api::GenXandP gen_x_and_p_func();
+  /// The processor's model mapped onto the full state (shared by update and innovation_statistic).
+  std::optional<api::StandardMeasurementModel> full_model(api::StandardMeasurementProcessor* proc,
+                                                          const std::string& processor_label, const api::Message& message);
 
   api::Mediator* mediator_;
   api::Timestamp time_{0};
@@ -136,6 +152,7 @@ class StandardFusionEngine final : public api::StandardFusionEngine {
   double default_gate_probability_;
   std::map<std::string, double> gates_;      ///< processor label -> probability (absent/0 = no gate)
   std::map<std::string, GateStats> gate_stats_;
+  bool report_ = true;
 };
 
 class StandardFusionPlugin final : public api::FusionPlugin {

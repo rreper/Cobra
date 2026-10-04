@@ -1034,4 +1034,18 @@ std::optional<UiLogPlottingConfig> UiLogPlottingConfig::from_registry(api::Media
   return c;
 }
 
+void RegistryConfig::to_registry(api::Mediator& m) const {
+  auto kv = m.registry().batch(group_);
+  for (const auto& [k, v] : values) kv->set(k, v);
+}
+
+std::optional<RegistryConfig> RegistryConfig::from_registry(api::Mediator& m, const std::string& group) {
+  if (!m.registry().has_group(group)) return std::nullopt;
+  RegistryConfig c;
+  c.group_ = group;
+  auto kv = m.registry().batch(group);
+  for (const auto& [k, v] : kv->items()) c.values[k] = v;
+  return c;
+}
+
 }  // namespace pntos::cobra

@@ -4,6 +4,7 @@
 #include <pntos/cobra/config/BaseConfig.hpp>
 
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -582,6 +583,20 @@ struct LcmTransportConfig final : BaseConfig {
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<LcmTransportConfig> from_registry(api::Mediator& m, const std::string& group = kGroup);
+};
+
+/// C++ addition: a generic config for out-of-tree plugins (registered through app::register_orchestration /
+/// register_extra_plugin). Its values are written as-is into registry group `group_`; JSON form
+/// `{"type": "RegistryConfig", "group": "config/x", "values": {...}}` with strings, bools, integers, numbers,
+/// string arrays, numeric arrays (column vectors) and arrays of numeric arrays (matrices).
+struct RegistryConfig final : BaseConfig {
+  std::string group_;
+  std::map<std::string, api::RegistryValue> values;
+
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  /// Every key of the group as stored; nullopt if the group does not exist.
+  static std::optional<RegistryConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
 }  // namespace pntos::cobra

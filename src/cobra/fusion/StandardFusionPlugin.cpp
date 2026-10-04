@@ -441,7 +441,7 @@ void StandardFusionEngine::propagate(Timestamp time) {
   strategy_->propagate(big);
   trace_state("P", "prop", time_, time, strategy_.get());
   time_ = time;
-  if (save_after_prop_) save_x_and_p_to_registry();
+  if (save_after_prop_ && report_) save_x_and_p_to_registry();
 }
 
 std::optional<std::string> StandardFusionEngine::get_real_label(const std::string& label) {
@@ -449,20 +449,11 @@ std::optional<std::string> StandardFusionEngine::get_real_label(const std::strin
   return vsb_manager_.get_start_block_label(label);
 }
 
-void StandardFusionEngine::update(const std::string& processor_label, const api::Message& message) {
-  if (!strategy_) throw std::logic_error("FusionStrategy has not been set");
-  auto* proc = find_processor(processor_label);
-  if (!proc) {
-    log(LoggingLevel::ERROR, "Attempted process measurement, but measurement processor (" + processor_label +
-                                 ") does not exist. No action taken.");
-    return;
-  }
-  auto tov = message.wrapped_message ? utils::time_of_validity(*message.wrapped_message) : std::nullopt;
-  if (!tov) throw std::invalid_argument("update(): message has no time of validity");
-  propagate(*tov);
-
+std::optional<api::StandardMeasurementModel> StandardFusionEngine::full_model(api::StandardMeasurementProcessor* proc,
+                                                                               const std::string& processor_label,
+                                                                               const api::Message& message) {
   auto mm = proc->generate_model(message, gen_x_and_p_func());
-  if (!mm) return;
+  if (!mm) return std::nullopt;
 
   // Map each label the processor models onto the full state. A real block consumes its own width
   // of the processor's H; a virtual block consumes the virtual width and is pulled back onto its
@@ -479,7 +470,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
   auto full_est = strategy_->estimate();
   if (!full_est) {
     log(LoggingLevel::ERROR, "Unable to get estimate from strategy.");
-    return;
+    return std::nullopt;
   }
   Matrix full_H = Matrix::Zero(mm->H.rows(), num_states_);
   Eigen::Index mp_num_states = 0;
@@ -487,12 +478,12 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
     auto real = get_real_label(label);
     if (!real) {
       log(LoggingLevel::ERROR, "Unable to populate H with the jacobian from block \"" + label + "\"");
-      return;
+      return std::nullopt;
     }
     const auto* sb = find_block(*real);
     if (!sb) {
       log(LoggingLevel::ERROR, "Unable to find the state block \"" + *real + "\".");
-      return;
+      return std::nullopt;
     }
     const bool is_virtual = vsb_labels.count(label) != 0;
     Eigen::Index n_mp = sb->num_states;
@@ -500,7 +491,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
     if (is_virtual) {
       Vector real_est = full_est->segment(sb->start_index, sb->num_states);
       real_to_virt = vsb_manager_.jacobian(real_est, sb->label, label, time_);
-      if (!real_to_virt) return;
+      if (!real_to_virt) return std::nullopt;
       n_mp = real_to_virt->rows();
     }
     if (mp_num_states + n_mp > mm->H.cols())
@@ -537,13 +528,52 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
     return h_mp(x_mp);
   };
 
-  api::StandardMeasurementModel big{mm->z, full_h, full_H, mm->R};
+  return api::StandardMeasurementModel{mm->z, full_h, full_H, mm->R};
+}
+
+std::optional<StandardFusionEngine::InnovationStatistic> StandardFusionEngine::innovation_statistic(
+    const std::string& processor_label, const api::Message& message) {
+  if (!strategy_ || !find_processor(processor_label)) return std::nullopt;
+  auto tov = message.wrapped_message ? utils::time_of_validity(*message.wrapped_message) : std::nullopt;
+  if (!tov) return std::nullopt;
+  // Work on a copy so that propagating to the message time leaves this engine untouched.
+  auto copy_base = clone();
+  auto* copy = static_cast<StandardFusionEngine*>(copy_base.get());
+  copy->report_ = false;
+  ++g_in_peek;
+  copy->propagate(*tov);
+  auto model = copy->full_model(copy->find_processor(processor_label), processor_label, message);
+  --g_in_peek;
+  if (!model) return std::nullopt;
+  auto x = copy->strategy_->estimate();
+  auto P = copy->strategy_->covariance();
+  if (!x || !P) return std::nullopt;
+  const Vector nu = model->z - model->h(*x);
+  const Matrix S = (model->H * *P * model->H.transpose() + model->R).eval();
+  return InnovationStatistic{nu.dot(S.ldlt().solve(nu)), static_cast<int>(nu.size()), nu};
+}
+
+void StandardFusionEngine::update(const std::string& processor_label, const api::Message& message) {
+  if (!strategy_) throw std::logic_error("FusionStrategy has not been set");
+  auto* proc = find_processor(processor_label);
+  if (!proc) {
+    log(LoggingLevel::ERROR, "Attempted process measurement, but measurement processor (" + processor_label +
+                                 ") does not exist. No action taken.");
+    return;
+  }
+  auto tov = message.wrapped_message ? utils::time_of_validity(*message.wrapped_message) : std::nullopt;
+  if (!tov) throw std::invalid_argument("update(): message has no time of validity");
+  propagate(*tov);
+
+  auto big_opt = full_model(proc, processor_label, message);
+  if (!big_opt) return;
+  api::StandardMeasurementModel& big = *big_opt;
   if (auto g = gates_.find(processor_label); g != gates_.end()) {
     auto x = strategy_->estimate();
     auto P = strategy_->covariance();
     if (x && P) {
-      const Vector nu = mm->z - full_h(*x);
-      const Matrix S = (full_H * *P * full_H.transpose() + mm->R).eval();
+      const Vector nu = big.z - big.h(*x);
+      const Matrix S = (big.H * *P * big.H.transpose() + big.R).eval();
       const double chi2 = nu.dot(S.ldlt().solve(nu));
       const double threshold = chi2_quantile(g->second, static_cast<int>(nu.size()));
       GateStats& st = gate_stats_[processor_label];
@@ -551,7 +581,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
       st.last_threshold = threshold;
       const bool reject = !(chi2 <= threshold);  // NaN rejects too
       reject ? ++st.rejected : ++st.accepted;
-      if (mediator_ && g_in_peek == 0) {
+      if (mediator_ && g_in_peek == 0 && report_) {
         auto kv = mediator_->registry().batch("fusion/gating");
         kv->set(processor_label + "_accepted", static_cast<std::int64_t>(st.accepted));
         kv->set(processor_label + "_rejected", static_cast<std::int64_t>(st.rejected));
@@ -561,7 +591,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
         std::ostringstream os;
         os << "Innovation gate rejected a measurement from processor \"" << processor_label << "\" at time " << std::fixed
            << std::setprecision(3) << tov->seconds() << "s: chi2 " << chi2 << " > " << threshold << " (dof " << nu.size() << ")";
-        log(LoggingLevel::WARN, os.str());
+        if (report_) log(LoggingLevel::WARN, os.str());
         trace_state("R", processor_label, *tov, time_, strategy_.get());
         return;
       }
@@ -569,7 +599,7 @@ void StandardFusionEngine::update(const std::string& processor_label, const api:
   }
   strategy_->update(big);
   trace_state("U", processor_label, *tov, time_, strategy_.get());
-  if (save_after_update_) save_x_and_p_to_registry();
+  if (save_after_update_ && report_) save_x_and_p_to_registry();
 }
 
 std::optional<EstimateWithCovariance> StandardFusionEngine::peek_ahead(Timestamp time,
@@ -686,6 +716,9 @@ std::unique_ptr<api::StandardFusionEngine> StandardFusionEngine::clone() const {
     c->sb_.push_back({b.label, b.num_states, b.start_index, b.stop_index, b.block->clone()});
   for (const auto& p : mp_) c->mp_.push_back(p->clone());
   c->vsb_manager_ = vsb_manager_;
+  c->default_gate_probability_ = default_gate_probability_;
+  c->gates_ = gates_;
+  c->report_ = report_;
   return c;
 }
 
