@@ -220,7 +220,11 @@ the full unit suite and the acceptance run before its push (details in PROGRESS.
 CI: the GitHub token was given the `workflow` scope on 4 Oct and `.github/workflows/ci.yml` is live. The first
 run failed only because `*.log` in `.gitignore` had kept `testdata/example_60s.log` out of the repository; with
 the file tracked, run 2 passed every step (build, 22 suites, short acceptance through the compiled apps, the
-config files and the push API, and the C example). Still deferred: the ROS 2 adapter (no ROS environment here) and the UI server plugin.
+config files and the push API, and the C example). Hygiene followed the same day: `CONTRIBUTING.md`, clang-format / clang-tidy configs, a sanitizer CI job (clean)
+and a tag-triggered release workflow; `v0.2.0` is published with an install tarball. Still deferred: the ROS 2
+adapter (no ROS environment here) and the UI server plugin. The next step discussed is a separate product
+repository (`pnt-edge`) for an edge single-board computer: NMEA 0183 and ASPN on a tactical Ethernet
+interface, a browser maintenance UI with authentication on a second interface, built on the push API.
 
 ## 11. Open items and limitations
 

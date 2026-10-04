@@ -9,7 +9,8 @@ Newest first. Each entry: what changed, what was verified, what is next.
 - CI gained a `sanitizers` job: ASan + UBSan build and all suites (clean locally: 22 suites), then clang-tidy on
   the library sources. `release.yml` builds a release configuration on a `v*` tag, runs the suites, installs into
   a staging tree and attaches `pntos-cobra-<tag>-linux-x86_64.tar.gz` (+ sha256) to a GitHub release.
-- Tagged `v0.2.0`.
+- Tagged `v0.2.0`: the release workflow published `pntos-cobra-v0.2.0-linux-x86_64.tar.gz` (+ sha256) at
+  https://github.com/rreper/Cobra/releases/tag/v0.2.0; the CI run with the sanitizer job passed.
 
 ## 2026-10-04 — CI live on GitHub Actions
 
