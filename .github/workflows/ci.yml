@@ -40,3 +40,31 @@ jobs:
         with:
           name: meson-logs
           path: build/meson-logs/
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ ninja-build python3-pip clang-tidy
+          pip3 install --user meson
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache subprojects
+        uses: actions/cache@v4
+        with:
+          path: subprojects/packagecache
+          key: subprojects-${{ hashFiles('subprojects/*.wrap') }}
+      - name: Configure with ASan + UBSan
+        run: meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false -Dbuildtype=debug
+      - name: Build
+        run: meson compile -C build-asan
+      - name: Unit tests under sanitizers
+        run: ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 meson test -C build-asan --print-errorlogs --timeout-multiplier 4
+      - name: clang-tidy (library sources, checks in .clang-tidy; advisory until the first results are reviewed)
+        continue-on-error: true
+        run: |
+          ninja -C build-asan -t compdb > build-asan/compile_commands.json
+          git ls-files 'src/cobra/*.cpp' | xargs -P 4 -n 8 clang-tidy -p build-asan --quiet

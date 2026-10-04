@@ -1,0 +1,18 @@
+# Checks that the code base passes today; widen deliberately, one family at a time.
+Checks: >
+  -*,
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-infinite-loop,
+  bugprone-integer-division,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memset-usage,
+  bugprone-undelegated-constructor,
+  performance-for-range-copy,
+  performance-move-const-arg,
+  performance-unnecessary-copy-initialization,
+  modernize-use-nullptr,
+  modernize-use-override,
+  misc-definitions-in-headers
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include|src)/pntos/.*'

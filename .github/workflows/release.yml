@@ -1,0 +1,34 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ ninja-build python3-pip
+          pip3 install --user meson
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build (release)
+        run: |
+          meson setup build -Dbuildtype=release -Dprefix=/usr
+          meson compile -C build
+          meson test -C build
+      - name: Install into a staging tree and pack
+        run: |
+          DESTDIR=$PWD/stage meson install -C build
+          tar -C stage -czf pntos-cobra-${GITHUB_REF_NAME}-linux-x86_64.tar.gz .
+          sha256sum pntos-cobra-${GITHUB_REF_NAME}-linux-x86_64.tar.gz > pntos-cobra-${GITHUB_REF_NAME}-linux-x86_64.tar.gz.sha256
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pntos-cobra-*.tar.gz
+            pntos-cobra-*.sha256
+          generate_release_notes: true

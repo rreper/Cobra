@@ -2,6 +2,15 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-04 — Hygiene: sanitizer + clang-tidy CI job, release workflow, CONTRIBUTING, v0.2.0
+
+- `CONTRIBUTING.md` (the loop, where each kind of addition goes, style), `.clang-tidy` (a conservative check set,
+  advisory in CI until reviewed), `.clang-format`.
+- CI gained a `sanitizers` job: ASan + UBSan build and all suites (clean locally: 22 suites), then clang-tidy on
+  the library sources. `release.yml` builds a release configuration on a `v*` tag, runs the suites, installs into
+  a staging tree and attaches `pntos-cobra-<tag>-linux-x86_64.tar.gz` (+ sha256) to a GitHub release.
+- Tagged `v0.2.0`.
+
 ## 2026-10-04 — CI live on GitHub Actions
 
 - Token given the `workflow` scope; `ci/github-ci.yml` moved to `.github/workflows/ci.yml`. First run failed
