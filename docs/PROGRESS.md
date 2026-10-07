@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-06 — v0.2.5: Allan tool as a library
+
+- `tools/imu_allan.py` exposes `analyze(log, imu_channel, truth_channel)`; without a truth channel the static
+  segments come from the gyro norm. Used by the integrity repository's per-installation tuning procedure.
+
 ## 2026-10-06 — Measured VN-100 preset and the Allan tool, v0.2.4
 
 - `tools/imu_allan.py`: static segments from the truth channel's speed, overlapping Allan deviation per axis of
