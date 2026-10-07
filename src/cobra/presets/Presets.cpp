@@ -34,6 +34,21 @@ std::vector<ImuPreset> make_presets() {
     v.push_back({"vn100_corrected", "VectorNav VN-100, Cobra tuning with the yaw gyro random walk retuned for the corrected Pinson-Q rotation",
                  "cobra-tuned, retuned 2026-10-04", c});
   }
+  {
+    // Measured on the recorded dataset (tools/imu_allan.py, 2026-10-06): Allan deviation over the 128 s static
+    // start gives a gyro white noise of 0.5-1.2e-4 rad/s/sqrt(Hz) and an accelerometer white noise of 2-2.7e-3
+    // m/s^2/sqrt(Hz) (engine vibration included); the Allan floors at 20-30 s put the bias instabilities near
+    // 1-2e-5 rad/s and 3-6e-4 m/s^2, and the bias wander between the thirteen stops of the drive stays below
+    // 1.5e-4 rad/s. The Cobra tuning above is about ten times this on the gyro white noise and four times on
+    // the bias sigmas; it absorbs installation effects the measurement does not show. Initial sigmas unchanged.
+    ImuConfig c = vn100_cobra();
+    c.accel_random_walk_sigma = {2.4e-3, 2.4e-3, 2.4e-3};
+    c.gyro_random_walk_sigma = {1.0e-4, 1.0e-4, 5.0e-5};
+    c.accel_bias_sigma = {6.0e-4, 6.0e-4, 6.0e-4};
+    c.gyro_bias_sigma = {5.0e-5, 5.0e-5, 5.0e-5};
+    v.push_back({"vn100_measured", "VectorNav VN-100 as measured on the example dataset (Allan deviation of the static start, bias wander across stops)",
+                 "tools/imu_allan.py on cobra_gps_ins_example_data.log, 2026-10-06", c});
+  }
   // Datasheet-derived starting points. Figures are the manufacturers' typical values.
   v.push_back({"vn100_datasheet", "VectorNav VN-100 from the datasheet (industrial MEMS)", "VN-100 datasheet rev. 2.x",
                imu_from_datasheet({0.21, 10.0, 0.5 * 3600 * 0 + 36.0, 0.14 * kG * 1e-3 * 60, 0.04, 2.0, 500.0}, "")});

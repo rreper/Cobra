@@ -603,7 +603,11 @@ Command-line overrides (`app::apply_overrides`) are applied on the JSON form: ou
 
 `presets::imu_presets()` holds named `ImuConfig`s: `vn100` (the Python apps' values; pairs with the legacy rotation),
 `vn100_corrected` (same with the yaw gyro random walk raised from 6.7e-5 to 6.0e-4 rad/√s; pairs with the corrected
-rotation), and datasheet-derived starting points converted by `imu_from_datasheet` (`stim300`, `adis16488`, `hg1700`,
+rotation), `vn100_measured` (the recorded unit as `tools/imu_allan.py` measures it on the example log: gyro white
+noise 0.5–1.2e-4 rad/s/√Hz, accelerometer 2–2.7e-3 m/s²/√Hz, bias instabilities 1–2e-5 rad/s and 3–6e-4 m/s²,
+i.e. a tenth of the Cobra tuning on the gyro noise and a quarter on the bias sigmas; the tuning absorbs
+installation effects the measurement does not show, so the measured preset is for consistency-sensitive uses such
+as integrity monitoring, not the default), and datasheet-derived starting points converted by `imu_from_datasheet` (`stim300`, `adis16488`, `hg1700`,
 `hg4930`, `consumer_mems`, `vn100_datasheet`). The conversion is 1 °/√h = 2.909e-4 rad/√s, 1 °/h = 4.848e-6 rad/s,
 1 mg = 9.807e-3 m/s², velocity random walk in m/s/√h divided by 60; the initial bias sigma is the turn-on
 repeatability or three times the in-run stability, whichever is larger. The datasheet presets are untuned: Cobra's

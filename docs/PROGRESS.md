@@ -2,6 +2,17 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-06 — Measured VN-100 preset and the Allan tool, v0.2.4
+
+- `tools/imu_allan.py`: static segments from the truth channel's speed, overlapping Allan deviation per axis of
+  specific force and angular rate, white-noise densities at τ = 1 s, Allan floors, bias wander across the stops.
+  On the example log: 128 s static start plus twelve stops; gyro white noise 0.5–1.2e-4 rad/s/√Hz (preset
+  6–10e-4), accelerometer 2–2.7e-3 m/s²/√Hz with engine vibration (preset 3.9e-6), Allan floors 1–2e-5 rad/s and
+  3–6e-4 m/s², gyro mean wander across 40 minutes below 1.5e-4 rad/s (heading changes included).
+- Preset `vn100_measured` with those values (initial sigmas unchanged). The default stays `vn100_corrected`:
+  acceptance limits and the Python comparison are tied to it, and the Cobra tuning absorbs installation effects.
+  Consumers that need a consistent free-inertial covariance (integrity monitoring) select the measured preset.
+
 ## 2026-10-04 — v0.2.3: innovation covariance in the probe
 
 - `StandardFusionEngine::InnovationStatistic` also carries S = H P Hᵀ + R, so a consistency monitor can
