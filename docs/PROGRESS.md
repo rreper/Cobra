@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-10 — v0.2.6: log sink
+
+- `utils::set_log_sink` / `set_log_to_console`: a process-wide sink receives every message printed through
+  `print_message` (a host daemon keeps the recent log in memory for its web page). 1 test.
+
 ## 2026-10-06 — v0.2.5: Allan tool as a library
 
 - `tools/imu_allan.py` exposes `analyze(log, imu_channel, truth_channel)`; without a truth channel the static

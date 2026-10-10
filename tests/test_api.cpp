@@ -56,3 +56,20 @@ TEST(Api, RegistryValueConversions) {
   EXPECT_EQ(registry_value_as<StringArray>(mat)->size(), 2u);
   EXPECT_FALSE(registry_value_as<std::int64_t>(mat).has_value());
 }
+
+#include <pntos/cobra/utils/logging.hpp>
+
+TEST(Logging, SinkReceivesEveryPrintedMessage) {
+  using namespace pntos;
+  std::vector<std::string> got;
+  cobra::utils::set_log_to_console(false);
+  cobra::utils::set_log_sink([&](api::LoggingLevel l, const std::string& id, const std::string& m) {
+    got.push_back(std::string(api::to_string(l)) + "|" + id + "|" + m);
+  });
+  cobra::utils::print_message(api::LoggingLevel::WARN, "unit", "hello");
+  cobra::utils::set_log_sink({});
+  cobra::utils::set_log_to_console(true);
+  cobra::utils::print_message(api::LoggingLevel::INFO, "unit", "not captured");
+  ASSERT_EQ(got.size(), 1u);
+  EXPECT_EQ(got[0], "WARN|unit|hello");
+}
