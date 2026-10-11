@@ -117,7 +117,8 @@ TEST(CApi, PushAndPoll) {
   EXPECT_NE(std::string(cobra_last_error()).find("cannot open"), std::string::npos);
   cobra_filter* f = cobra_filter_create(cfg.c_str(), "{\"logging_level\": \"WARN\"}");
   ASSERT_NE(f, nullptr) << cobra_last_error();
-  EXPECT_STREQ(cobra_version(), "0.2.0");
+  EXPECT_NE(std::string(cobra_version()), "0.0.0");
+  EXPECT_EQ(std::string(cobra_version()).find_first_not_of("0123456789."), std::string::npos);
   const std::set<std::string> channels{"/sensor/vn-100/imu", "/sensor/ublox-ZED-F9T/position"};
   cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
   std::int64_t first = 0;

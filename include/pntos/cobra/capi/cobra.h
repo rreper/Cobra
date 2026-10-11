@@ -31,7 +31,7 @@ typedef struct cobra_pva {
   char channel[96];
 } cobra_pva;
 
-/* Version of the library, e.g. "0.2.0". */
+/* Version of the library (the meson project version), e.g. "0.2.7". */
 const char* cobra_version(void);
 /* Message of the last failed call in this thread ("" if none). */
 const char* cobra_last_error(void);

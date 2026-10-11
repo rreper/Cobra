@@ -94,7 +94,10 @@ int guarded(cobra_filter* f, F&& fn) {
 
 extern "C" {
 
-const char* cobra_version(void) { return "0.2.0"; }
+#ifndef PNTOS_COBRA_VERSION
+#define PNTOS_COBRA_VERSION "0.0.0"
+#endif
+const char* cobra_version(void) { return PNTOS_COBRA_VERSION; }
 const char* cobra_last_error(void) { return g_error.c_str(); }
 
 cobra_filter* cobra_filter_create(const char* config_json_path, const char* overrides_json) {

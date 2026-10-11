@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-11 — v0.2.7: cobra_version() reports the project version
+
+- `cobra_version()` was a literal left at 0.2.0 since the C ABI landed; it now comes from the meson project
+  version. The project version is bumped with every tag from here on.
+
 ## 2026-10-10 — v0.2.6: log sink
 
 - `utils::set_log_sink` / `set_log_to_console`: a process-wide sink receives every message printed through

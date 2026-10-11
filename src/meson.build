@@ -61,7 +61,8 @@ cobra_lib = library('pntos-cobra', cobra_sources,
   include_directories: [pntos_inc, third_party_inc],
   dependencies: [pntos_api_dep],
   version: meson.project_version(),
-  install: true)
+  install: true,
+  cpp_args: ['-DPNTOS_COBRA_VERSION="' + meson.project_version() + '"'])
 
 # Installation: headers, the geoid grid, the example configs and a pkg-config file.
 install_subdir('../include/pntos', install_dir: get_option('includedir'))
