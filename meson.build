@@ -1,5 +1,5 @@
 project('pntos-cpp', ['cpp', 'c'],
-  version: '0.2.7',
+  version: '0.2.8',
   license: 'Apache-2.0',
   meson_version: '>=1.3',
   default_options: [

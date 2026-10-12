@@ -24,7 +24,7 @@ Filter::Filter(AppConfig config, const app::RunOptions& options) : config_(app::
   if (!transport_) throw std::runtime_error("Filter: no push transport in the plugin set");
   transport_->set_sink([this](const api::Message& m, const std::string& channel) {
     api::Message copy(m.wrapped_message, channel);
-    {
+    if (queue_solutions_) {
       std::lock_guard lk(mutex_);
       solutions_.push_back(copy);
     }
@@ -49,7 +49,10 @@ std::vector<api::Message> Filter::take_solutions() {
   return out;
 }
 
-void Filter::set_solution_callback(std::function<void(const api::Message&)> callback) { callback_ = std::move(callback); }
+void Filter::set_solution_callback(std::function<void(const api::Message&)> callback, bool also_queue) {
+  callback_ = std::move(callback);
+  queue_solutions_ = !callback_ || also_queue;
+}
 
 std::optional<api::Message> Filter::solution(api::Timestamp time) {
   if (stopped_ || !transport_->mediator()) return std::nullopt;

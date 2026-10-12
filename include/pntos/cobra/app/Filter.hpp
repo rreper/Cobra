@@ -60,9 +60,12 @@ class Filter {
   void push(std::shared_ptr<api::AspnBase> message, const std::string& channel) { push(api::Message(std::move(message), channel)); }
 
   /// Solutions published by the mediator (once per publish_interval of message time) since the last call.
+  /// Empty while a callback is set, unless the callback was registered with also_queue = true.
   std::vector<api::Message> take_solutions();
-  /// Called synchronously from push() for every published solution (in addition to the queue).
-  void set_solution_callback(std::function<void(const api::Message&)> callback);
+  /// Called synchronously from push() for every published solution. By default the callback replaces the queue
+  /// (a daemon that never calls take_solutions() would otherwise retain every solution, about 1 kB each, for
+  /// as long as it runs); also_queue = true keeps queueing as well.
+  void set_solution_callback(std::function<void(const api::Message&)> callback, bool also_queue = false);
   /// BEST solution at `time` on demand (nullopt before alignment or outside the inertial buffer).
   std::optional<api::Message> solution(api::Timestamp time);
 
@@ -80,6 +83,7 @@ class Filter {
   std::mutex mutex_;
   std::vector<api::Message> solutions_;
   std::function<void(const api::Message&)> callback_;
+  bool queue_solutions_ = true;
   bool stopped_ = false;
 };
 

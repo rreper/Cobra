@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-10-12 — v0.2.8: the push Filter no longer retains solutions behind a callback
+
+- `Filter::set_solution_callback` replaces the `take_solutions()` queue by default (`also_queue = true` keeps
+  both). Found by pnt-edge's first 8 h soak: the daemon used the callback only and the queue grew by one
+  solution copy (about 1 kB) per second, 28 MB over the run. Test extended; C ABI (poll only) unchanged.
+
 ## 2026-10-11 — v0.2.7: cobra_version() reports the project version
 
 - `cobra_version()` was a literal left at 0.2.0 since the C ABI landed; it now comes from the meson project

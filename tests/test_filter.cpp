@@ -75,7 +75,7 @@ TEST(Filter, DirectUse) {
   cobra::Filter f(config, o);
   EXPECT_FALSE(f.error_logged());
   std::size_t callback_count = 0;
-  f.set_solution_callback([&](const api::Message&) { ++callback_count; });
+  f.set_solution_callback([&](const api::Message&) { ++callback_count; }, /*also_queue=*/true);
   // feed the first 40 s of the example log on the two channels the app uses
   const std::set<std::string> channels{"/sensor/vn-100/imu", "/sensor/ublox-ZED-F9T/position"};
   cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
@@ -97,6 +97,17 @@ TEST(Filter, DirectUse) {
   EXPECT_EQ(callback_count, sols.size());
   EXPECT_TRUE(f.take_solutions().empty());
   EXPECT_EQ(sols.front().source_identifier, "/solution/pntos/pva");
+  // a callback registered the default way replaces the queue: a daemon that never polls must not accumulate
+  std::size_t more = 0;
+  f.set_solution_callback([&](const api::Message&) { ++more; });
+  while (auto ev = r.next()) {
+    if (!channels.count(ev->channel)) continue;
+    auto msg = cobra::lcm::decode(ev->data);
+    last = cobra::utils::time_of_validity(*msg)->elapsed_nsec;
+    f.push(msg, ev->channel);
+  }
+  EXPECT_GE(more, 10u);
+  EXPECT_TRUE(f.take_solutions().empty());
   // on-demand solution: the orchestration answers at the latest inertial time when asked for a time it
   // cannot serve exactly (Python quirk 8), so expect a solution within a second of the last push
   auto s = f.solution(api::Timestamp{last});
