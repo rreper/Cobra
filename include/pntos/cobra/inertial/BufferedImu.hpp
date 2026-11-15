@@ -3,13 +3,16 @@
 // buffered time, resets with re-propagation, and force/rate queries.
 #pragma once
 
+#include <pntos/cobra/inertial/ImuRobustness.hpp>
 #include <pntos/cobra/inertial/Mechanization.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
 
 #include <aspn23/eigen/MeasurementImu.hpp>
 
+#include <cstdint>
 #include <deque>
 #include <memory>
+#include <vector>
 
 namespace pntos::cobra::inertial {
 
@@ -67,8 +70,12 @@ class TimestampedRing {
 
 using Imu = aspn23_eigen::MeasurementImu;
 
-/// Linear interpolation of a PVA between two buffered solutions (RPY slerp for attitude).
-std::shared_ptr<utils::PVA> linear_interp_pva(const utils::PVA& a, const utils::PVA& b, Timestamp t);
+/// Linear interpolation of a PVA between two buffered solutions. Attitude: NavToolkit's slerp through
+/// roll/pitch/yaw by default, which loses the attitude within about 1e-6 rad of pitch = +-90 degrees;
+/// AttitudeInterpolation::QUATERNION slerps the quaternions directly. A solution without a quaternion is
+/// taken as level and north-pointing, as to_standard_pva does.
+std::shared_ptr<utils::PVA> linear_interp_pva(const utils::PVA& a, const utils::PVA& b, Timestamp t,
+                                              AttitudeInterpolation attitude = AttitudeInterpolation::RPY);
 /// Build a zero-covariance geodetic PVA message from a mechanization solution.
 std::shared_ptr<utils::PVA> to_pva_message(const StandardPva& s);
 StandardPva to_standard_pva(const utils::PVA& pva);
@@ -77,11 +84,44 @@ std::shared_ptr<Imu> to_force_rate_message(Timestamp t, const Vector3& force, co
 
 class BufferedImu {
  public:
-  BufferedImu(const utils::PVA& initial, double expected_dt = 0.01, double buffer_length = 60.0,
-              const ImuErrors& errors = {}, const MechanizationOptions& opts = {});
+  /// Outcome of add_sample(). Only ACCEPTED and NOT_NEWER can occur with the default ImuRobustness.
+  enum class AddStatus {
+    ACCEPTED,          ///< mechanized as received
+    GAP_FILLED,        ///< mechanized; it arrived late and its rate was held across the gap (HOLD, or SAMPLED data)
+    NOT_NEWER,         ///< rejected: not after the latest solution (duplicate or out-of-order time stamp)
+    SAMPLED_DROPPED,   ///< rejected: not INTEGRATED and SampledImuPolicy::DROP
+    NON_FINITE,        ///< rejected: NaN or infinity in the measurement (reject_non_finite)
+    GAP_TOO_LONG,      ///< rejected: more than max_gap ahead of the latest solution and not (yet) confirmed
+  };
+  static bool accepted(AddStatus s) { return s == AddStatus::ACCEPTED || s == AddStatus::GAP_FILLED; }
 
-  /// Mechanize one integrated IMU message (type must be INTEGRATED). Returns false if rejected.
-  bool add(std::shared_ptr<Imu> imu);
+  /// Counters since construction, for health reporting.
+  struct Stats {
+    std::uint64_t accepted = 0;         ///< samples mechanized (including gap_filled and sampled_integrated)
+    std::uint64_t gap_filled = 0;       ///< late samples whose rate was held across the gap
+    std::uint64_t sampled_integrated = 0;
+    std::uint64_t not_newer = 0;
+    std::uint64_t sampled_dropped = 0;
+    std::uint64_t non_finite = 0;       ///< IMU samples rejected for NaN / infinity
+    std::uint64_t gap_too_long = 0;
+    std::uint64_t resets_rejected = 0;  ///< reset() calls refused (out of range, or non-finite with reject_non_finite)
+    double longest_gap = 0;             ///< s, longest interval between two accepted samples
+  };
+
+  /// Throws std::invalid_argument unless expected_dt and buffer_length are positive and finite, the
+  /// robustness values are in range (gap_factor > 1, max_gap >= 0, dt_window 0 or >= 3) and, with
+  /// robustness.reject_non_finite, `initial` holds a finite position and velocity and a unit quaternion.
+  BufferedImu(const utils::PVA& initial, double expected_dt = 0.01, double buffer_length = 60.0,
+              const ImuErrors& errors = {}, const MechanizationOptions& opts = {},
+              const ImuRobustness& robustness = {});
+
+  /// Mechanize one IMU message. Returns false if rejected; throws std::invalid_argument for a null message
+  /// and, unless ImuRobustness::sampled_imu says otherwise, for one that is not INTEGRATED.
+  bool add(std::shared_ptr<Imu> imu) { return accepted(add_sample(std::move(imu))); }
+  /// As add(), telling why a sample was rejected or how it was used.
+  AddStatus add_sample(std::shared_ptr<Imu> imu);
+  const Stats& stats() const { return stats_; }
+  const ImuRobustness& robustness() const { return robustness_; }
 
   std::shared_ptr<utils::PVA> calc_pva(Timestamp t) const;  ///< nullptr if out of range
   std::shared_ptr<utils::PVA> latest_pva() const;
@@ -98,14 +138,36 @@ class BufferedImu {
 
   /// Reset the solution and/or the error model at the time of `pva` (or `errors.time`), then
   /// re-mechanize the buffered IMU data from there. Returns false if the time is out of range.
+  /// With ImuRobustness::reject_non_finite a solution or error set that is not finite (or a solution
+  /// without position, velocity or a unit quaternion) is refused as well.
   bool reset(const utils::PVA* pva, const ImuErrors* errors, const utils::PVA* previous = nullptr);
 
-  double estimated_dt() const { return num_dt_ > 10 ? dt_sum_ / num_dt_ : expected_dt_; }
+  /// Nominal interval between IMU samples: expected_dt until more than 10 intervals were seen, then their
+  /// mean since construction (NavToolkit) or, with ImuRobustness::dt_window, the median of the last N.
+  double estimated_dt() const;
 
  private:
+  /// How one buffered record is mechanized up to its time stamp: `steps` equal sub-steps of dv / dth each.
+  struct Plan {
+    Vector3 dv, dth;
+    int steps = 1;      ///< more than one only when a rate is held across a gap
+    bool held = false;  ///< the record arrived late and stands for the samples lost before it as well
+  };
   std::pair<std::int64_t, std::int64_t> nsec_span() const;
   std::shared_ptr<utils::PVA> calc_pva_no_check(Timestamp t) const;
   void reset_ins(Inertial& ins, const utils::PVA& pva, const ImuErrors& e, const utils::PVA* old) const;
+  bool reset_checked(const utils::PVA* pva, const ImuErrors* errors, const utils::PVA* previous);
+  /// How buffered record `imu` is mechanized over the `dt` seconds since the record before it. The one
+  /// place that decides how a record is used, shared by add_sample() and the replays of reset() and
+  /// calc_pva_no_reset_since(), so that a replay bridges a gap exactly as the first pass did.
+  Plan plan(const Imu& imu, double dt) const;
+  /// The same for the part of the interval of record `index` that follows a reset at `from_nsec`. False if
+  /// nothing is left to mechanize (`min_scale` is NavToolkit's cut-off, which differs between the callers).
+  bool plan_after_reset(std::size_t index, std::int64_t from_nsec, double min_scale, Plan& out) const;
+  bool late(double dt) const;
+  static void run(Inertial& ins, std::int64_t to_nsec, const Plan& plan);
+  bool confirmed_time_jump(std::int64_t t);
+  void note_interval(double dt);
 
   Inertial ins_;
   TimestampedRing<utils::PVA> pva_buf_;
@@ -114,6 +176,17 @@ class BufferedImu {
   double expected_dt_;
   double dt_sum_ = 0;
   long num_dt_ = 0;
+  ImuRobustness robustness_;
+  Stats stats_;
+  // windowed dt estimate (ImuRobustness::dt_window, or kDefaultDtWindow for ImuGapPolicy::HOLD)
+  std::size_t dt_window_ = 0;
+  std::vector<double> recent_dt_;
+  std::size_t recent_next_ = 0;
+  std::vector<double> median_scratch_;
+  double median_dt_ = 0;
+  // samples refused for being more than max_gap ahead, while they keep agreeing with each other
+  std::int64_t pending_jump_nsec_ = 0;
+  int pending_jumps_ = 0;
 };
 
 }  // namespace pntos::cobra::inertial

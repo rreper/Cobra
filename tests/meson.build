@@ -12,6 +12,7 @@ test_sources = {
   'controller': files('test_controller.cpp'),
   'orchestration': files('test_orchestration.cpp'),
   'inertial': files('test_inertial.cpp'),
+  'inertial_live': files('test_inertial_live.cpp'),
   'initialization': files('test_initialization.cpp'),
   'preprocessors': files('test_preprocessors.cpp'),
   'lcm_transport': files('test_lcm_transport.cpp'),

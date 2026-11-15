@@ -26,6 +26,7 @@ SUITES = {
     'controller': ('test_single_threaded_controller.py', 'all tests ported + mediator behaviour'),
     'orchestration': ('test_orchestration.py (standard cases)', 'mock inertial/initializer; tutorial cases not ported'),
     'inertial': ('test_inertial_plugin.py', 'all tests ported + mechanization checks'),
+    'inertial_live': ('— (new: live-sensor robustness)', 'lost / late / sampled / non-finite IMU data, corrupt time stamps, dt estimate, interpolation at vertical pitch; opt-in via InertialConfig'),
     'initialization': ('test_manual_initialization_plugin.py, inertial_alignment/*', 'all tests ported + PVA-message strategy'),
     'preprocessors': ('test_preprocessor_plugin.py', 'all tests ported + time bias'),
     'lcm_transport': ('test_transport_plugin.py (log parts)', 'network LCM transport not ported'),
@@ -33,6 +34,8 @@ SUITES = {
     'extras': ('— (Python covers it via the zerovel2d app)', 'ZeroVelocity2dGenerator + AdvancedPreprocessorPlugin'),
     'diagnostics': ('test_diagnostic_log_plugin.py, test_hdf5utils.py (write half)', 'DiagnosticLogPlugin + dependency-free HDF5 writer; files verified with h5py by run_acceptance'),
     'json_config': ('— (new: config files, presets, app builder)', 'JSON round trip preserves the registry; presets; command-line overrides; plugin sets'),
+    'filter': ('— (new: push API, C ABI)', 'cobra::Filter against the log transport, direct use, the C ABI, live IMU faults end to end'),
+    'transports': ('— (new: LCM over UDP multicast, CSV)', 'datagram encoding and reassembly, loopback delivery, CSV reading and writing'),
 }
 
 # Python test file -> (C++ suite or None, coverage note)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <pntos/cobra/config/BaseConfig.hpp>
+#include <pntos/cobra/inertial/ImuRobustness.hpp>
 
 #include <array>
 #include <map>
@@ -302,6 +303,12 @@ struct InertialConfig final : BaseConfig {
   double inertial_buffer_length = 10.0;  ///< s
   std::vector<std::string> channels;
   Mat3 C_imu_to_platform{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+  /// Handling of imperfect live IMU data (C++ only). The defaults reproduce NavToolkit / Python exactly;
+  /// a field left at its default is not written to the registry or to JSON, so both stay identical to
+  /// what Python produces. Registry / JSON keys: sampled_imu ("throw" | "drop" | "integrate"),
+  /// reject_non_finite, imu_gap_policy ("navtk" | "hold"), imu_gap_factor, max_imu_gap, dt_window,
+  /// attitude_interpolation ("rpy" | "quaternion"). inertial::ImuRobustness::live_sensor() sets them all.
+  inertial::ImuRobustness robustness;
 
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;

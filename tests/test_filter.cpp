@@ -8,8 +8,13 @@
 
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <set>
 
 using namespace pntos;
@@ -120,6 +125,221 @@ TEST(Filter, DirectUse) {
   EXPECT_EQ(f.stop(), 0);
   EXPECT_EQ(f.stop(), 0);
   EXPECT_THROW(f.push(sols.front()), std::logic_error);
+}
+
+// ----------------------------------------------------------------------------- live IMU faults, end to end
+
+namespace {
+namespace inr = cobra::inertial;
+using ImuPtr = std::shared_ptr<aspn23_eigen::MeasurementImu>;
+/// What to push in place of the i-th IMU message of the log (empty: the message is lost).
+using ImuFault = std::function<std::vector<ImuPtr>(int i, const ImuPtr& m)>;
+
+/// pos_ins with the recorded time stamps reaching the inertial: the TimeAdjuster preprocessor of the standard
+/// config is taken out (it re-stamps late IMU samples onto a 10 ms grid, which turns a lost sample into a time
+/// slip instead of a gap the inertial could see).
+cobra::AppConfig live_config(const inr::ImuRobustness& robustness) {
+  auto config = cobra::jsoncfg::load_app_config(src("configs/pos_ins.json"));
+  for (auto& c : config.configs) {
+    auto orch = std::dynamic_pointer_cast<const cobra::StandardOrchestrationConfig>(c);
+    if (!orch) continue;
+    auto copy = std::make_shared<cobra::StandardOrchestrationConfig>(*orch);
+    copy->inertial_config.robustness = robustness;
+    if (copy->preprocessor_configs) {
+      auto& pp = *copy->preprocessor_configs;
+      pp.erase(std::remove_if(pp.begin(), pp.end(),
+                              [](const auto& x) { return x->identifier == cobra::TimeAdjusterConfig::kIdentifier; }),
+               pp.end());
+    }
+    c = copy;
+  }
+  return config;
+}
+
+struct LiveEpoch {
+  std::int64_t t;
+  double lat, lon, alt, vn, ve, vd;
+  bool finite() const { return std::isfinite(lat + lon + alt + vn + ve + vd); }
+};
+struct LiveRun {
+  std::vector<LiveEpoch> solutions;        ///< published once per second of message time
+  std::optional<LiveEpoch> final_on_demand;  ///< Filter::solution() at the last IMU time, after the whole log
+  bool threw = false;
+  bool error_logged = false;
+  std::size_t finite_after(std::int64_t t) const {
+    const auto later_and_finite = [t](const LiveEpoch& e) { return e.t > t && e.finite(); };
+    return static_cast<std::size_t>(std::count_if(solutions.begin(), solutions.end(), later_and_finite));
+  }
+};
+LiveRun run_live(const inr::ImuRobustness& robustness, const ImuFault& fault) {
+  LiveRun out;
+  cobra::app::RunOptions o;
+  o.progress = false;
+  cobra::Filter f(live_config(robustness), o);
+  auto epoch = [](const api::Message& m) -> std::optional<LiveEpoch> {
+    auto p = m.as<cobra::utils::PVA>();
+    if (!p) return std::nullopt;
+    return LiveEpoch{p->get_time_of_validity().get_elapsed_nsec(), p->get_p1(), p->get_p2(), p->get_p3(),
+                     p->get_v1(), p->get_v2(), p->get_v3()};
+  };
+  f.set_solution_callback([&](const api::Message& m) {
+    if (auto e = epoch(m)) out.solutions.push_back(*e);
+  });
+  std::int64_t last_imu_ns = 0;
+  const std::string imu_channel = "/sensor/vn-100/imu", position_channel = "/sensor/ublox-ZED-F9T/position";
+  cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+  int i = 0;
+  try {
+    while (auto ev = r.next()) {
+      if (ev->channel == position_channel) {
+        f.push(cobra::lcm::decode(ev->data), ev->channel);
+      } else if (ev->channel == imu_channel) {
+        auto imu = std::dynamic_pointer_cast<aspn23_eigen::MeasurementImu>(cobra::lcm::decode(ev->data));
+        last_imu_ns = imu->get_time_of_validity().get_elapsed_nsec();
+        for (const auto& m : fault(i++, imu)) f.push(m, ev->channel);
+      }
+    }
+    if (auto s = f.solution(api::Timestamp{last_imu_ns})) out.final_on_demand = epoch(*s);
+  } catch (const std::exception&) {
+    out.threw = true;
+  }
+  out.error_logged = f.error_logged();
+  f.stop();
+  return out;
+}
+
+/// Largest horizontal / vertical distance (m) between two runs after `from_ns`. A solution is stamped with the
+/// latest IMU time, so the epochs of a run with lost samples sit a few milliseconds off the clean ones: each
+/// epoch of `a` is compared with the nearest one of `b` (within 50 ms), moved to the same instant with its velocity.
+struct Difference {
+  double horizontal = 0, vertical = 0;
+  std::size_t epochs = 0;
+};
+Difference difference(const std::vector<LiveEpoch>& a, const std::vector<LiveEpoch>& b, std::int64_t from_ns) {
+  Difference d;
+  for (const auto& x : a) {
+    if (x.t < from_ns) continue;
+    const LiveEpoch* near = nullptr;
+    for (const auto& y : b) {
+      const std::int64_t apart = std::llabs(y.t - x.t);
+      if (y.finite() && apart <= 50'000'000 && (!near || apart < std::llabs(near->t - x.t))) near = &y;
+    }
+    if (!near) continue;
+    const double dt = (x.t - near->t) * 1e-9;
+    const double north = (near->lat - x.lat) * 6.37e6 + near->vn * dt;
+    const double east = (near->lon - x.lon) * 6.37e6 * std::cos(x.lat) + near->ve * dt;
+    d.horizontal = std::max(d.horizontal, std::hypot(north, east));
+    d.vertical = std::max(d.vertical, std::abs(near->alt - near->vd * dt - x.alt));
+    ++d.epochs;
+  }
+  return d;
+}
+
+const int kFaultsFrom = 1500;  // IMU message index: 15 s into the log, after the 10 s alignment
+ImuFault no_fault() {
+  return [](int, const ImuPtr& m) { return std::vector<ImuPtr>{m}; };
+}
+/// One IMU message in 25 lost (4 %), as on a marginal serial or UDP link.
+ImuFault lossy() {
+  return [](int i, const ImuPtr& m) {
+    return (i > kFaultsFrom && i % 25 == 0) ? std::vector<ImuPtr>{} : std::vector<ImuPtr>{m};
+  };
+}
+/// The lossy link plus a NaN sample and ten seconds of the same data delivered as SAMPLED rates instead of
+/// increments; with `future_stamp`, also one sample stamped an hour ahead.
+ImuFault everything(bool future_stamp) {
+  return [future_stamp](int i, const ImuPtr& m) -> std::vector<ImuPtr> {
+    if (i <= kFaultsFrom) return {m};
+    if (i % 25 == 0) return {};
+    auto copy = std::make_shared<aspn23_eigen::MeasurementImu>(*m);
+    if (i == 2001) {
+      Eigen::Matrix<double, Eigen::Dynamic, 1> a = copy->get_meas_accel();
+      a(1) = std::nan("");
+      copy->set_meas_accel(a);
+    } else if (i == 5001 && future_stamp) {
+      const std::int64_t an_hour_ahead = m->get_time_of_validity().get_elapsed_nsec() + 3'600'000'000'000LL;
+      copy->set_time_of_validity(aspn23_eigen::TypeTimestamp(an_hour_ahead));
+    } else if (i >= 3000 && i < 4000) {
+      copy->set_imu_type(ASPN23_MEASUREMENT_IMU_IMU_TYPE_SAMPLED);
+      copy->set_meas_accel(Eigen::Matrix<double, Eigen::Dynamic, 1>(m->get_meas_accel() / 0.01));
+      copy->set_meas_gyro(Eigen::Matrix<double, Eigen::Dynamic, 1>(m->get_meas_gyro() / 0.01));
+    }
+    return {copy};
+  };
+}
+}  // namespace
+
+TEST(Filter, LiveImuFaults) {
+  const auto clean = run_live({}, no_fault());
+  ASSERT_GE(clean.solutions.size(), 40u);
+  ASSERT_FALSE(clean.threw || clean.error_logged);
+  // the faults start about 5 s after the first solution
+  const std::int64_t from = clean.solutions.front().t + 8'000'000'000;
+
+  // On clean data the live-sensor settings change nothing that matters (the recorded stamps jitter by up to
+  // 40 % of an interval; nothing is lost, nothing is filled).
+  const auto clean_live = run_live(inr::ImuRobustness::live_sensor(), no_fault());
+  auto d = difference(clean.solutions, clean_live.solutions, 0);
+  EXPECT_EQ(d.epochs, clean.solutions.size());
+  EXPECT_LT(d.horizontal, 1e-3);
+  EXPECT_LT(d.vertical, 1e-3);
+
+  // 4 % of the IMU messages lost. Default: each lost sample is 10 ms of free fall; the position fixes hold the
+  // solution within metres but it is visibly pulled down. Held rate: within centimetres of the clean run.
+  const auto lossy_default = run_live({}, lossy());
+  const auto lossy_live = run_live(inr::ImuRobustness::live_sensor(), lossy());
+  ASSERT_FALSE(lossy_default.threw);
+  ASSERT_FALSE(lossy_live.threw || lossy_live.error_logged);
+  const auto dd = difference(clean.solutions, lossy_default.solutions, from);
+  const auto dl = difference(clean.solutions, lossy_live.solutions, from);
+  EXPECT_GE(dl.epochs, 30u);
+  RecordProperty("lossy_default_vertical_m", std::to_string(dd.vertical));
+  RecordProperty("lossy_default_horizontal_m", std::to_string(dd.horizontal));
+  RecordProperty("lossy_live_vertical_m", std::to_string(dl.vertical));
+  RecordProperty("lossy_live_horizontal_m", std::to_string(dl.horizontal));
+  std::printf("4%% IMU loss vs clean: default %.3f m horizontal / %.3f m vertical, live %.3f / %.3f m (%zu epochs)\n",
+              dd.horizontal, dd.vertical, dl.horizontal, dl.vertical, dl.epochs);
+  EXPECT_GT(dd.vertical, 1.0);
+  EXPECT_LT(dl.horizontal, 0.25);
+  EXPECT_LT(dl.vertical, 0.25);
+  EXPECT_LT(dl.vertical * 10, dd.vertical);
+
+  // Loss, a NaN sample and SAMPLED data together. Default: no usable solution after the NaN sample (5 s into
+  // the faults), and the first SAMPLED message throws out of push(). Live settings: no exception, no ERROR,
+  // close to the clean run.
+  const auto all_default = run_live({}, everything(false));
+  EXPECT_TRUE(all_default.threw);
+  std::printf("default with NaN + sampled: %zu solutions, %zu finite after the NaN sample\n",
+              all_default.solutions.size(), all_default.finite_after(from + 6'000'000'000));
+  EXPECT_EQ(all_default.finite_after(from + 6'000'000'000), 0u);
+  const auto all_live = run_live(inr::ImuRobustness::live_sensor(), everything(false));
+  EXPECT_FALSE(all_live.threw);
+  EXPECT_FALSE(all_live.error_logged);
+  const auto da = difference(clean.solutions, all_live.solutions, from);
+  std::printf("loss + NaN + sampled vs clean: live %.3f m horizontal / %.3f m vertical (%zu epochs)\n", da.horizontal,
+              da.vertical, da.epochs);
+  EXPECT_EQ(all_live.finite_after(0), all_live.solutions.size());
+  EXPECT_GE(da.epochs, 30u);
+  EXPECT_LT(da.horizontal, 0.5);
+  EXPECT_LT(da.vertical, 0.5);
+
+  // And one IMU message stamped an hour ahead, 50 s into the log. The inertial refuses it and the filter carries
+  // on: asked at the end, it answers within centimetres of the same run without that message. (The periodic
+  // solutions do stop there: the mediator schedules them on message time and takes the stamp at face value.
+  // That is the controller's to fix, not the inertial's.)
+  const auto stamped = run_live(inr::ImuRobustness::live_sensor(), everything(true));
+  EXPECT_FALSE(stamped.threw);
+  EXPECT_FALSE(stamped.error_logged);
+  ASSERT_TRUE(all_live.final_on_demand && stamped.final_on_demand);
+  ASSERT_TRUE(stamped.final_on_demand->finite());
+  EXPECT_EQ(stamped.final_on_demand->t, all_live.final_on_demand->t);
+  const auto ds = difference({*all_live.final_on_demand}, {*stamped.final_on_demand}, 0);
+  std::printf("after a sample stamped 1 h ahead: final solution %.3f m horizontal / %.3f m vertical from the run "
+              "without it\n",
+              ds.horizontal, ds.vertical);
+  EXPECT_EQ(ds.epochs, 1u);
+  EXPECT_LT(ds.horizontal, 0.1);
+  EXPECT_LT(ds.vertical, 0.1);
 }
 
 TEST(CApi, PushAndPoll) {

@@ -4,11 +4,16 @@
 #include <pntos/api/inertial.hpp>
 #include <pntos/cobra/inertial/BufferedImu.hpp>
 
+#include <array>
+#include <cstdint>
+
 namespace pntos::cobra {
 
 class StandardInertial final : public api::StandardInertialMechanization {
  public:
   /// Reads InertialConfig from `config_group`; throws std::invalid_argument on a bad solution/config.
+  /// InertialConfig::robustness selects how imperfect IMU data is handled (default: as NavToolkit does,
+  /// which includes throwing std::invalid_argument out of process_pntos_message for a SAMPLED message).
   StandardInertial(const std::string& config_group, api::Mediator* mediator, const api::Message& solution);
 
   api::AspnMessageType request_solution_message_type() const override {
@@ -36,11 +41,19 @@ class StandardInertial final : public api::StandardInertialMechanization {
   std::optional<api::StandardInertialErrors> request_sensor_errors(api::Timestamp time) override;
 
   static constexpr const char* kIdentifier = "Cobra standard inertial";
+  /// The buffer itself, e.g. for buffered().stats() (samples rejected, gaps held, resets refused).
   inertial::BufferedImu& buffered() { return inertial_; }
 
  private:
+  /// WARN about a sample that was rejected or bridged: the 1st, 10th, 100th, ... occurrence of each kind,
+  /// so that a sensor that keeps misbehaving at several hundred hertz cannot flood the log.
+  void report(inertial::BufferedImu::AddStatus status, api::Timestamp time);
+  void report_refused(const char* what, api::Timestamp time, std::uint64_t& count);
+
   api::Mediator* mediator_;
   inertial::BufferedImu inertial_;
+  std::array<std::uint64_t, 6> reported_{};  ///< occurrences per AddStatus
+  std::uint64_t refused_resets_ = 0, refused_corrections_ = 0;
 };
 
 class StandardInertialPlugin final : public api::InertialPlugin {

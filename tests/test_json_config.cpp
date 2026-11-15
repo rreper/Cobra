@@ -181,6 +181,64 @@ TEST(JsonConfig, RoundTripPreservesTheRegistryContents) {
   EXPECT_TRUE(j["configs"][1]["publish_interval"].is_null());
 }
 
+TEST(JsonConfig, InertialRobustnessKeys) {
+  namespace inr = cobra::inertial;
+  // absent keys mean the NavToolkit-compatible defaults, and defaults are not written back
+  json plain = R"({"type":"InertialConfig","group":"config/inertial","channels":["/imu"]})"_json;
+  auto c = std::dynamic_pointer_cast<cobra::InertialConfig>(cobra::jsoncfg::config_from_json(plain));
+  ASSERT_TRUE(c);
+  EXPECT_TRUE(c->robustness.is_default());
+  json out = cobra::jsoncfg::config_to_json(*c);
+  for (const char* key : {"sampled_imu", "reject_non_finite", "imu_gap_policy", "imu_gap_factor", "max_imu_gap",
+                          "dt_window", "attitude_interpolation"})
+    EXPECT_FALSE(out.contains(key)) << key;
+
+  json live = plain;
+  live["sampled_imu"] = "integrate";
+  live["reject_non_finite"] = true;
+  live["imu_gap_policy"] = "hold";
+  live["imu_gap_factor"] = 1.6;
+  live["max_imu_gap"] = 0.5;
+  live["dt_window"] = 64;
+  live["attitude_interpolation"] = "quaternion";
+  c = std::dynamic_pointer_cast<cobra::InertialConfig>(cobra::jsoncfg::config_from_json(live));
+  ASSERT_TRUE(c);
+  inr::ImuRobustness want;
+  want.sampled_imu = inr::SampledImuPolicy::INTEGRATE;
+  want.reject_non_finite = true;
+  want.gap_policy = inr::ImuGapPolicy::HOLD;
+  want.gap_factor = 1.6;
+  want.max_gap = 0.5;
+  want.dt_window = 64;
+  want.attitude_interpolation = inr::AttitudeInterpolation::QUATERNION;
+  EXPECT_EQ(c->robustness, want);
+  out = cobra::jsoncfg::config_to_json(*c);
+  for (auto it = live.begin(); it != live.end(); ++it) EXPECT_EQ(out.at(it.key()), it.value()) << it.key();
+  auto again = std::dynamic_pointer_cast<cobra::InertialConfig>(cobra::jsoncfg::config_from_json(out));
+  ASSERT_TRUE(again);
+  EXPECT_EQ(again->robustness, want);
+  // the registry a JSON file produces equals the one the object produces
+  EXPECT_EQ(registry_of({again}), registry_of({c}));
+
+  auto expect_error = [&](const char* key, json value, const char* needle) {
+    json bad = plain;
+    bad[key] = value;
+    try {
+      cobra::jsoncfg::config_from_json(bad);
+      FAIL() << "expected an error for " << bad.dump();
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(std::string(e.what()).find(needle), std::string::npos) << e.what();
+    }
+  };
+  expect_error("sampled_imu", "ignore", "sampled_imu");
+  expect_error("imu_gap_policy", "interpolate", "imu_gap_policy");
+  expect_error("attitude_interpolation", "euler", "attitude_interpolation");
+  expect_error("imu_gap_factor", 0.9, "imu_gap_factor");
+  expect_error("max_imu_gap", -1.0, "max_imu_gap");
+  expect_error("dt_window", -5, "dt_window");
+  expect_error("dt_window", 2, "dt_window");
+}
+
 TEST(JsonConfig, PresetsAndOverrides) {
   json jc = R"({"type":"PinsonStateBlockConfig","group":"config/pinson_block","label":"pinson15",
                 "imu_model":{"preset":"stim300","group":"config/inertial_state","gyro_bias_tau":[100,100,100]}})"_json;

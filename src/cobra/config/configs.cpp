@@ -551,6 +551,17 @@ void InertialConfig::to_registry(api::Mediator& m) const {
   w.scalar("inertial_buffer_length", inertial_buffer_length);
   w.strings("channels", channels);
   w.matrix("C_imu_to_platform", to_matrix(C_imu_to_platform));
+  // C++-only keys, written when they differ from the NavToolkit-compatible default (absent in Python-written
+  // registries)
+  const inertial::ImuRobustness d;
+  if (robustness.sampled_imu != d.sampled_imu) w.scalar("sampled_imu", inertial::to_string(robustness.sampled_imu));
+  if (robustness.reject_non_finite != d.reject_non_finite) w.scalar("reject_non_finite", robustness.reject_non_finite);
+  if (robustness.gap_policy != d.gap_policy) w.scalar("imu_gap_policy", inertial::to_string(robustness.gap_policy));
+  if (robustness.gap_factor != d.gap_factor) w.scalar("imu_gap_factor", robustness.gap_factor);
+  if (robustness.max_gap != d.max_gap) w.scalar("max_imu_gap", robustness.max_gap);
+  if (robustness.dt_window != d.dt_window) w.scalar("dt_window", static_cast<std::int64_t>(robustness.dt_window));
+  if (robustness.attitude_interpolation != d.attitude_interpolation)
+    w.scalar("attitude_interpolation", inertial::to_string(robustness.attitude_interpolation));
 }
 
 std::optional<InertialConfig> InertialConfig::from_registry(api::Mediator& m, const std::string& group) {
@@ -569,6 +580,26 @@ std::optional<InertialConfig> InertialConfig::from_registry(api::Mediator& m, co
     r.fail("C_imu_to_platform");
     return std::nullopt;
   }
+  // A policy name that is not known is a configuration error, not a reason to fall back to the default.
+  auto named = [&r](const char* key, auto parse, auto& field) {
+    if (auto v = r.optional<std::string>(key)) {
+      if (auto parsed = parse(*v))
+        field = *parsed;
+      else
+        r.fail(key);
+    }
+  };
+  named("sampled_imu", inertial::sampled_imu_policy_from_string, c.robustness.sampled_imu);
+  named("imu_gap_policy", inertial::imu_gap_policy_from_string, c.robustness.gap_policy);
+  named("attitude_interpolation", inertial::attitude_interpolation_from_string, c.robustness.attitude_interpolation);
+  c.robustness.reject_non_finite = r.optional<bool>("reject_non_finite").value_or(c.robustness.reject_non_finite);
+  c.robustness.gap_factor = r.optional<double>("imu_gap_factor").value_or(c.robustness.gap_factor);
+  c.robustness.max_gap = r.optional<double>("max_imu_gap").value_or(c.robustness.max_gap);
+  if (auto w = r.optional<std::int64_t>("dt_window")) {
+    if (*w < 0) r.fail("dt_window");
+    else c.robustness.dt_window = static_cast<std::size_t>(*w);
+  }
+  if (!r.ok()) return std::nullopt;
   return c;
 }
 

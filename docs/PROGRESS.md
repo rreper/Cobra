@@ -2,6 +2,25 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-15 — v0.2.9: opt-in handling of live IMU data
+
+- Review of the inertial for live sensors (DESIGN.md §7.22). Six defects, all inherited from NavToolkit and all
+  left as they are by default: a lost sample is mechanized as free fall (0.098 m/s per lost 10 ms sample), one
+  future-stamped sample strands the inertial, a SAMPLED IMU message throws out of `Filter::push`, one NaN
+  poisons every later solution, `estimated_dt()` never forgets a gap, and the RPY interpolation fails at pitch
+  ±90°. Each has a key in `inertial_config` (`imu_gap_policy`, `max_imu_gap`, `sampled_imu`,
+  `reject_non_finite`, `dt_window`, `attitude_interpolation`); `ImuRobustness::live_sensor()` sets them all.
+  The two Earth-rate constants and the per-sample allocations were measured and left alone.
+- Not opt-in: a non-positive or non-finite `expected_dt` / buffer length is refused with an ERROR, and
+  interpolation next to a solution without a quaternion no longer reads an empty optional.
+- Verified: 23 suites / 238 tests, also under ASan + UBSan. Default mode byte for byte that of v0.2.8 (parity
+  dump and all 61,772 acceptance output messages, `tools/compare_logs.py`); acceptance 24/24 with the default
+  and with the live settings. 60 s log with 4 % of the IMU messages lost: 5.3 m vertical error by default,
+  0.06 m with the live settings.
+- Next: the `TimeAdjuster` of the standard configs turns a lost sample into a 10 ms time slip before the
+  inertial sees it, and the mediator's publish timer latches onto a future-stamped message. Neither is changed
+  here.
+
 ## 2026-10-12 — v0.2.8: the push Filter no longer retains solutions behind a callback
 
 - `Filter::set_solution_callback` replaces the `take_solutions()` queue by default (`also_queue = true` keeps

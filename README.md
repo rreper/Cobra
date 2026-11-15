@@ -87,6 +87,10 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   (`docs/DEGRADED_MATRIX.md`), including spoofing rows on `configs/pos_ins_two_sources.json`.
 - Geoid: MSL altitudes (barometer) are converted with the bundled EGM96 grid (`data/egm96_15min.bin`), see
   `configs/pos_ins_baro.json`.
+- Live IMU data: `inertial_config` keys `imu_gap_policy`, `max_imu_gap`, `reject_non_finite`, `sampled_imu`,
+  `dt_window` and `attitude_interpolation` make the inertial hold its rate across lost samples, refuse corrupt time
+  stamps and NaN, and accept rate (SAMPLED) messages. All off by default, where it behaves exactly as NavToolkit
+  does (`docs/DESIGN.md` §7.22).
 
 ### Feeding the filter (Phase 3)
 

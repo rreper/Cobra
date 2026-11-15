@@ -199,12 +199,45 @@ InertialConfig inertial_from(const json& jc) {
   c.inertial_buffer_length = get_or(jc, "inertial_buffer_length", 10.0);
   c.channels = need(jc, "channels").get<std::vector<std::string>>();
   if (jc.contains("C_imu_to_platform")) c.C_imu_to_platform = mat3(jc, "C_imu_to_platform");
+  // Live-sensor handling (C++ only); every key is optional and defaults to what NavToolkit does.
+  auto& r = c.robustness;
+  auto named = [&jc](const char* key, auto parse, auto& field, const char* choices) {
+    if (!jc.contains(key) || jc.at(key).is_null()) return;
+    const auto parsed = jc.at(key).is_string() ? parse(jc.at(key).get<std::string>()) : std::nullopt;
+    if (!parsed) fail(std::string("\"") + key + "\" must be one of " + choices);
+    field = *parsed;
+  };
+  named("sampled_imu", inertial::sampled_imu_policy_from_string, r.sampled_imu, "\"throw\", \"drop\", \"integrate\"");
+  named("imu_gap_policy", inertial::imu_gap_policy_from_string, r.gap_policy, "\"navtk\", \"hold\"");
+  named("attitude_interpolation", inertial::attitude_interpolation_from_string, r.attitude_interpolation,
+        "\"rpy\", \"quaternion\"");
+  r.reject_non_finite = get_or(jc, "reject_non_finite", r.reject_non_finite);
+  r.gap_factor = get_or(jc, "imu_gap_factor", r.gap_factor);
+  if (!(r.gap_factor > 1.0)) fail("\"imu_gap_factor\" must be greater than 1");
+  r.max_gap = get_or(jc, "max_imu_gap", r.max_gap);
+  if (!(r.max_gap >= 0.0)) fail("\"max_imu_gap\" must be 0 (unlimited) or a positive number of seconds");
+  const auto window = get_or<std::int64_t>(jc, "dt_window", static_cast<std::int64_t>(r.dt_window));
+  if (window < 0 || (window > 0 && window < static_cast<std::int64_t>(inertial::ImuRobustness::kMinDtWindow)))
+    fail("\"dt_window\" must be 0 (mean since start) or at least 3 samples");
+  r.dt_window = static_cast<std::size_t>(window);
   return c;
 }
 json inertial_to(const InertialConfig& c) {
-  return json{{"type", "InertialConfig"}, {"group", c.group_}, {"expected_dt", c.expected_dt},
-              {"inertial_buffer_length", c.inertial_buffer_length}, {"channels", c.channels},
-              {"C_imu_to_platform", j(c.C_imu_to_platform)}};
+  json o{{"type", "InertialConfig"}, {"group", c.group_}, {"expected_dt", c.expected_dt},
+         {"inertial_buffer_length", c.inertial_buffer_length}, {"channels", c.channels},
+         {"C_imu_to_platform", j(c.C_imu_to_platform)}};
+  // written only when set, so that the files of the existing apps stay as they are
+  const inertial::ImuRobustness d;
+  const auto& r = c.robustness;
+  if (r.sampled_imu != d.sampled_imu) o["sampled_imu"] = inertial::to_string(r.sampled_imu);
+  if (r.reject_non_finite != d.reject_non_finite) o["reject_non_finite"] = r.reject_non_finite;
+  if (r.gap_policy != d.gap_policy) o["imu_gap_policy"] = inertial::to_string(r.gap_policy);
+  if (r.gap_factor != d.gap_factor) o["imu_gap_factor"] = r.gap_factor;
+  if (r.max_gap != d.max_gap) o["max_imu_gap"] = r.max_gap;
+  if (r.dt_window != d.dt_window) o["dt_window"] = r.dt_window;
+  if (r.attitude_interpolation != d.attitude_interpolation)
+    o["attitude_interpolation"] = inertial::to_string(r.attitude_interpolation);
+  return o;
 }
 
 FeedbackConfig feedback_from(const json& jc) {

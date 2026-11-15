@@ -763,6 +763,62 @@ latitudes within 2 cm (the CSV carries only the diagonal of the receiver's posit
 `include/pntos` (with the vendored JSON header under `pntos/third_party`), `cobra_run`, the geoid grid and the
 example configs under `share/pntos-cobra`. `docs/GETTING_STARTED.md` is the user guide.
 
+### 7.22 Live IMU data (`inertial/ImuRobustness.hpp`, `InertialConfig::robustness`)
+
+NavToolkit's `BufferedImu` assumes a complete, well-formed stream of integrated increments. The port reproduces
+it exactly (`tools/inertial_parity_check.py`, the acceptance runs), including what it does when the stream is
+not: the table lists what was measured on the port, with NavToolkit doing the same in each case except the first.
+Every remedy is opt-in through `InertialConfig::robustness`; the defaults write no key to the registry or to
+JSON, and the default code path performs the same arithmetic as before (parity dump and acceptance output
+logs are byte for byte those of v0.2.8).
+
+| Input | Default (NavToolkit) | Option | With the option |
+|---|---|---|---|
+| SAMPLED IMU message (m/s², rad/s) | `std::invalid_argument` out of `process_pntos_message`, i.e. out of `Filter::push` (NavToolkit throws only in `ErrorMode::DIE`; the Python apps run with `OFF` and drop it silently) | `sampled_imu`: `"drop"` or `"integrate"` | dropped with a WARN, or mechanized as rates held over the stamped interval since the previous sample |
+| NaN / infinity in one sample | every later solution is NaN; a reset to before that sample re-poisons it | `reject_non_finite` | the sample is rejected; resets and bias corrections that are not finite (or lack position, velocity or a unit quaternion) are refused |
+| A lost sample | increments used as received, gravity integrated over the stamped `dt`: 0.098 m/s of downward velocity per lost 10 ms sample; 9.8 m/s and 4.9 m of height after one lost second, 20 m after another 1.5 s | `imu_gap_policy: "hold"` | a sample later than `imu_gap_factor` × nominal stands for the lost ones too: it is mechanized `round(dt / nominal)` times in steps of one nominal interval, so a steady stream is reproduced exactly; replays after a reset do the same |
+| One sample stamped far ahead | accepted; the solution moves there (35 km/s after a one-hour stamp) and every later sample is rejected as old, for good | `max_imu_gap` (s) | rejected; if three in a row agree with each other the time base really moved and the gap is bridged per the gap policy |
+| `estimated_dt()` after a gap | mean of every interval since construction: 13.3 ms for a 10 ms IMU 2 s after a 1 s gap, so reported forces and rates are 25 % low and decay as 1/N | `dt_window` (samples) | median of the last N intervals (used automatically, N = 100, when the gap policy is `hold`) |
+| Interpolating between two solutions at pitch ±90° | through roll/pitch/yaw (`quat_to_rpy` has no gimbal-lock branch): attitude error grows inside about 1e-6 rad of vertical, 90° at the singularity itself | `attitude_interpolation: "quaternion"` | slerp on the quaternions, exact to rounding at any attitude |
+
+Measured (`inertial_live` and `filter` suites): with one sample in ten lost for 5 s under 2 m/s² and 0.3 rad/s
+swinging at 1 Hz, holding ends 2.7 mm/s and 10 mm from the complete stream, the default 4.6 m/s and 11 m. On
+the recorded 60 s log through the whole filter, without the `TimeAdjuster` and with 4 % of the IMU messages
+lost, the default is up to 5.3 m off the clean run vertically (the position fixes hold it), holding 0.06 m
+(0.15 m horizontally). On clean data the options change nothing that matters: with the standard configs all 24
+acceptance rows pass with every statistic within 5e-4 of the default run, and on raw stamps no sample of the
+43-minute log is called late.
+
+`inertial::ImuRobustness::live_sensor()` sets them all (integrate, reject, hold, `max_imu_gap` 1 s, window 100,
+quaternion). `BufferedImu::add_sample` reports what happened to each sample (`AddStatus`), `stats()` counts it,
+and the plugin logs the 1st, 10th, 100th, ... occurrence of each kind at WARN. Two things are fixed without an
+option because they were undefined behaviour: a zero, negative or NaN `expected_dt` / `inertial_buffer_length`
+is refused with an ERROR instead of sizing the rings from a NaN, and interpolating next to a solution that
+carries no quaternion no longer dereferences an empty optional (it is taken as level, as `to_standard_pva`
+does).
+
+Things the options assume or do not cover:
+
+- **The stamps are measurement times.** Holding compares `dt` with the nominal interval, so batches stamped on
+  arrival (eight samples 1 ns apart, then 80 ms of nothing) are not gaps to be filled. `imu_gap_factor` is 1.75
+  because the recorded VN-100 log has stamp jitter up to 1.6 intervals with no sample lost (3 samples above 1.5
+  in 43 minutes); a lost sample gives 2.0.
+- **A fixed sensor rate.** A late sample is indistinguishable from a sensor that halved its rate.
+- **The `TimeAdjuster` preprocessor of the standard configs** re-stamps any IMU sample more than 100 µs off the
+  10 ms grid to "previous + 10 ms". Behind it the inertial never sees a gap: a lost sample becomes a permanent
+  10 ms slip of IMU time against the other sensors instead, and an IMU running at another rate than the
+  configured one is put on a wrong time base altogether (200 Hz through the 10 ms adjuster: IMU time runs at
+  twice real time). To have gaps held, take it out of the filter config; `configs/pos_ins.json` and the other
+  standard configs include it, so anything that loads them runs it.
+- **The mediator schedules published solutions on message time** (`StandardMediator::process_pntos_message`).
+  A future-stamped message on an immediate stream is refused by the inertial but still moves that schedule
+  ahead, and no solution is published until message time catches up; `Filter::solution()` keeps answering.
+- **The two Earth-rate constants** (`kMechOmega` 7.292115e-5 in the mechanization, `nav::ROTATION_RATE`
+  7.2921151467e-5 in the reported rates and the Pinson block) differ by 1.5e-12 rad/s, 5e-9 rad per hour.
+  Left as NavToolkit has them: unifying would change the last digits of every solution for nothing measurable.
+- **Allocations**: 2 per sample (the two vectors the ASPN getters return) and 2 µs per `add`; 4 per
+  force/rate query, about 400 for a one-second average. No change was warranted.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -787,6 +843,8 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 15 | `UiLogPlottingPlugin` writes an error summary and a per-epoch CSV instead of opening matplotlib figures | No plotting library in the port (§7.10). |
 | 16 | HDF5 diagnostic log: `bool` values are written as `uint8` without the `'bool'` attribute, `Message` values are skipped with a WARN | Python stores pickles; attributes are not needed by the plot tool. |
 | 12 | `has_virtual_state_block` returns true only for nodes known to the manager (roots included, as Python) | identical; listed because the API doc says otherwise (§12 #5). |
+| 19 | `InertialConfig::robustness` (sampled IMU, non-finite input, lost samples, corrupt stamps, windowed dt estimate, quaternion interpolation): C++ additions, all off by default | §7.22. Without them the inertial is NavToolkit's to the last bit, including that a SAMPLED message throws (NavToolkit in `ErrorMode::DIE`; the Python apps run it with `OFF`, where the message is dropped silently). |
+| 20 | A non-positive or non-finite `expected_dt` / `inertial_buffer_length` is refused with an ERROR; interpolation next to a solution without a quaternion treats it as level | Both were undefined behaviour (§7.22). |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -806,7 +864,8 @@ Python interpreter at configure time, spdlog, nlohmann_json and a data download;
 | `navutils` (`rot_vec_to_dcm`, `axis_angle_to_dcm`, `quat_to_rpy`, Titterton gravity, `wrap_to_pi`) | `utils/navutils.hpp` additions |
 | Cobra `standard_plugins/StandardInertialPlugin.py` | `inertial/StandardInertialPlugin.hpp` |
 
-Behavioural notes: integrated IMU only (SAMPLED throws, as NavToolkit); the ring buffers hold
+Behavioural notes: integrated IMU only by default (SAMPLED throws, as NavToolkit in `ErrorMode::DIE`; §7.22 for
+live data); the ring buffers hold
 `buffer_length / expected_dt + 2` entries and the reported time span excludes the oldest entry once the ring is
 full (NavToolkit quirk, kept); `estimated_dt()` switches from the configured value to the running mean after
 10 samples; resets re-mechanize every buffered IMU record after the reset time, scaling the first one by the
