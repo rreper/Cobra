@@ -3,6 +3,7 @@
 
 #include <pntos/api/preprocessor.hpp>
 #include <pntos/cobra/config/configs.hpp>
+#include <pntos/cobra/inertial/Stationarity.hpp>
 
 #include <aspn23/eigen/MeasurementVelocity.hpp>
 
@@ -33,6 +34,26 @@ class ZeroVelocity2dGenerator final : public api::Preprocessor {
   std::optional<std::int64_t> last_ns_;
 };
 
+/// Says that the vehicle stands (C++ addition, ZeroMotionGeneratorConfig; DESIGN.md §7.25). Every IMU message
+/// of its channels goes through a StationarityDetector; while the last `window` seconds were quiet, a zero
+/// velocity (NED) and a zero angular rate (sensor frame) follow the IMU message every `trigger_dt_sec`, stamped
+/// at the middle of the quiet window, so that the second the filter averages the gyro over lies inside it.
+class ZeroMotionGenerator final : public api::Preprocessor {
+ public:
+  ZeroMotionGenerator(const ZeroMotionGeneratorConfig& config, api::Mediator* mediator);
+  std::optional<std::vector<api::Message>> process_pntos_message(const api::Message& message) override;
+
+  const inertial::StationarityDetector& detector() const { return detector_; }
+  std::uint64_t generated() const { return generated_; }
+
+ private:
+  ZeroMotionGeneratorConfig cfg_;
+  api::Mediator* mediator_;
+  inertial::StationarityDetector detector_;
+  std::optional<std::int64_t> last_imu_ns_, last_ns_;
+  std::uint64_t generated_ = 0;
+};
+
 /// Emulates a worse sensor set on the fly (SensorDegradationConfig): IMU noise and bias, GNSS position /
 /// velocity noise, covariance scaling and one-shot position jumps. Deterministic for a given seed.
 class SensorDegradationPreprocessor final : public api::Preprocessor {
@@ -58,7 +79,7 @@ class SensorDegradationPreprocessor final : public api::Preprocessor {
   api::Vector3 ramp_offset(double rel_s) const;
 };
 
-/// Preprocessor plugin providing ["zero_velocity2d_generator", "sensor_degradation"].
+/// Preprocessor plugin providing ["zero_velocity2d_generator", "sensor_degradation", "zero_motion_generator"].
 class AdvancedPreprocessorPlugin final : public api::PreprocessorPlugin {
  public:
   explicit AdvancedPreprocessorPlugin(std::string identifier) : identifier_(std::move(identifier)) {}
@@ -72,7 +93,8 @@ class AdvancedPreprocessorPlugin final : public api::PreprocessorPlugin {
  private:
   std::string identifier_;
   api::Mediator* mediator_ = nullptr;
-  std::vector<std::string> ids_{ZeroVelocity2dGeneratorConfig::kIdentifier, SensorDegradationConfig::kIdentifier};
+  std::vector<std::string> ids_{ZeroVelocity2dGeneratorConfig::kIdentifier, SensorDegradationConfig::kIdentifier,
+                                ZeroMotionGeneratorConfig::kIdentifier};  // the third is a C++ addition
 };
 
 }  // namespace pntos::cobra

@@ -1,5 +1,8 @@
 #include <pntos/cobra/state_modeling/MeasurementProcessors.hpp>
+#include <pntos/cobra/config/configs.hpp>
 #include <pntos/cobra/utils/navutils.hpp>
+
+#include <aspn23/eigen/MeasurementAngularVelocity.hpp>
 
 #include <cmath>
 
@@ -219,6 +222,80 @@ std::optional<api::StandardMeasurementModel> PinsonVelocityMeasurementProcessor:
   model.h = [H](const Vector& x) { return Vector(H * x); };
   model.H = H;
   model.R = vel->get_covariance();
+  return model;
+}
+
+// ======================================================= PinsonZeroRateMeasurementProcessor
+
+PinsonZeroRateMeasurementProcessor::PinsonZeroRateMeasurementProcessor(std::string label, std::vector<std::string> labels,
+                                                                       api::Mediator* mediator)
+    : PinsonProcessorBase("PinsonZeroRateMeasurementProcessor", std::move(label), std::move(labels), mediator, 1) {}
+
+void PinsonZeroRateMeasurementProcessor::receive_aux_data(const api::AuxData& aux) {
+  // Two MeasurementImu messages; the one from kAuxSourceSensorErrors holds the applied biases, the other the rate.
+  for (const auto& a : aux) {
+    if (!a) continue;
+    auto imu = a->as<aspn23_eigen::MeasurementImu>();
+    if (!imu) continue;
+    const Vector3 gyro(imu->get_meas_gyro());
+    if (a->source_identifier == kAuxSourceSensorErrors) {
+      bias_ = gyro;
+    } else {
+      rate_ = gyro;
+      rate_ns_ = imu->get_time_of_validity().get_elapsed_nsec();
+    }
+  }
+}
+
+std::optional<api::StandardMeasurementModel> PinsonZeroRateMeasurementProcessor::generate_model(
+    const api::Message& message, const api::GenXandP& gen_x_and_p) {
+  auto av = message.as<aspn23_eigen::MeasurementAngularVelocity>();
+  if (!av) {
+    log(LoggingLevel::ERROR, name_ + " expected message of type MeasurementAngularVelocity, but got another type. Cannot process message.");
+    return std::nullopt;
+  }
+  const api::Timestamp time(av->get_time_of_validity());
+  if (state_block_labels_.size() != num_required_blocks_) {
+    log(LoggingLevel::ERROR, name_ + " has wrong number of state blocks. Cannot generate model.");
+    return std::nullopt;
+  }
+  if (av->get_reference_frame() != ASPN23_MEASUREMENT_ANGULAR_VELOCITY_REFERENCE_FRAME_SENSOR) {
+    log(LoggingLevel::ERROR, name_ + " expected MeasurementAngularVelocity in the SENSOR frame at time " + secs(time) +
+                                 ". Cannot process message.");
+    return std::nullopt;
+  }
+  const Vector meas = av->get_meas();
+  const Matrix R = av->get_covariance();
+  if (meas.size() != 3 || R.rows() != 3 || R.cols() != 3 || !meas.allFinite()) {
+    log(LoggingLevel::ERROR, name_ + " expected three rates and a 3x3 covariance at time " + secs(time) + ". Cannot process message.");
+    return std::nullopt;
+  }
+  if (!rate_ || !bias_) {
+    log(LoggingLevel::ERROR, name_ + " cannot process message at time " + secs(time) +
+                                 " as it has not received the inertial's rate and sensor errors as aux data (aux_channels " +
+                                 kAuxInertialForcesAndRates + " and " + kAuxInertialSensorErrors + ").");
+    return std::nullopt;
+  }
+  // The rate is the mean over the second around the filter's time; near the ends of the inertial's buffer that
+  // second is cut short and its middle moves away from the measurement.
+  if (std::llabs(rate_ns_ - time.elapsed_nsec) > 250'000'000) {
+    log(LoggingLevel::DEBUG, name_ + " skips the message at time " + secs(time) + ": the inertial's rate is centred " +
+                                 std::to_string((rate_ns_ - time.elapsed_nsec) * 1e-9) + " s away from it.");
+    return std::nullopt;
+  }
+  auto ewc = gen_x_and_p(state_block_labels_);
+  if (!ewc) return std::nullopt;
+  if (ewc->estimate.size() < 15) {
+    log(LoggingLevel::ERROR, name_ + " needs the 15 Pinson states. Cannot generate model.");
+    return std::nullopt;
+  }
+  Matrix H = Matrix::Zero(3, ewc->estimate.size());
+  H.block<3, 3>(0, 12) = Matrix3::Identity();
+  api::StandardMeasurementModel model;
+  model.z = Vector3(meas) - (*rate_ - *bias_);
+  model.h = [H](const Vector& x) { return Vector(H * x); };
+  model.H = H;
+  model.R = R;
   return model;
 }
 

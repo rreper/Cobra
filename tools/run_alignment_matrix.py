@@ -15,10 +15,12 @@ channel:
 
 Rows: the receiver's velocity at the time bias the example configs give it (150 ms), at the lags that fit the
 recording better, velocity from position differences, and the alignment followed by a filter that also has the
-ground-vehicle constraints of run_aiding_matrix.py ("no sideways, no vertical motion").
+ground-vehicle constraints of run_aiding_matrix.py ("no sideways, no vertical motion") and the zero-velocity /
+zero-rate updates while the vehicle stands.
 
 --write-configs also writes configs/pos_ins_align_in_motion.json (pos_ins without the heading from the
-configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints), no start time.
+configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints and the zero-velocity /
+zero-rate updates at standstill), no start time.
 """
 import argparse, copy, json, math, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import run_acceptance as ra  # noqa: E402
-from run_aiding_matrix import GNSS_P, GNSS_V, IMU, TRUTH, SOL, base, orch, listen, constraints  # noqa: E402
+from run_aiding_matrix import GNSS_P, GNSS_V, IMU, TRUTH, SOL, base, orch, listen, constraints, zero_motion  # noqa: E402
 
 LEVER = [-0.5, 0.38, -0.05]  # antenna relative to the IMU, as in the example configs
 AFTER = [10.0, 30.0, 60.0, 120.0]
@@ -58,6 +60,7 @@ def aligned(cfg, source='velocity', velocity_bias_ms=150, heading_sigma_deg=3.0,
 
 
 plain = lambda cfg: cfg  # noqa: E731
+ground_vehicle = lambda cfg: zero_motion(constraints(cfg))  # noqa: E731
 ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the receiver's velocity, 150 ms time bias as the example configs give it", plain),
         ('velocity_250ms', dict(source='velocity', velocity_bias_ms=250), "the receiver's velocity, 250 ms", plain),
         ('velocity_350ms', dict(source='velocity', velocity_bias_ms=350), "the receiver's velocity, 350 ms", plain),
@@ -66,7 +69,11 @@ ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the r
         ('velocity_250ms_no_lever', dict(source='velocity', velocity_bias_ms=250, lever=[0.0, 0.0, 0.0]), '250 ms, antenna lever arm left out', plain),
         ('velocity_250ms_constraints', dict(source='velocity', velocity_bias_ms=250),
          '250 ms; afterwards the filter also has the ground-vehicle constraints (same alignment, the difference is in the second table)', constraints),
-        ('position_constraints', dict(source='position'), 'position differences; afterwards with the constraints: a vehicle with a position-only receiver', constraints)]
+        ('position_constraints', dict(source='position'), 'position differences; afterwards with the constraints: a vehicle with a position-only receiver', constraints),
+        ('velocity_250ms_zero_motion', dict(source='velocity', velocity_bias_ms=250),
+         '250 ms; afterwards with zero-velocity and zero-rate updates while the vehicle stands, no constraints', zero_motion),
+        ('velocity_250ms_constraints_zero_motion', dict(source='velocity', velocity_bias_ms=250),
+         '250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates: configs/pos_ins_ground_vehicle.json', ground_vehicle)]
 
 
 def dcm(q):
@@ -132,7 +139,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=min(12, os.cpu_count() or 2))
     a = ap.parse_args()
     if a.write_configs:
-        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', constraints)):
+        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', ground_vehicle)):
             cfg = aligned(then(base()), **ROWS[1][1])
             cfg['app']['name'] = name
             json.dump(cfg, open(os.path.join(ROOT, 'configs', name + '.json'), 'w'), indent=2)

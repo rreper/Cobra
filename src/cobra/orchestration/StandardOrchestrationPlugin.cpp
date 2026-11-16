@@ -227,6 +227,7 @@ bool StandardOrchestrationPlugin::add_measurement_processor(const Providers& pro
         mp_aux_channels_[ch].push_back(cfg.label);
         if (ch == kAuxInertialPva) needs_inertial_pva_[cfg.label] = true;
         if (ch == kAuxInertialForcesAndRates) needs_inertial_f_and_r_[cfg.label] = true;
+        if (ch == kAuxInertialSensorErrors) needs_inertial_errors_[cfg.label] = true;
       }
     }
     return true;
@@ -392,12 +393,26 @@ std::optional<Message> StandardOrchestrationPlugin::get_inertial_forces(std::opt
 void StandardOrchestrationPlugin::send_inertial_aux_to_measurement_processor(const std::string& mp_label) {
   const bool needs_pva = needs_inertial_pva_[mp_label];
   const bool needs_forces = needs_inertial_f_and_r_[mp_label];
-  if (!needs_pva && !needs_forces) return;
+  const auto errors_it = needs_inertial_errors_.find(mp_label);
+  const bool needs_errors = errors_it != needs_inertial_errors_.end() && errors_it->second;
+  if (!needs_pva && !needs_forces && !needs_errors) return;
   api::AuxData aux;
   if (needs_pva) aux.push_back(cache_->inertial_solution());
   if (needs_forces) {
     const Timestamp ft = fusion_engine_->time();
     aux.push_back(get_inertial_forces(Timestamp{ft.elapsed_nsec - 500'000'000}, Timestamp{ft.elapsed_nsec + 500'000'000}));
+  }
+  if (needs_errors) {  // C++ addition: the biases the inertial is applying now
+    const Timestamp ft = fusion_engine_->time();
+    std::optional<Message> errors;
+    if (auto e = inertial_->request_sensor_errors(ft)) {
+      auto imu = std::make_shared<aspn23_eigen::MeasurementImu>(
+          aspn23_eigen::TypeHeader(ASPN_MEASUREMENT_IMU, 0, 0, 0, 0), aspn23_eigen::TypeTimestamp(ft.elapsed_nsec),
+          ASPN23_MEASUREMENT_IMU_IMU_TYPE_SAMPLED, Eigen::Matrix<double, Eigen::Dynamic, 1>(e->accel_biases),
+          Eigen::Matrix<double, Eigen::Dynamic, 1>(e->gyro_biases), std::vector<aspn23_eigen::TypeIntegrity>{});
+      errors = Message(imu, kAuxSourceSensorErrors);
+    }
+    aux.push_back(errors);
   }
   fusion_engine_->give_measurement_processor_aux_data(mp_label, aux);
 }

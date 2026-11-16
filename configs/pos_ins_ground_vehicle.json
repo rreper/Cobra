@@ -203,6 +203,29 @@
             "INERTIAL_PVA",
             "INERTIAL_FORCES_AND_RATES"
           ]
+        },
+        {
+          "type": "PinsonVelocityMPConfig",
+          "group": "config/zero_velocity_processor",
+          "label": "zero_velocity",
+          "channel": "/generated/zero_velocity",
+          "state_block_labels": [
+            "pinson15"
+          ],
+          "aux_channels": [
+            "INERTIAL_PVA"
+          ],
+          "innovation_gate_probability": 0.999
+        },
+        {
+          "type": "PinsonZeroRateMPConfig",
+          "group": "config/zero_rate_processor",
+          "label": "zero_rate",
+          "channel": "/generated/zero_rate",
+          "state_block_labels": [
+            "pinson15"
+          ],
+          "innovation_gate_probability": 0.999
         }
       ],
       "pinson_sb_config": {
@@ -267,6 +290,15 @@
           "lateral_vel_sigma": 0.2,
           "vertical_vel_sigma": 0.2,
           "output_channel": "/generated/constraints"
+        },
+        {
+          "type": "ZeroMotionGeneratorConfig",
+          "group": "config/zero_motion",
+          "channels": [
+            "/sensor/vn-100/imu"
+          ],
+          "velocity_channel": "/generated/zero_velocity",
+          "rate_channel": "/generated/zero_rate"
         },
         {
           "type": "TimeBiasConfig",

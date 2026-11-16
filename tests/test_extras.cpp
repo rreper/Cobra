@@ -7,10 +7,12 @@
 
 #include "test_support.hpp"
 
+#include <aspn23/eigen/MeasurementAngularVelocity.hpp>
 #include <aspn23/eigen/MeasurementImu.hpp>
 
 #include <cmath>
 #include <numeric>
+#include <random>
 
 using namespace pntos;
 using namespace pntos::test;
@@ -60,8 +62,11 @@ TEST_F(ExtrasTest, ConfigRoundTrip) {
 }
 
 TEST_F(ExtrasTest, PluginErrors) {
-  EXPECT_EQ(plugin->preprocessor_identifiers(), (std::vector<std::string>{"zero_velocity2d_generator", "sensor_degradation"}));
-  EXPECT_EQ(plugin->new_preprocessor(2, std::string("config/pseudovel_generator")), nullptr);
+  EXPECT_EQ(plugin->preprocessor_identifiers(),
+            (std::vector<std::string>{"zero_velocity2d_generator", "sensor_degradation", "zero_motion_generator"}));
+  EXPECT_EQ(plugin->new_preprocessor(3, std::string("config/pseudovel_generator")), nullptr);
+  EXPECT_EQ(plugin->new_preprocessor(2, std::nullopt), nullptr);
+  EXPECT_EQ(plugin->new_preprocessor(2, std::string("config/missing")), nullptr);
   EXPECT_EQ(plugin->new_preprocessor(1, std::nullopt), nullptr);
   EXPECT_EQ(plugin->new_preprocessor(1, std::string("config/missing")), nullptr);
   EXPECT_EQ(plugin->new_preprocessor(0, std::nullopt), nullptr);
@@ -245,4 +250,242 @@ TEST(SensorDegradation, RampsAndDerivedSource) {
   EXPECT_EQ(back->position_ramps[1][2], 2.0);
   EXPECT_EQ(back->derived_position_channel, "/synthetic/cell/position");
   EXPECT_EQ(back->derived_position_rate_hz, 1.0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Standing still: StationarityDetector and ZeroMotionGenerator (DESIGN.md §7.25)
+
+namespace {
+constexpr std::int64_t kMs = 1'000'000;
+/// A vehicle's IMU at 100 Hz: gyro bias, gravity, and the vibration of an idling engine, which is strong sample
+/// by sample (5 mrad/s and 0.5 m/s^2 rms, as on the example recording) but oscillates, here at 27 Hz, so that it
+/// is gone from a mean over 0.2 s. A little white noise on top.
+struct ImuStream {
+  std::mt19937 rng{7};
+  std::normal_distribution<double> n{0.0, 1.0};
+  std::int64_t t = 1'700'000'000'000'000'000;
+  std::int64_t k = 0;
+  Vector3 bias{-1.6e-3, -2.0e-3, -2.8e-3};
+  /// One sample of 10 ms with the vehicle turning at `rate` (rad/s) and accelerating at `accel` (m/s^2).
+  std::pair<Vector3, Vector3> sample(const Vector3& rate = Vector3::Zero(), const Vector3& accel = Vector3::Zero()) {
+    t += 10 * kMs;
+    ++k;
+    const double ph = 2 * 3.14159265358979 * 27.0 * 0.01 * static_cast<double>(k);
+    const Vector3 shake(std::sin(ph), std::sin(ph + 2.1), std::sin(ph + 4.2));
+    const Vector3 w = bias + rate + shake * 7e-3 + Vector3(n(rng), n(rng), n(rng)) * 5e-4;
+    const Vector3 f = Vector3(0, 0, -9.8) + accel + shake * 0.7 + Vector3(n(rng), n(rng), n(rng)) * 0.03;
+    return {Vector3(f * 0.01), Vector3(w * 0.01)};
+  }
+  Message message(const Vector3& rate = Vector3::Zero(), const Vector3& accel = Vector3::Zero(), const char* channel = "/imu") {
+    const auto [dv, dth] = sample(rate, accel);
+    return Message(std::make_shared<aspn23_eigen::MeasurementImu>(header(ASPN_MEASUREMENT_IMU), aspn23_eigen::TypeTimestamp(t),
+                                                                  ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED, DynVector(dv), DynVector(dth),
+                                                                  std::vector<aspn23_eigen::TypeIntegrity>{}),
+                   channel);
+  }
+};
+}  // namespace
+
+TEST(Stationarity, QuietThroughEngineVibrationAndNotThroughMotion) {
+  cobra::inertial::StationarityDetector d;
+  ImuStream imu;
+  // standing: not before the window is full, then steadily
+  int first = -1;
+  for (int k = 0; k < 500; ++k) {
+    const auto [dv, dth] = imu.sample();
+    const bool s = d.add(imu.t, 0.01, dv, dth);
+    if (s && first < 0) first = k;
+    if (first >= 0) EXPECT_TRUE(s) << k;
+  }
+  EXPECT_GE(first, 195);
+  EXPECT_LE(first, 205);
+  EXPECT_NEAR((d.window_end_ns() - d.window_begin_ns()) * 1e-9, 2.0, 1e-6);
+  EXPECT_EQ(d.window_end_ns(), imu.t);
+  EXPECT_LT((d.mean_rate() - imu.bias).norm(), 3e-4);  // 5 mrad/s rms of vibration is gone from the mean
+  EXPECT_NEAR(d.mean_specific_force()(2), -9.8, 0.03);
+  EXPECT_NEAR(d.quiet_seconds(), 5.0, 0.21);
+
+  // a turn of 0.6 deg/s that builds up over a second: no single sample stands out of the vibration, the means do
+  bool lost = false;
+  for (int k = 0; k < 300; ++k) {
+    const auto [dv, dth] = imu.sample(Vector3(0, 0, 0.01 * std::min(1.0, k / 100.0)));
+    lost = lost || !d.add(imu.t, 0.01, dv, dth);
+  }
+  EXPECT_TRUE(lost);
+  // a steady turn is quiet again in the deviations, but its rate is not a bias: max_rate
+  for (int k = 0; k < 300; ++k) {
+    const auto [dv, dth] = imu.sample(Vector3(0, 0, 0.03));
+    d.add(imu.t, 0.01, dv, dth);
+  }
+  EXPECT_FALSE(d.stationary());
+  // pulling away at 0.5 m/s^2 after standing
+  for (int k = 0; k < 300; ++k) {
+    const auto [dv, dth] = imu.sample();
+    d.add(imu.t, 0.01, dv, dth);
+  }
+  EXPECT_TRUE(d.stationary());
+  bool noticed = false;
+  int noticed_at = -1;
+  for (int k = 0; k < 100 && !noticed; ++k) {
+    const auto [dv, dth] = imu.sample(Vector3::Zero(), Vector3(0.5, 0, 0));
+    noticed = !d.add(imu.t, 0.01, dv, dth);
+    noticed_at = k;
+  }
+  EXPECT_TRUE(noticed);
+  EXPECT_LT(noticed_at, 45);  // within two sub-windows
+  EXPECT_EQ(d.quiet_seconds(), 0.0);
+}
+
+TEST(Stationarity, GapsAndNonsenseStartOver) {
+  cobra::inertial::StationarityDetector d;
+  ImuStream imu;
+  for (int k = 0; k < 300; ++k) {
+    const auto [dv, dth] = imu.sample();
+    d.add(imu.t, 0.01, dv, dth);
+  }
+  ASSERT_TRUE(d.stationary());
+  // a second without data
+  imu.t += 1000 * kMs;
+  auto [dv, dth] = imu.sample();
+  EXPECT_FALSE(d.add(imu.t, 0.01, dv, dth));
+  for (int k = 0; k < 150; ++k) {
+    std::tie(dv, dth) = imu.sample();
+    EXPECT_FALSE(d.add(imu.t, 0.01, dv, dth)) << k;  // the window has to fill again
+  }
+  for (int k = 0; k < 100; ++k) {
+    std::tie(dv, dth) = imu.sample();
+    d.add(imu.t, 0.01, dv, dth);
+  }
+  EXPECT_TRUE(d.stationary());
+  // not finite, a zero interval, a step back
+  EXPECT_FALSE(d.add(imu.t + 10 * kMs, 0.01, Vector3(0, std::nan(""), 0), dth));
+  EXPECT_FALSE(d.add(imu.t + 20 * kMs, 0.0, dv, dth));
+  EXPECT_FALSE(d.stationary());
+  // options that make no sense
+  cobra::inertial::StationarityOptions o;
+  o.window = 0.3;
+  EXPECT_THROW(cobra::inertial::StationarityDetector{o}, std::invalid_argument);
+  o = {};
+  o.gyro_deviation = 0;
+  EXPECT_THROW(cobra::inertial::StationarityDetector{o}, std::invalid_argument);
+}
+
+namespace {
+class ZeroMotionTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    auto zm = std::make_shared<cobra::ZeroMotionGeneratorConfig>();
+    zm->group_ = "config/zero_motion";
+    zm->channels = std::vector<std::string>{"/imu"};
+    zm->velocity_channel = "/generated/zero_velocity";
+    zm->rate_channel = "/generated/zero_rate";
+    zm->velocity_sigma = 0.04;
+    zm->rate_sigma = 2e-4;
+    auto rate_only = std::make_shared<cobra::ZeroMotionGeneratorConfig>(*zm);
+    rate_only->group_ = "config/zero_rate_only";
+    rate_only->velocity_channel.clear();
+    rate_only->trigger_dt_sec = 0.5;
+    registry = std::make_shared<cobra::StandardRegistryPlugin>("registry", std::vector<std::shared_ptr<const cobra::BaseConfig>>{zm, rate_only});
+    registry->init_plugin(std::nullopt, &med);
+    med.set_registry(registry->new_registry());
+    plugin = std::make_unique<cobra::AdvancedPreprocessorPlugin>("extras");
+    plugin->init_plugin(std::nullopt, &med);
+  }
+  TestMediator med;
+  std::shared_ptr<cobra::StandardRegistryPlugin> registry;
+  std::unique_ptr<cobra::AdvancedPreprocessorPlugin> plugin;
+};
+}  // namespace
+
+TEST_F(ZeroMotionTest, ConfigRoundTrip) {
+  auto c = cobra::ZeroMotionGeneratorConfig::from_registry(med, "config/zero_motion");
+  ASSERT_TRUE(c);
+  EXPECT_EQ(c->identifier, "zero_motion_generator");
+  EXPECT_EQ(c->velocity_channel, "/generated/zero_velocity");
+  EXPECT_EQ(c->rate_channel, "/generated/zero_rate");
+  EXPECT_DOUBLE_EQ(c->velocity_sigma, 0.04);
+  EXPECT_DOUBLE_EQ(c->rate_sigma, 2e-4);
+  EXPECT_DOUBLE_EQ(c->window, 2.0);
+  EXPECT_DOUBLE_EQ(c->trigger_dt_sec, 1.0);
+  ASSERT_TRUE(c->channels);
+  EXPECT_EQ(c->channels->at(0), "/imu");
+  auto base = cobra::PreprocessorConfig::from_registry(med, "config/zero_motion");
+  ASSERT_TRUE(base);
+  EXPECT_EQ(base->identifier, cobra::ZeroMotionGeneratorConfig::kIdentifier);
+  auto r = cobra::ZeroMotionGeneratorConfig::from_registry(med, "config/zero_rate_only");
+  ASSERT_TRUE(r);
+  EXPECT_TRUE(r->velocity_channel.empty());
+}
+
+TEST_F(ZeroMotionTest, SaysOnceASecondThatTheVehicleStands) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion"));
+  ASSERT_TRUE(pp);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<std::int64_t> stamps, arrivals;
+  for (int k = 0; k < 800; ++k) {
+    const Message in = imu.message();
+    auto out = pp->process_pntos_message(in);
+    ASSERT_TRUE(out);
+    ASSERT_GE(out->size(), 1u);
+    EXPECT_EQ((*out)[0].wrapped_message, in.wrapped_message);  // the IMU message itself comes first, untouched
+    if (out->size() == 1) continue;
+    ASSERT_EQ(out->size(), 3u);
+    auto vel = (*out)[1].as<aspn23_eigen::MeasurementVelocity>();
+    auto rate = (*out)[2].as<aspn23_eigen::MeasurementAngularVelocity>();
+    ASSERT_TRUE(vel);
+    ASSERT_TRUE(rate);
+    EXPECT_EQ((*out)[1].source_identifier, "/generated/zero_velocity");
+    EXPECT_EQ((*out)[2].source_identifier, "/generated/zero_rate");
+    EXPECT_EQ(vel->get_reference_frame(), ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED);
+    EXPECT_EQ(Vector3(vel->get_x(), vel->get_y(), vel->get_z()), Vector3::Zero());
+    EXPECT_TRUE(allclose(Matrix(vel->get_covariance()), Matrix::Identity(3, 3) * 0.04 * 0.04, 1e-12, 0));
+    EXPECT_EQ(rate->get_reference_frame(), ASPN23_MEASUREMENT_ANGULAR_VELOCITY_REFERENCE_FRAME_SENSOR);
+    EXPECT_EQ(Vector(rate->get_meas()), Vector(Vector3::Zero()));
+    EXPECT_TRUE(allclose(Matrix(rate->get_covariance()), Matrix::Identity(3, 3) * 2e-4 * 2e-4, 1e-12, 0));
+    EXPECT_EQ(vel->get_time_of_validity().get_elapsed_nsec(), rate->get_time_of_validity().get_elapsed_nsec());
+    stamps.push_back(vel->get_time_of_validity().get_elapsed_nsec());
+    arrivals.push_back(imu.t);
+  }
+  // 8 s of standing: the first after the 2 s window, then one a second
+  ASSERT_GE(stamps.size(), 6u);
+  ASSERT_LE(stamps.size(), 7u);
+  EXPECT_NEAR((arrivals.front() - t0) * 1e-9, 2.0, 0.05);
+  for (std::size_t i = 0; i < stamps.size(); ++i) {
+    EXPECT_EQ(arrivals[i] - stamps[i], 1000 * kMs) << i;  // stamped at the middle of the quiet window
+    if (i) EXPECT_NEAR((stamps[i] - stamps[i - 1]) * 1e-9, 1.0, 0.01) << i;
+  }
+
+  // driving off and winding: nothing; other channels and other message types pass untouched
+  for (int k = 0; k < 400; ++k) {
+    auto out = pp->process_pntos_message(imu.message(Vector3(0, 0, 0.05 * std::sin(0.02 * k)), Vector3(0.8, 0, 0)));
+    ASSERT_TRUE(out);
+    if (k > 40) EXPECT_EQ(out->size(), 1u) << k;
+  }
+  for (int k = 0; k < 400; ++k) {
+    auto out = pp->process_pntos_message(imu.message(Vector3::Zero(), Vector3::Zero(), "/other_imu"));
+    ASSERT_TRUE(out);
+    EXPECT_EQ(out->size(), 1u);
+  }
+  auto out = pp->process_pntos_message(Message(make_position(imu.t, 1, 2, 3, Matrix::Identity(3, 3)), "/imu"));
+  ASSERT_TRUE(out);
+  EXPECT_EQ(out->size(), 1u);
+}
+
+TEST_F(ZeroMotionTest, RateOnlyAndItsOwnInterval) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_rate_only"));
+  ASSERT_TRUE(pp);
+  ImuStream imu;
+  int generated = 0;
+  for (int k = 0; k < 500; ++k) {
+    auto out = pp->process_pntos_message(imu.message());
+    ASSERT_TRUE(out);
+    if (out->size() == 1) continue;
+    ASSERT_EQ(out->size(), 2u);
+    EXPECT_TRUE((*out)[1].as<aspn23_eigen::MeasurementAngularVelocity>());
+    ++generated;
+  }
+  // 0.5 s is not a multiple of the 0.2 s sub-window the detector advances by: every 0.6 s from 2 s on
+  EXPECT_GE(generated, 5);
+  EXPECT_LE(generated, 6);
 }

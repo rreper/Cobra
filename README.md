@@ -95,6 +95,10 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   velocity and the IMU once the vehicle drives, with no heading from outside and no assumption about the mounting.
   Switched on at 64 points of the example drive it aligned every time, in 18 s (median), to 1.6° RMS:
   `docs/ALIGNMENT_MATRIX.md`, `configs/pos_ins_align_in_motion.json`, `configs/pos_ins_ground_vehicle.json`.
+- Standing still: `zero_motion_generator` sees from the IMU that the vehicle stands and says so once a second;
+  `pinson_zero_rate` and `pinson_velocity` turn that into the gyro bias and a bounded velocity. A standing
+  vehicle's heading holds (0.15° in a minute instead of 8.9°) and a 120 s GNSS outage ends 34 m off instead of
+  131 m with no extra sensor, 9 m with the motion constraints: `docs/AIDING_MATRIX.md`, DESIGN.md §7.25.
 - Live IMU data: `inertial_config` keys `imu_gap_policy`, `max_imu_gap`, `reject_non_finite`, `sampled_imu`,
   `dt_window` and `attitude_interpolation` make the inertial hold its rate across lost samples, refuse corrupt time
   stamps and NaN, and accept rate (SAMPLED) messages. All off by default, where it behaves exactly as NavToolkit

@@ -345,6 +345,9 @@ LeverArmOrientationMPConfig PinsonBodyVelocityMPConfig() {
 LeverArmOrientationMPConfig PinsonOdometryMPConfig() {
   return LeverArmOrientationMPConfig(kPinsonOdometry, std::vector<std::string>{kAuxInertialPva, kAuxInertialForcesAndRates});
 }
+PlainMPConfig PinsonZeroRateMPConfig() {
+  return PlainMPConfig(kPinsonZeroRate, std::vector<std::string>{kAuxInertialForcesAndRates, kAuxInertialSensorErrors});
+}
 LeverArmMPConfig PosVelMPConfig() { return LeverArmMPConfig(kPinsonPosVel, pva_aux()); }
 LeverArmMPConfig PositionMPConfig() { return LeverArmMPConfig(kPosition, std::nullopt); }
 LeverArmOrientationMPConfig Direction3dToPointsMPConfig() {
@@ -720,6 +723,32 @@ PNTOS_PP_IMPL(
       c.lateral_vel_sigma = r.require<double>("lateral_vel_sigma");
       c.vertical_vel_sigma = r.require<double>("vertical_vel_sigma");
       c.output_channel = r.require<std::string>("output_channel");
+    })
+PNTOS_PP_IMPL(
+    ZeroMotionGeneratorConfig,
+    {
+      w.scalar("window", window);
+      w.scalar("sub_window", sub_window);
+      w.scalar("gyro_deviation", gyro_deviation);
+      w.scalar("accel_deviation", accel_deviation);
+      w.scalar("max_rate", max_rate);
+      w.scalar("trigger_dt_sec", trigger_dt_sec);
+      w.scalar("velocity_channel", velocity_channel);
+      w.scalar("velocity_sigma", velocity_sigma);
+      w.scalar("rate_channel", rate_channel);
+      w.scalar("rate_sigma", rate_sigma);
+    },
+    {
+      c.window = r.optional<double>("window").value_or(c.window);
+      c.sub_window = r.optional<double>("sub_window").value_or(c.sub_window);
+      c.gyro_deviation = r.optional<double>("gyro_deviation").value_or(c.gyro_deviation);
+      c.accel_deviation = r.optional<double>("accel_deviation").value_or(c.accel_deviation);
+      c.max_rate = r.optional<double>("max_rate").value_or(c.max_rate);
+      c.trigger_dt_sec = r.optional<double>("trigger_dt_sec").value_or(c.trigger_dt_sec);
+      c.velocity_channel = r.optional<std::string>("velocity_channel").value_or("");
+      c.velocity_sigma = r.optional<double>("velocity_sigma").value_or(c.velocity_sigma);
+      c.rate_channel = r.optional<std::string>("rate_channel").value_or("");
+      c.rate_sigma = r.optional<double>("rate_sigma").value_or(c.rate_sigma);
     })
 PNTOS_PP_IMPL(
     SensorDegradationConfig,

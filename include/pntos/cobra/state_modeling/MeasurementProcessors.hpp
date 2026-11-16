@@ -6,6 +6,8 @@
 // precondition, exactly like the Python originals.
 #pragma once
 
+#include <cstdint>
+
 #include <pntos/api/state_modeling.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
 #include <pntos/cobra/utils/geoid.hpp>
@@ -72,6 +74,26 @@ class PinsonVelocityMeasurementProcessor final : public PinsonProcessorBase {
   std::unique_ptr<api::StandardMeasurementProcessor> clone() const override {
     return std::make_unique<PinsonVelocityMeasurementProcessor>(*this);
   }
+};
+
+/// C++ addition: an angular rate the vehicle is known to have, in the sensor frame and relative to the
+/// navigation frame (zero while it stands: ZeroMotionGeneratorConfig), against what the gyro shows -> Pinson
+/// gyro-bias states. Aux data: the inertial's rate over the second around the measurement (raw, the Earth's and
+/// the transport rate removed: INERTIAL_FORCES_AND_RATES) and the bias it is applying (INERTIAL_SENSOR_ERRORS).
+/// With the bias state x = applied bias - true bias: measurement - (rate - applied bias) = x + noise.
+class PinsonZeroRateMeasurementProcessor final : public PinsonProcessorBase {
+ public:
+  PinsonZeroRateMeasurementProcessor(std::string label, std::vector<std::string> state_block_labels, api::Mediator* mediator);
+  void receive_aux_data(const api::AuxData& aux) override;
+  std::optional<api::StandardMeasurementModel> generate_model(const api::Message& message,
+                                                              const api::GenXandP& gen_x_and_p) override;
+  std::unique_ptr<api::StandardMeasurementProcessor> clone() const override {
+    return std::make_unique<PinsonZeroRateMeasurementProcessor>(*this);
+  }
+
+ private:
+  std::optional<api::Vector3> rate_, bias_;
+  std::int64_t rate_ns_ = 0;
 };
 
 /// Geodetic PVA (position + velocity part) -> Pinson position/velocity/tilt states.

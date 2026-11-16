@@ -6,6 +6,8 @@
 #include <pntos/cobra/orchestration/StandardOrchestrationPlugin.hpp>
 #include <pntos/cobra/presets/Presets.hpp>
 
+#include <cstdlib>
+#include <fstream>
 #include "test_support.hpp"
 
 #include <cmath>
@@ -506,4 +508,83 @@ TEST(JsonConfig, OdometryProcessorReorderWindowAndWheelEmulation) {
                  return bad;
                }()),
                std::runtime_error);
+}
+
+TEST(JsonConfig, ZeroMotionGeneratorAndZeroRateProcessor) {
+  using namespace cobra;
+  auto src = [](const char* rel) {
+    const char* s = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(s ? s : "..") + "/" + rel;
+  };
+  std::ifstream in(src("configs/pos_ins.json"));
+  jsoncfg::json j;
+  in >> j;
+  j["app"]["preprocessors"] = {"standard", "advanced"};
+  for (auto& c : j["configs"]) {
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    c["measurement_reorder_s"] = 2.5;
+    c["preprocessor_configs"].push_back({{"type", "ZeroMotionGeneratorConfig"},
+                                         {"group", "config/zero_motion"},
+                                         {"channels", {"/sensor/vn-100/imu"}},
+                                         {"velocity_channel", "/generated/zero_velocity"},
+                                         {"rate_channel", "/generated/zero_rate"},
+                                         {"rate_sigma", 2e-4}});
+    c["mp_configs"].push_back({{"type", "PinsonZeroRateMPConfig"},
+                               {"group", "config/zero_rate_processor"},
+                               {"label", "zaru"},
+                               {"channel", "/generated/zero_rate"},
+                               {"state_block_labels", {"pinson15"}}});
+  }
+  const auto app = jsoncfg::app_config_from_json(j);
+  const StandardOrchestrationConfig* orch = nullptr;
+  for (const auto& c : app.configs)
+    if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) orch = o;
+  ASSERT_NE(orch, nullptr);
+  const ZeroMotionGeneratorConfig* zm = nullptr;
+  ASSERT_TRUE(orch->preprocessor_configs.has_value());
+  for (const auto& p : *orch->preprocessor_configs)
+    if (auto* z = dynamic_cast<const ZeroMotionGeneratorConfig*>(p.get())) zm = z;
+  ASSERT_NE(zm, nullptr);
+  EXPECT_EQ(zm->identifier, "zero_motion_generator");
+  EXPECT_EQ(zm->velocity_channel, "/generated/zero_velocity");
+  EXPECT_DOUBLE_EQ(zm->rate_sigma, 2e-4);
+  EXPECT_DOUBLE_EQ(zm->velocity_sigma, 0.2);  // defaults where the text is silent
+  EXPECT_DOUBLE_EQ(zm->window, 2.0);
+  EXPECT_DOUBLE_EQ(zm->gyro_deviation, 0.003);
+  const MeasurementProcessorConfig* zaru = nullptr;
+  ASSERT_TRUE(orch->mp_configs.has_value());
+  for (const auto& mp : *orch->mp_configs)
+    if (mp->label == "zaru") zaru = mp.get();
+  ASSERT_NE(zaru, nullptr);
+  EXPECT_EQ(zaru->identifier, "pinson_zero_rate");
+  // the two aux channels come with the type: the inertial's rate and the biases it applies
+  ASSERT_TRUE(zaru->aux_channels.has_value());
+  EXPECT_EQ(*zaru->aux_channels, (std::vector<std::string>{"INERTIAL_FORCES_AND_RATES", "INERTIAL_SENSOR_ERRORS"}));
+  // text -> config -> text -> config is stable, and the plugins build
+  const auto text = jsoncfg::app_config_to_json(app);
+  EXPECT_EQ(jsoncfg::app_config_to_json(jsoncfg::app_config_from_json(text)).dump(), text.dump());
+  EXPECT_NE(text.dump().find("\"PinsonZeroRateMPConfig\""), std::string::npos);
+  EXPECT_NE(text.dump().find("\"ZeroMotionGeneratorConfig\""), std::string::npos);
+
+  auto with = [&](const char* key, jsoncfg::json value) {
+    jsoncfg::json k = j;
+    for (auto& c : k["configs"])
+      if (c["type"] == "StandardOrchestrationConfig")
+        for (auto& p : c["preprocessor_configs"])
+          if (p["type"] == "ZeroMotionGeneratorConfig") {
+            if (value.is_null())
+              p.erase(key);
+            else
+              p[key] = value;
+          }
+    return k;
+  };
+  EXPECT_THROW(jsoncfg::app_config_from_json(with("window", 0.5)), std::runtime_error);        // the rate is a mean over a second
+  EXPECT_THROW(jsoncfg::app_config_from_json(with("rate_sigma", 0.0)), std::runtime_error);
+  jsoncfg::json neither = with("velocity_channel", nullptr);
+  for (auto& c : neither["configs"])
+    if (c["type"] == "StandardOrchestrationConfig")
+      for (auto& p : c["preprocessor_configs"])
+        if (p["type"] == "ZeroMotionGeneratorConfig") p.erase("rate_channel");
+  EXPECT_THROW(jsoncfg::app_config_from_json(neither), std::runtime_error);  // nothing to generate
 }

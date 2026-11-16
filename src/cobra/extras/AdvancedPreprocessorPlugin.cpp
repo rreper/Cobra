@@ -3,6 +3,7 @@
 #include <pntos/cobra/utils/aspn.hpp>
 #include <pntos/cobra/utils/logging.hpp>
 
+#include <aspn23/eigen/MeasurementAngularVelocity.hpp>
 #include <aspn23/eigen/MeasurementImu.hpp>
 #include <aspn23/eigen/MeasurementPosition.hpp>
 #include <aspn23/eigen/MeasurementPositionVelocityAttitude.hpp>
@@ -57,6 +58,72 @@ std::optional<std::vector<Message>> ZeroVelocity2dGenerator::process_pntos_messa
   vel->set_time_of_validity(aspn23_eigen::TypeTimestamp(now));
   last_ns_ = now;
   return std::vector<Message>{message, Message(vel, output_channel_)};
+}
+
+// ----------------------------------------------------------------------------- ZeroMotionGenerator
+
+namespace {
+inertial::StationarityOptions stationarity_options(const ZeroMotionGeneratorConfig& c) {
+  inertial::StationarityOptions o;
+  o.window = c.window;
+  o.sub_window = c.sub_window;
+  o.gyro_deviation = c.gyro_deviation;
+  o.accel_deviation = c.accel_deviation;
+  o.max_rate = c.max_rate;
+  return o;
+}
+}  // namespace
+
+ZeroMotionGenerator::ZeroMotionGenerator(const ZeroMotionGeneratorConfig& config, api::Mediator* mediator)
+    : cfg_(config), mediator_(mediator), detector_(stationarity_options(config)) {}
+
+std::optional<std::vector<Message>> ZeroMotionGenerator::process_pntos_message(const Message& message) {
+  std::vector<Message> out{message};
+  if (cfg_.channels && !cfg_.channels->empty() &&
+      std::find(cfg_.channels->begin(), cfg_.channels->end(), message.source_identifier) == cfg_.channels->end())
+    return out;
+  auto imu = message.as<aspn23_eigen::MeasurementImu>();
+  if (!imu) return out;
+  const std::int64_t t = imu->get_time_of_validity().get_elapsed_nsec();
+  if (!last_imu_ns_ || t <= *last_imu_ns_) {  // the first sample sets the time base; a step back starts over
+    last_imu_ns_ = t;
+    detector_.reset();
+    return out;
+  }
+  const double dt = (t - *last_imu_ns_) * 1e-9;
+  last_imu_ns_ = t;
+  api::Vector3 dv(imu->get_meas_accel()), dth(imu->get_meas_gyro());
+  if (imu->get_imu_type() != ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED) {
+    dv *= dt;
+    dth *= dt;
+  }
+  if (!detector_.add(t, dt, dv, dth)) return out;
+
+  // Stamped at the middle of the quiet window: the filter averages the gyro over the second around the stamp.
+  const std::int64_t stamp = detector_.window_begin_ns() + (detector_.window_end_ns() - detector_.window_begin_ns()) / 2;
+  if (last_ns_ && stamp - *last_ns_ < static_cast<std::int64_t>(cfg_.trigger_dt_sec * 1e9)) return out;
+  last_ns_ = stamp;
+  ++generated_;
+  using RowMajor = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+  const Eigen::Matrix<double, Eigen::Dynamic, 1> none(0);
+  if (!cfg_.velocity_channel.empty()) {
+    const RowMajor cov = RowMajor::Identity(3, 3) * (cfg_.velocity_sigma * cfg_.velocity_sigma);
+    out.emplace_back(std::make_shared<aspn23_eigen::MeasurementVelocity>(
+                         aspn23_eigen::TypeHeader(ASPN_MEASUREMENT_VELOCITY, 0, 0, 0, 0), aspn23_eigen::TypeTimestamp(stamp),
+                         ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED, 0.0, 0.0, 0.0, cov,
+                         ASPN23_MEASUREMENT_VELOCITY_ERROR_MODEL_NONE, none, std::vector<aspn23_eigen::TypeIntegrity>{}),
+                     cfg_.velocity_channel);
+  }
+  if (!cfg_.rate_channel.empty()) {
+    const RowMajor cov = RowMajor::Identity(3, 3) * (cfg_.rate_sigma * cfg_.rate_sigma);
+    out.emplace_back(std::make_shared<aspn23_eigen::MeasurementAngularVelocity>(
+                         aspn23_eigen::TypeHeader(ASPN_MEASUREMENT_ANGULAR_VELOCITY, 0, 0, 0, 0), aspn23_eigen::TypeTimestamp(stamp),
+                         ASPN23_MEASUREMENT_ANGULAR_VELOCITY_REFERENCE_FRAME_SENSOR, ASPN23_MEASUREMENT_ANGULAR_VELOCITY_IMU_TYPE_SAMPLED,
+                         Eigen::Matrix<double, Eigen::Dynamic, 1>(api::Vector3::Zero()), cov,
+                         ASPN23_MEASUREMENT_ANGULAR_VELOCITY_ERROR_MODEL_NONE, none, std::vector<aspn23_eigen::TypeIntegrity>{}),
+                     cfg_.rate_channel);
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------- SensorDegradation
@@ -179,6 +246,24 @@ std::unique_ptr<api::Preprocessor> AdvancedPreprocessorPlugin::new_preprocessor(
     utils::print_message(LoggingLevel::ERROR, identifier_,
                          "mediator is null. init_plugin must be called with a valid mediator before new_preprocessor.");
     return nullptr;
+  }
+  if (index == 2) {
+    if (!config_group) {
+      mediator_->log_message(LoggingLevel::ERROR, "config_group is a required parameter for preprocessor \"" + ids_[2] +
+                                                      "\" and cannot be None.");
+      return nullptr;
+    }
+    auto cfg = ZeroMotionGeneratorConfig::from_registry(*mediator_, *config_group);
+    if (!cfg) {
+      mediator_->log_message(LoggingLevel::ERROR, "Failed to populate ZeroMotionGeneratorConfig for preprocessor " + ids_[2] + ".");
+      return nullptr;
+    }
+    try {
+      return std::make_unique<ZeroMotionGenerator>(*cfg, mediator_);
+    } catch (const std::exception& e) {
+      mediator_->log_message(LoggingLevel::ERROR, std::string("ZeroMotionGeneratorConfig: ") + e.what());
+      return nullptr;
+    }
   }
   if (index == 1) {
     if (!config_group) {

@@ -1,6 +1,6 @@
 # Alignment matrix: the filter switched on anywhere in the drive
 
-Generated 2026-11-16 06:39 by `tools/run_alignment_matrix.py` in 116 s. `configs/pos_ins.json` with the `vn100_measured` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
+Generated 2026-11-16 07:52 by `tools/run_alignment_matrix.py` in 154 s. `configs/pos_ins.json` with the `vn100_measured` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
 
 ## At the hand-over
 
@@ -14,6 +14,8 @@ Generated 2026-11-16 06:39 by `tools/run_alignment_matrix.py` in 116 s. `configs
 | velocity_250ms_no_lever | 64 / 64 | 18, 42, 136 | 2.15 (4.89) | 2.54 | 0.98 (3.86) | 0.35 (1.25) | 48, 2.00 | 2.52 |
 | velocity_250ms_constraints | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
 | position_constraints | 64 / 64 | 30, 62, 139 | 2.65 (5.22) | 2.74 | 0.95 (1.95) | 0.49 (1.95) | 46, 2.09 | 3.71 |
+| velocity_250ms_zero_motion | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
+| velocity_250ms_constraints_zero_motion | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
 
 - `velocity_150ms`: the receiver's velocity, 150 ms time bias as the example configs give it
 - `velocity_250ms`: the receiver's velocity, 250 ms
@@ -23,6 +25,8 @@ Generated 2026-11-16 06:39 by `tools/run_alignment_matrix.py` in 116 s. `configs
 - `velocity_250ms_no_lever`: 250 ms, antenna lever arm left out
 - `velocity_250ms_constraints`: 250 ms; afterwards the filter also has the ground-vehicle constraints (same alignment, the difference is in the second table)
 - `position_constraints`: position differences; afterwards with the constraints: a vehicle with a position-only receiver
+- `velocity_250ms_zero_motion`: 250 ms; afterwards with zero-velocity and zero-rate updates while the vehicle stands, no constraints
+- `velocity_250ms_constraints_zero_motion`: 250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates: configs/pos_ins_ground_vehicle.json
 
 The longest times are switch-on times at which the car stands: nothing shows a heading until it moves.
 
@@ -40,3 +44,5 @@ Heading error (deg) and horizontal position error (m), RMS over the switch-on ti
 | velocity_250ms_no_lever | 2.78 (6.29), 0.90 / 1.74 (3.35), 1.55 | 3.52 (11.05), 0.71 / 1.84 (3.86), 1.57 | 2.49 (11.52), 0.88 / 1.89 (3.45), 1.57 | 1.18 (4.22), 0.68 / 1.74 (3.06), 1.55 |
 | velocity_250ms_constraints | 1.23 (2.39), 0.90 / 1.61 (2.71), 1.55 | 1.26 (5.09), 0.71 / 1.67 (3.28), 1.57 | 1.21 (6.05), 0.88 / 1.62 (3.24), 1.57 | 0.58 (1.33), 0.68 / 1.55 (2.82), 1.55 |
 | position_constraints | 1.86 (5.57), 0.92 / 1.74 (3.36), 1.53 | 1.98 (10.35), 0.70 / 1.76 (2.93), 1.60 | 0.91 (2.87), 0.90 / 1.67 (2.77), 1.54 | 0.52 (1.34), 0.65 / 1.67 (3.02), 1.58 |
+| velocity_250ms_zero_motion | 2.30 (5.17), 0.90 / 1.57 (2.87), 1.55 | 2.89 (9.41), 0.71 / 1.69 (3.36), 1.57 | 2.16 (10.72), 0.88 / 1.74 (3.38), 1.57 | 0.66 (1.62), 0.68 / 1.63 (2.72), 1.55 |
+| velocity_250ms_constraints_zero_motion | 1.14 (2.39), 0.90 / 1.59 (2.71), 1.55 | 0.73 (1.71), 0.71 / 1.66 (3.28), 1.57 | 0.70 (2.30), 0.88 / 1.59 (2.79), 1.57 | 0.54 (1.33), 0.68 / 1.56 (2.81), 1.55 |

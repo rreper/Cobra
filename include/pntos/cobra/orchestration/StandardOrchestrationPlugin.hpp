@@ -128,7 +128,7 @@ class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
 
   std::map<std::string, std::vector<std::string>> measurement_channels_;  ///< channel -> MP labels
   std::map<std::string, std::vector<std::string>> sb_aux_channels_, mp_aux_channels_, vsb_aux_channels_;
-  std::map<std::string, bool> needs_inertial_pva_, needs_inertial_f_and_r_;
+  std::map<std::string, bool> needs_inertial_pva_, needs_inertial_f_and_r_, needs_inertial_errors_;
   std::map<std::string, std::vector<std::string>> vsbs_needing_pva_, vsbs_needing_f_and_r_;
   std::map<std::string, std::string> vsb_target_to_source_;
 };

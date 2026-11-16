@@ -2,6 +2,35 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.12: standing still, zero-velocity and zero-rate updates
+
+- Asked for: zero-rate updates. A standing vehicle's heading ran away with the gyro bias (8.9 deg in a minute with
+  position fixes alone, `Filter.StandingStillTheHeadingDriftsWithTheGyroBias`), and after an alignment in motion
+  the bias about the vertical stayed unknown until a manoeuvre. DESIGN.md §7.25.
+- `inertial::StationarityDetector` (the IMU alone: 0.2 s means over a 2 s window; per sample an idling engine
+  hides the difference), preprocessor `zero_motion_generator` (a zero velocity and a zero rate a second while the
+  window is quiet), measurement processor `pinson_zero_rate` (eleventh), aux channel `INERTIAL_SENSOR_ERRORS`
+  (the bias the inertial applies, which no processor could see). All opt-in.
+- On the recording the detector says "stands" 420 times: 396 at a true standstill, 24 while the car creeps (up
+  to 0.49 m/s), never above 0.5 m/s.
+- Result: standing for a minute, heading drift 0.15 deg instead of 8.9. Outages (mean, worst of six): 60 s 10.7
+  (23.4) m instead of 25.1 (56.6), 120 s 33.8 (65.6) m instead of 130.8 (290.7), no extra sensor; with the
+  constraints as well 6.2 (12.2) and 9.3 (15.7) m. A 40 s outage while standing: 2.2 m instead of 10.9. After an
+  alignment in motion, with constraints and zero-motion updates, the heading is 0.7 deg RMS (1.7 worst) 30 s
+  after the hand-over, level with the run that is given its heading. `configs/pos_ins_ground_vehicle.json` has
+  all three now.
+- Found on the way: (1) a zero velocity weighted at 0.05 m/s made the solution worse with the receiver present
+  (1.55 / 1.58 m became 1.85 / 2.51 m): the detector also fires while creeping, and the filter pins accelerometer
+  biases that wander by 2.3 mm/s2 between stretches of the drive (the IMU model allows 0.6). The default is
+  0.2 m/s, which keeps the outage gain and costs 0.03 / 0.10 m. (2) Not fixed: the `pva_message` initialization
+  leaves a 2 s gap before the first IMU sample (the PVA passes the controller's buffer); the solution falls at
+  19.5 m/s three seconds after the start.
+- 24 suites / 272 tests. Default mode unchanged: parity dump byte-identical, acceptance 24 / 24, the 61,772
+  output messages identical to v0.2.11.
+- Not done: an IMU error model that holds under driving (it would let the zero velocity weigh what it is
+  worth), the receiver's time offset, adaptive measurement weighting, tightly coupled GNSS. The detector is for
+  road vehicles: what glides at constant velocity looks like standing.
+
 ## 2026-11-16 — v0.2.11: alignment in motion; the reorder window of v0.2.10 corrected
 
 - Asked for: alignment in motion. Until now the heading came from the configuration file or a PVA message; the

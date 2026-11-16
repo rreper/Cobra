@@ -32,10 +32,10 @@ SUITES = {
     'preprocessors': ('test_preprocessor_plugin.py', 'all tests ported + time bias'),
     'lcm_transport': ('test_transport_plugin.py (log parts)', 'network LCM transport not ported'),
     'tutorial': ('test_orchestration.py (tutorial cases) + new', 'tutorial state model / orchestration / UI summary plugin'),
-    'extras': ('— (Python covers it via the zerovel2d app)', 'ZeroVelocity2dGenerator + AdvancedPreprocessorPlugin'),
+    'extras': ('— (Python covers it via the zerovel2d app)', 'ZeroVelocity2dGenerator + AdvancedPreprocessorPlugin; StationarityDetector and ZeroMotionGenerator (C++ additions)'),
     'diagnostics': ('test_diagnostic_log_plugin.py, test_hdf5utils.py (write half)', 'DiagnosticLogPlugin + dependency-free HDF5 writer; files verified with h5py by run_acceptance'),
     'json_config': ('— (new: config files, presets, app builder)', 'JSON round trip preserves the registry; presets; command-line overrides; plugin sets'),
-    'filter': ('— (new: push API, C ABI)', 'cobra::Filter against the log transport, direct use, the C ABI, live IMU faults end to end'),
+    'filter': ('— (new: push API, C ABI)', 'cobra::Filter against the log transport, direct use, the C ABI, live IMU faults, measurement order and the zero-motion updates end to end'),
     'transports': ('— (new: LCM over UDP multicast, CSV)', 'datagram encoding and reassembly, loopback delivery, CSV reading and writing'),
 }
 

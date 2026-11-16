@@ -328,6 +328,7 @@ const std::vector<MpKind>& mp_kinds() {
       {"PositionMPConfig", mp::kPosition, MpKind::LeverArm},
       {"Direction3dToPointsMPConfig", mp::kDirection3DToPoints, MpKind::LeverArmOrientation},
       {"PinsonOdometryMPConfig", mp::kPinsonOdometry, MpKind::LeverArmOrientation},
+      {"PinsonZeroRateMPConfig", mp::kPinsonZeroRate, MpKind::Plain},
   };
   return k;
 }
@@ -387,7 +388,8 @@ std::shared_ptr<BaseConfig> mp_from(const MpKind& k, const json& jc) {
       return c;
     }
     default: {
-      auto c = std::make_shared<PlainMPConfig>(mp::PinsonVelocityMPConfig());
+      auto c = std::make_shared<PlainMPConfig>(std::string(k.identifier) == mp::kPinsonZeroRate ? mp::PinsonZeroRateMPConfig()
+                                                                                                : mp::PinsonVelocityMPConfig());
       mp_base_from(jc, *c);
       return c;
     }
@@ -663,6 +665,26 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->output_channel = need(jc, "output_channel").get<std::string>();
     return c;
   }
+  if (type == "ZeroMotionGeneratorConfig") {
+    auto c = std::make_shared<ZeroMotionGeneratorConfig>();
+    pp_base_from(jc, *c);
+    c->window = get_or(jc, "window", c->window);
+    c->sub_window = get_or(jc, "sub_window", c->sub_window);
+    c->gyro_deviation = get_or(jc, "gyro_deviation", c->gyro_deviation);
+    c->accel_deviation = get_or(jc, "accel_deviation", c->accel_deviation);
+    c->max_rate = get_or(jc, "max_rate", c->max_rate);
+    c->trigger_dt_sec = get_or(jc, "trigger_dt_sec", c->trigger_dt_sec);
+    c->velocity_channel = get_or<std::string>(jc, "velocity_channel", "");
+    c->velocity_sigma = get_or(jc, "velocity_sigma", c->velocity_sigma);
+    c->rate_channel = get_or<std::string>(jc, "rate_channel", "");
+    c->rate_sigma = get_or(jc, "rate_sigma", c->rate_sigma);
+    if (!(c->window >= 1.0) || !(c->sub_window > 0) || !(c->window >= 2 * c->sub_window) || !(c->gyro_deviation > 0) ||
+        !(c->accel_deviation > 0) || !(c->max_rate > 0) || !(c->trigger_dt_sec >= 0) || !(c->velocity_sigma > 0) || !(c->rate_sigma > 0))
+      fail("ZeroMotionGeneratorConfig: window must be >= 1 s and at least two sub_windows; thresholds and sigmas > 0");
+    if (c->velocity_channel.empty() && c->rate_channel.empty())
+      fail("ZeroMotionGeneratorConfig: name a velocity_channel, a rate_channel or both");
+    return c;
+  }
   if (type == "SensorDegradationConfig") {
     auto c = std::make_shared<SensorDegradationConfig>();
     pp_base_from(jc, *c);
@@ -834,6 +856,7 @@ std::string type_name(const BaseConfig& c) {
   PNTOS_TN(ControllerConfig) PNTOS_TN(Stream) PNTOS_TN(StreamConfig) PNTOS_TN(InertialConfig) PNTOS_TN(FeedbackConfig)
   PNTOS_TN(DownsamplerConfig) PNTOS_TN(ImuRotatorConfig) PNTOS_TN(TimeAdjusterConfig) PNTOS_TN(BarometerToAltitudeConfig)
   PNTOS_TN(TimeBiasConfig) PNTOS_TN(OutageConfig) PNTOS_TN(ZeroVelocity2dGeneratorConfig) PNTOS_TN(SensorDegradationConfig)
+  PNTOS_TN(ZeroMotionGeneratorConfig)
   PNTOS_TN(ManualAlignmentConfig)
   PNTOS_TN(StaticAlignmentConfig) PNTOS_TN(ManualHeadingAlignmentConfig) PNTOS_TN(PvaMessageInitializationConfig)
   PNTOS_TN(InMotionAlignmentConfig)
@@ -984,6 +1007,21 @@ json config_to_json(const BaseConfig& c) {
     o["lateral_vel_sigma"] = p->lateral_vel_sigma;
     o["vertical_vel_sigma"] = p->vertical_vel_sigma;
     o["output_channel"] = p->output_channel;
+    return o;
+  }
+  if (auto* p = dynamic_cast<const ZeroMotionGeneratorConfig*>(&c)) {
+    json o{{"type", type}};
+    pp_base_to(*p, o);
+    o["window"] = p->window;
+    o["sub_window"] = p->sub_window;
+    o["gyro_deviation"] = p->gyro_deviation;
+    o["accel_deviation"] = p->accel_deviation;
+    o["max_rate"] = p->max_rate;
+    o["trigger_dt_sec"] = p->trigger_dt_sec;
+    if (!p->velocity_channel.empty()) o["velocity_channel"] = p->velocity_channel;
+    o["velocity_sigma"] = p->velocity_sigma;
+    if (!p->rate_channel.empty()) o["rate_channel"] = p->rate_channel;
+    o["rate_sigma"] = p->rate_sigma;
     return o;
   }
   if (auto* p = dynamic_cast<const SensorDegradationConfig*>(&c)) {

@@ -17,7 +17,8 @@ StandardStateModelProvider::StandardStateModelProvider(api::Mediator* mediator)
       processor_ids_{mp::kPinsonPosition,     mp::kPinsonVelocity,     mp::kPinsonWithNedFogmPosition,
                      mp::kPinsonAltitude,     mp::kPinsonWithLeverArmPosition, mp::kPinsonBodyVelocity,
                      mp::kPinsonPosVel,       mp::kPosition,           mp::kDirection3DToPoints,
-                     mp::kPinsonOdometry},  // C++ addition, after the nine of the Python original
+                     mp::kPinsonOdometry,   // C++ additions, after the nine of the Python original
+                     mp::kPinsonZeroRate},
       block_ids_{PinsonStateBlockConfig::kIdentifier, FogmStateBlockConfig::kIdentifier,
                  ClockBiasStateBlockConfig::kIdentifier, ConstantStateBlockConfig::kIdentifier},
       vsb_ids_{PinsonErrorToStandardVSBConfig::kIdentifier, StateExtractorConfig::kIdentifier} {}
@@ -41,6 +42,9 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
   const std::string& id = processor_ids_[index];
   if (id == mp::kPinsonVelocity) {
     return std::make_unique<PinsonVelocityMeasurementProcessor>(label, state_block_labels, mediator_);
+  }
+  if (id == mp::kPinsonZeroRate) {
+    return std::make_unique<PinsonZeroRateMeasurementProcessor>(label, state_block_labels, mediator_);
   }
   if (!config_group) {
     err("A config group is required for processor " + id);

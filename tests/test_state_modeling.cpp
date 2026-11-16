@@ -10,6 +10,7 @@
 
 #include "test_support.hpp"
 
+#include <aspn23/eigen/MeasurementAngularVelocity.hpp>
 #include <aspn23/eigen/MeasurementAltitude.hpp>
 #include <aspn23/eigen/MeasurementDirection3DToPoints.hpp>
 #include <aspn23/eigen/MeasurementVelocity.hpp>
@@ -153,7 +154,7 @@ TEST_F(StateModelingTest, EnoughLabelsAndInvalidIndex) {
   EXPECT_EQ(provider->new_virtual_block(provider->virtual_block_identifiers().size() + 1, "source", "target",
                                         "config/vsb"),
             nullptr);
-  EXPECT_EQ(provider->processor_identifiers().size(), 10u);  // the nine of the Python original and pinson_odometry
+  EXPECT_EQ(provider->processor_identifiers().size(), 11u);  // the nine of the Python original, pinson_odometry, pinson_zero_rate
   EXPECT_EQ(provider->block_identifiers().size(), 4u);
   EXPECT_EQ(provider->virtual_block_identifiers().size(), 2u);
 }
@@ -668,8 +669,8 @@ EstimateWithCovariance odometry_state(double scale, double pitch, double yaw) {
 }  // namespace
 
 TEST_F(StateModelingTest, OdometryIsTheTenthProcessor) {
-  ASSERT_EQ(provider->processor_identifiers().size(), 10u);
-  EXPECT_EQ(provider->processor_identifiers().back(), "pinson_odometry");
+  ASSERT_GE(provider->processor_identifiers().size(), 10u);
+  EXPECT_EQ(provider->processor_identifiers()[9], "pinson_odometry");
   EXPECT_TRUE(processor(9, "odo", {"pinson"}));
 }
 
@@ -755,4 +756,74 @@ TEST_F(StateModelingTest, OdometryUsesTheAxesThatArePresent) {
   bad.estimate.conservativeResize(17);
   bad.covariance = Matrix::Identity(17, 17);
   EXPECT_FALSE(odo->generate_model(Message(make_velocity(kSec, 4.4, kNaN, kNaN, Vector3(0.01, 0.04, 0.04), frame), "v"), fixed(bad)));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// pinson_zero_rate: a known angular rate (zero when the vehicle stands) against the gyro
+
+namespace {
+Message angular_rate(std::int64_t tov, const Vector3& rate, double sigma,
+                     Aspn23MeasurementAngularVelocityReferenceFrame frame = ASPN23_MEASUREMENT_ANGULAR_VELOCITY_REFERENCE_FRAME_SENSOR) {
+  return Message(std::make_shared<aspn23_eigen::MeasurementAngularVelocity>(
+                     header(ASPN_MEASUREMENT_ANGULAR_VELOCITY), aspn23_eigen::TypeTimestamp(tov), frame,
+                     ASPN23_MEASUREMENT_ANGULAR_VELOCITY_IMU_TYPE_SAMPLED, DynVector(rate), rm(Matrix::Identity(3, 3) * sigma * sigma),
+                     ASPN23_MEASUREMENT_ANGULAR_VELOCITY_ERROR_MODEL_NONE, DynVector(0), std::vector<aspn23_eigen::TypeIntegrity>{}),
+                 "/generated/zero_rate");
+}
+}  // namespace
+
+TEST_F(StateModelingTest, ZeroRateIsTheEleventhProcessor) {
+  ASSERT_EQ(provider->processor_identifiers().size(), 11u);
+  EXPECT_EQ(provider->processor_identifiers().back(), "pinson_zero_rate");
+  EXPECT_TRUE(processor(10, "zaru", {"pinson"}));
+  EXPECT_TRUE(processor(10, "zaru", {"pinson"}, std::nullopt));  // it has no configuration of its own
+  const auto c = cobra::mp::PinsonZeroRateMPConfig();
+  EXPECT_EQ(c.identifier, "pinson_zero_rate");
+  ASSERT_TRUE(c.aux_channels);
+  EXPECT_EQ(*c.aux_channels, (std::vector<std::string>{"INERTIAL_FORCES_AND_RATES", "INERTIAL_SENSOR_ERRORS"}));
+}
+
+TEST_F(StateModelingTest, ZeroRateSeesTheGyroBiasStates) {
+  auto zaru = processor(10, "zaru", {"pinson"});
+  ASSERT_TRUE(zaru);
+  // What the gyro showed over the second around the measurement (the Earth's rate already taken out), and the
+  // bias the inertial is applying. The vehicle stands: the corrected rate that is left is the bias error.
+  const Vector3 shown(-1.6e-3, -2.0e-3, -2.8e-3), applied(-1.0e-3, -2.5e-3, 0.0);
+  const Message rate_aux(make_imu(kSec, Vector3(0, 0, -9.8), shown), "Orchestration forces and rates");
+  const Message error_aux(make_imu(kSec, Vector3(0.01, 0.02, 0.03), applied), cobra::kAuxSourceSensorErrors);
+  const auto xp = gxp(15);
+  const Message m = angular_rate(kSec, Vector3::Zero(), 3e-4);
+
+  // without aux data there is nothing to compare with
+  EXPECT_FALSE(zaru->generate_model(m, fixed(xp)));
+  EXPECT_TRUE(med.has_error());
+  zaru->receive_aux_data({rate_aux});
+  EXPECT_FALSE(zaru->generate_model(m, fixed(xp)));
+
+  zaru->receive_aux_data({rate_aux, error_aux});
+  auto mm = zaru->generate_model(m, fixed(xp));
+  ASSERT_TRUE(mm);
+  EXPECT_ALLCLOSE(mm->z, Vector(applied - shown));
+  Matrix H = Matrix::Zero(3, 15);
+  H.block<3, 3>(0, 12) = Matrix::Identity(3, 3);
+  EXPECT_EQ(mm->H, H);
+  EXPECT_ALLCLOSE(mm->h(xp.estimate), Vector(xp.estimate.segment<3>(12)));
+  EXPECT_TRUE(allclose(mm->R, Matrix::Identity(3, 3) * 9e-8, 1e-12, 0));
+
+  // the order of the aux messages does not matter, and a known rate other than zero is taken as it is
+  auto other = processor(10, "zaru", {"pinson"});
+  other->receive_aux_data({error_aux, rate_aux});
+  const Vector3 known(0.0, 0.0, 0.1);
+  auto mk = other->generate_model(angular_rate(kSec, known, 3e-4), fixed(xp));
+  ASSERT_TRUE(mk);
+  EXPECT_ALLCLOSE(mk->z, Vector(known - (shown - applied)));
+
+  // refused: another frame, another message type, a rate that is not centred on the measurement, two state blocks
+  EXPECT_FALSE(zaru->generate_model(angular_rate(kSec, Vector3::Zero(), 3e-4, ASPN23_MEASUREMENT_ANGULAR_VELOCITY_REFERENCE_FRAME_NED), fixed(xp)));
+  EXPECT_FALSE(zaru->generate_model(pos_meas, fixed(xp)));
+  EXPECT_FALSE(zaru->generate_model(angular_rate(kSec + 400'000'000, Vector3::Zero(), 3e-4), fixed(xp)));
+  EXPECT_TRUE(zaru->generate_model(angular_rate(kSec + 200'000'000, Vector3::Zero(), 3e-4), fixed(xp)));
+  auto two = processor(10, "zaru", {"pinson", "fogm"});
+  two->receive_aux_data({rate_aux, error_aux});
+  EXPECT_FALSE(two->generate_model(m, fixed(xp)));
 }

@@ -7,6 +7,7 @@
 #include <pntos/cobra/transport/LcmLog.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
 #include <pntos/cobra/utils/logging.hpp>
+#include <pntos/cobra/utils/navutils.hpp>
 
 #include "test_support.hpp"
 
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <optional>
 #include <set>
 
@@ -550,4 +552,148 @@ TEST(Filter, ReorderWindowMustExceedTheControllerBuffer) {
   EXPECT_GE(ok.velocity_reached, ok.fixes - 4);
   EXPECT_EQ(ok.discard_warnings, 0);
   EXPECT_EQ(ok.window_warnings, 0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Standing still: zero-velocity and zero-rate updates (ZeroMotionGeneratorConfig, PinsonZeroRateMPConfig)
+
+namespace {
+struct Standing {
+  int solutions = 0;
+  double heading_drift_deg = 0;   ///< heading error at the end minus at the first solution, against the log's reference
+  double speed_max = 0;           ///< largest horizontal speed of the solution from 10 s on, m/s (the car stands)
+  int rate_updates = 0, velocity_updates = 0, errors = 0, discards = 0;
+};
+/// The 60 s log (the car stands, engine running) with the filter started from the reference solution and no
+/// knowledge of the gyro bias: nothing in the position fixes of a standing vehicle shows the bias about the
+/// vertical, 0.16 deg/s on this IMU.
+Standing stand_for_a_minute(bool zero_motion) {
+  std::ifstream in(src("configs/pos_ins.json"));
+  cobra::jsoncfg::json j;
+  in >> j;
+  const char* kTruth = "/sensor/ins-d/pva";
+  const char* kImu = "/sensor/vn-100/imu";
+  // Started from the reference solution at the first IMU sample (the "manual" initialization, which leaves no
+  // gap between the initial solution and the IMU), with the gyro bias unknown to 3 mrad/s.
+  std::int64_t first_imu_ns = 0;
+  std::shared_ptr<cobra::utils::PVA> start;
+  {
+    cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+    while (auto ev = r.next()) {
+      if (ev->channel == kImu && !first_imu_ns)
+        first_imu_ns = cobra::utils::time_of_validity(*cobra::lcm::decode(ev->data)).value_or(api::Timestamp{0}).elapsed_nsec;
+      if (ev->channel == kTruth && first_imu_ns && !start) start = std::dynamic_pointer_cast<cobra::utils::PVA>(cobra::lcm::decode(ev->data));
+      if (start) break;
+    }
+  }
+  if (!start) throw std::runtime_error("no reference PVA in the test log");
+  const api::Vector3 rpy = cobra::nav::quat_to_rpy(api::Vector(start->get_quaternion()));
+  j["app"]["initialization"] = "manual";
+  j["app"]["logging_level"] = "WARN";
+  if (zero_motion) j["app"]["preprocessors"] = {"standard", "advanced"};
+  for (auto& c : j["configs"]) {
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    c["alignment_config"] = {{"type", "ManualAlignmentConfig"},
+                             {"group", "config/default/alignment"},
+                             {"initial_pos", {start->get_p1(), start->get_p2(), start->get_p3()}},
+                             {"initial_vel", {0.0, 0.0, 0.0}},
+                             {"initial_rpy", {rpy(0), rpy(1), rpy(2)}},
+                             {"initial_accel_bias", {0.0, 0.0, 0.0}},
+                             {"initial_gyro_bias", {0.0, 0.0, 0.0}},
+                             {"initial_time", (first_imu_ns - 10'000'000) * 1e-9},
+                             {"initial_pos_var", {1.0, 1.0, 1.0}},
+                             {"initial_vel_var", {0.01, 0.01, 0.01}},
+                             {"initial_tilt_var", {1e-4, 1e-4, 4e-4}},
+                             {"initial_accel_bias_var", {0.072 * 0.072, 0.072 * 0.072, 0.072 * 0.072}},
+                             {"initial_gyro_bias_var", {9e-6, 9e-6, 9e-6}}};
+    if (!zero_motion) continue;
+    c["measurement_reorder_s"] = 2.5;
+    c["preprocessor_configs"].push_back({{"type", "ZeroMotionGeneratorConfig"},
+                                         {"group", "config/zero_motion"},
+                                         {"channels", {kImu}},
+                                         {"velocity_channel", "/generated/zero_velocity"},
+                                         {"rate_channel", "/generated/zero_rate"}});
+    c["mp_configs"].push_back({{"type", "PinsonVelocityMPConfig"},
+                               {"group", "config/zero_velocity_processor"},
+                               {"label", "zupt"},
+                               {"channel", "/generated/zero_velocity"},
+                               {"state_block_labels", {"pinson15"}},
+                               {"aux_channels", {"INERTIAL_PVA"}},
+                               {"innovation_gate_probability", 0.999999}});
+    c["mp_configs"].push_back({{"type", "PinsonZeroRateMPConfig"},
+                               {"group", "config/zero_rate_processor"},
+                               {"label", "zaru"},
+                               {"channel", "/generated/zero_rate"},
+                               {"state_block_labels", {"pinson15"}},
+                               {"innovation_gate_probability", 0.999999}});
+  }
+  Standing out;
+  cobra::utils::set_log_sink([&](api::LoggingLevel level, const std::string&, const std::string& m) {
+    if (level == api::LoggingLevel::ERROR) ++out.errors;
+    if (m.find("older than the filter") != std::string::npos) ++out.discards;
+  });
+  std::vector<std::pair<std::int64_t, double>> reference;  // time, heading (rad)
+  std::vector<std::pair<std::int64_t, double>> heading;
+  auto yaw = [](const cobra::utils::PVA& p) { return cobra::nav::quat_to_rpy(api::Vector(p.get_quaternion()))(2); };
+  cobra::app::RunOptions o;
+  o.progress = false;
+  {
+    cobra::Filter f(cobra::jsoncfg::app_config_from_json(j), o);
+    f.set_solution_callback([&](const api::Message& m) {
+      if (auto p = m.as<cobra::utils::PVA>()) {
+        const std::int64_t t = p->get_time_of_validity().get_elapsed_nsec();
+        heading.emplace_back(t, yaw(*p));
+        if (t > first_imu_ns + 10'000'000'000) out.speed_max = std::max(out.speed_max, std::hypot(p->get_v1(), p->get_v2()));
+      }
+    });
+    cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+    while (auto ev = r.next()) {
+      if (ev->channel != kImu && ev->channel != "/sensor/ublox-ZED-F9T/position" && ev->channel != kTruth) continue;
+      auto msg = cobra::lcm::decode(ev->data);
+      if (ev->channel == kTruth)
+        if (auto p = std::dynamic_pointer_cast<cobra::utils::PVA>(msg)) reference.emplace_back(p->get_time_of_validity().get_elapsed_nsec(), yaw(*p));
+      f.push(msg, ev->channel);
+    }
+    if (f.registry().has_group("fusion/gating")) {
+      auto kv = f.registry().batch("fusion/gating");
+      out.rate_updates = static_cast<int>(kv->template get_value<std::int64_t>("zaru_accepted").value_or(0));
+      out.velocity_updates = static_cast<int>(kv->template get_value<std::int64_t>("zupt_accepted").value_or(0));
+    }
+    f.stop();
+  }
+  cobra::utils::set_log_sink(nullptr);
+  out.solutions = static_cast<int>(heading.size());
+  auto error_at = [&](const std::pair<std::int64_t, double>& h) {
+    auto it = std::lower_bound(reference.begin(), reference.end(), h.first, [](const auto& a, std::int64_t t) { return a.first < t; });
+    if (it == reference.end()) --it;
+    return cobra::nav::wrap_to_pi(h.second - it->second);
+  };
+  if (heading.size() >= 2) out.heading_drift_deg = (error_at(heading.back()) - error_at(heading.front())) * 180.0 / 3.14159265358979323846;
+  return out;
+}
+}  // namespace
+
+TEST(Filter, StandingStillTheHeadingDriftsWithTheGyroBias) {
+  // The default, pinned: with position fixes alone a standing vehicle's heading runs away with the gyro bias
+  // about the vertical (0.16 deg/s here), which nothing but a manoeuvre would show.
+  const Standing s = stand_for_a_minute(false);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_EQ(s.errors, 0);
+  EXPECT_GT(std::abs(s.heading_drift_deg), 5.0) << s.heading_drift_deg;
+  std::cout << "standing for a minute, position fixes only: heading drift " << s.heading_drift_deg << " deg, speed up to " << s.speed_max << " m/s\n";
+}
+
+TEST(Filter, ZeroRateAndZeroVelocityUpdatesHoldAStandingVehicle) {
+  // The generator sees that the IMU is quiet (the idling engine notwithstanding) and says once a second: this
+  // vehicle neither moves nor turns. The zero rate gives the filter the gyro bias, the heading stays.
+  const Standing s = stand_for_a_minute(true);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_EQ(s.errors, 0);
+  EXPECT_EQ(s.discards, 0);
+  EXPECT_GE(s.rate_updates, 40);
+  EXPECT_GE(s.velocity_updates, 40);
+  EXPECT_LT(std::abs(s.heading_drift_deg), 0.3) << s.heading_drift_deg;
+  EXPECT_LT(s.speed_max, 0.05);  // from 10 s on: the first update needs the 2 s window and the 2.5 s reorder window
+  std::cout << "with zero-rate and zero-velocity updates: heading drift " << s.heading_drift_deg << " deg, speed up to " << s.speed_max
+            << " m/s, " << s.rate_updates << " rate and " << s.velocity_updates << " velocity updates\n";
 }

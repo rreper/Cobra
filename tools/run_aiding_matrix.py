@@ -15,6 +15,11 @@ compared with the truth channel, for:
   velocity3                the log's three-axis body velocity; scale and misalignment estimated
   full                     wheel plus a second, independent receiver (emulated from truth, 3 m) and the barometer;
                            the outage takes the first receiver only
+  zero_motion              zero-velocity and zero-rate updates while the IMU says that the car stands
+  constraints_zero_motion  the constraints and those updates: configs/pos_ins_ground_vehicle.json without the alignment
+
+A last column takes the receiver away for 40 s while the car stands (at 1111 s of the drive, the one stop that is
+long enough).
 
 --write-configs also writes configs/pos_ins_odometry.json (wheel) and configs/pos_ins_full.json (full), without
 the outages.
@@ -32,7 +37,9 @@ import run_acceptance as ra  # noqa: E402
 GNSS_P, GNSS_V, IMU = '/sensor/ublox-ZED-F9T/position', '/sensor/ublox-ZED-F9T/velocity', '/sensor/vn-100/imu'
 TRUTH, SOL, VEL, NHC = '/sensor/ins-d/pva', '/solution/pntos/pva', '/sensor/simulated/velocity', '/generated/constraints'
 BARO, SECOND = '/sensor/bmp388/baro_pressure', '/sensor/second-receiver/position'
+ZERO_V, ZERO_W = '/generated/zero_velocity', '/generated/zero_rate'
 OUTAGE_STARTS = [300.0, 700.0, 1100.0, 1500.0, 1900.0, 2300.0]  # s after the first truth message; the vehicle moves at all of them
+STANDING_OUTAGE = (1111.0, 40.0)  # start and length of an outage inside the stop from 1108 to 1158 s
 AUX = ['INERTIAL_PVA', 'INERTIAL_FORCES_AND_RATES']
 # Weights found on this log (docs/DESIGN.md 7.23): the constraints hold to 0.2 m/s once the misalignment is
 # estimated; a wheel speed is not better than 0.1 m/s; the calibration states wander with a 10 minute time constant.
@@ -93,6 +100,21 @@ def constraints(cfg):
     return c
 
 
+def zero_motion(cfg):
+    """Zero-velocity and zero-rate updates while the IMU says that the vehicle stands (DESIGN.md 7.25). The messages are
+    made from the IMU clock, a second behind it: the reorder window is needed as for the constraints."""
+    c = advanced(copy.deepcopy(cfg))
+    o = orch(c)
+    o['measurement_reorder_s'] = 2.5
+    o['preprocessor_configs'].append(dict(type='ZeroMotionGeneratorConfig', group='config/zero_motion', channels=[IMU],
+                                          velocity_channel=ZERO_V, rate_channel=ZERO_W))
+    o['mp_configs'].append(dict(type='PinsonVelocityMPConfig', group='config/zero_velocity_processor', label='zero_velocity', channel=ZERO_V,
+                                state_block_labels=['pinson15'], aux_channels=['INERTIAL_PVA'], innovation_gate_probability=0.999))
+    o['mp_configs'].append(dict(type='PinsonZeroRateMPConfig', group='config/zero_rate_processor', label='zero_rate', channel=ZERO_W,
+                                state_block_labels=['pinson15'], innovation_gate_probability=0.999))
+    return c
+
+
 def wheel(cfg, calibrated=True):
     """A wheel speed (the log's body velocity cut down to its forward axis, 2 % too long) and the constraints with it."""
     c = advanced(copy.deepcopy(cfg))
@@ -147,19 +169,21 @@ ROWS = [('imu_only', lambda b: b, 'the IMU alone'),
         ('wheel', wheel, 'wheel speed with a 2 % scale error and the constraints; scale and misalignment estimated'),
         ('wheel_uncalibrated', lambda b: wheel(b, calibrated=False), 'the same through pinson_body_velocity: no calibration states'),
         ('velocity3', velocity3, 'three-axis body velocity (0.05 m/s); scale and misalignment estimated'),
-        ('full', full, 'wheel, a second receiver (3 m) and the barometer; the outage takes the first receiver only')]
+        ('full', full, 'wheel, a second receiver (3 m) and the barometer; the outage takes the first receiver only'),
+        ('zero_motion', zero_motion, 'zero velocity (0.2 m/s) and zero rate once a second while the IMU is quiet'),
+        ('constraints_zero_motion', lambda b: zero_motion(constraints(b)), 'the constraints and the zero-motion updates')]
 
 
-def with_outages(cfg, duration):
+def with_outages(cfg, duration, starts=None):
     c = copy.deepcopy(cfg)
     o = orch(c)
     channels = [GNSS_P, GNSS_V]
-    for i, t0 in enumerate(OUTAGE_STARTS if duration else []):
+    for i, t0 in enumerate((OUTAGE_STARTS if starts is None else starts) if duration else []):
         o['preprocessor_configs'].append(dict(type='OutageConfig', group='config/outage%d' % i, channels=channels, start_time=t0, end_time=t0 + duration))
     return c
 
 
-def run(runner, log, truth, cfg, name, duration, workdir):
+def run(runner, log, truth, cfg, name, duration, workdir, starts=None):
     path, out = os.path.join(workdir, name + '.json'), os.path.join(workdir, name + '.log')
     json.dump(cfg, open(path, 'w'))
     p = subprocess.run([runner, path, out, log, '--quiet', '--no-record-input'], capture_output=True, text=True)
@@ -176,7 +200,7 @@ def run(runner, log, truth, cfg, name, duration, workdir):
     hs = np.sqrt(sig[:, 0] ** 2 + sig[:, 1] ** 2)
     clean = t > tt[0] + 60
     ends = []
-    for o in (OUTAGE_STARTS if duration else []):
+    for o in ((OUTAGE_STARTS if starts is None else starts) if duration else []):
         k = min(np.searchsorted(t, tt[0] + o + duration - 0.5), len(t) - 1)
         ends.append((float(h[k]), float(hs[k]), float(v[k])))
         clean &= ~((t >= tt[0] + o) & (t <= tt[0] + o + duration + 30))
@@ -214,13 +238,15 @@ def main():
     runner = os.path.join(a.build, 'apps', 'cobra_run')
     truth, _ = ra.read_pva(a.input_log, TRUTH)
     durations = [0.0] + [float(x) for x in a.outages.split(',') if x]
-    jobs = [(name, d, with_outages(make(base()), d)) for name, make, _ in ROWS for d in durations]
+    jobs = [(name, d, with_outages(make(base()), d), None) for name, make, _ in ROWS for d in durations]
+    jobs += [(name, 'standing', with_outages(make(base()), STANDING_OUTAGE[1], [STANDING_OUTAGE[0]]), [STANDING_OUTAGE[0]]) for name, make, _ in ROWS]
     t0 = time.time()
     with ThreadPoolExecutor(a.jobs) as ex:
-        results = list(ex.map(lambda j: run(runner, a.input_log, truth, j[2], '%s_%d' % (j[0], j[1]), j[1], workdir), jobs))
+        results = list(ex.map(lambda j: run(runner, a.input_log, truth, j[2], '%s_%s' % (j[0], j[1]), STANDING_OUTAGE[1] if j[3] else j[1], workdir, j[3]), jobs))
     by = {(j[0], j[1]): r for j, r in zip(jobs, results)}
     failed = [k for k, r in by.items() if r.get('exit')]
-    json.dump(dict(generated=time.strftime('%Y-%m-%dT%H:%M:%S%z'), outage_starts_s=OUTAGE_STARTS, rows=[dict(row=k[0], outage_s=k[1], **r) for k, r in by.items()]),
+    json.dump(dict(generated=time.strftime('%Y-%m-%dT%H:%M:%S%z'), outage_starts_s=OUTAGE_STARTS, standing_outage=STANDING_OUTAGE,
+                   rows=[dict(row=k[0], outage_s=k[1], **r) for k, r in by.items()]),
               open(a.out, 'w'), indent=1)
     with open(a.md, 'w') as f:
         f.write('# Aiding matrix: a complete GNSS outage, by what else the filter has\n\n')
@@ -228,22 +254,27 @@ def main():
                 'every channel of the receiver withheld at %s s of the drive. Horizontal error against the truth channel at the end of each outage, in metres: '
                 'mean and worst of the six, the filter\'s own sigma, and their ratio (near 1: the covariance is honest). "No outage": RMS over the drive, '
                 'horizontal / vertical.\n\n' % (time.strftime('%Y-%m-%d %H:%M'), time.time() - t0, ', '.join('%g' % o for o in OUTAGE_STARTS)))
-        f.write('| aiding | no outage, h / v RMS | ' + ' | '.join('%g s outage: mean (worst), sigma, ratio' % d for d in durations[1:]) + ' | what it is |\n')
-        f.write('|---|---|' + '---|' * len(durations[1:]) + '---|\n')
+        f.write('| aiding | no outage, h / v RMS | ' + ' | '.join('%g s outage: mean (worst), sigma, ratio' % d for d in durations[1:]) +
+                ' | %g s outage while standing: error, sigma | what it is |\n' % STANDING_OUTAGE[1])
+        f.write('|---|---|' + '---|' * len(durations[1:]) + '---|---|\n')
         for name, _, note in ROWS:
             c = by[(name, 0.0)]
             cells = []
             for d in durations[1:]:
                 r = by[(name, d)]
                 cells.append('failed' if r.get('exit') else '%.1f (%.1f), %.1f, %.2f' % (r['end_h_mean'], r['end_h_max'], r['end_sigma_mean'], r['end_ratio_rms']))
+            st = by[(name, 'standing')]
+            cells.append('failed' if st.get('exit') else '%.1f, %.1f' % (st['end_h_mean'], st['end_sigma_mean']))
             f.write('| %s | %s | %s | %s |\n' % (name, 'failed' if c.get('exit') else '%.2f / %.2f' % (c['h_rms'], c['v_rms']), ' | '.join(cells), note))
         f.write('\nThe wheel speed and the second receiver do not exist in the recording: the first is the log\'s simulated body velocity (truth plus '
                 '0.05 m/s) cut down to its forward axis and scaled by 1.02, the second is the truth position with 3 m of noise once a second. '
-                'The constraints assume a vehicle that neither slides sideways nor leaves the ground.\n')
+                'The constraints assume a vehicle that neither slides sideways nor leaves the ground. The outage while standing is the one stop of the '
+                'drive that is long enough (1108 to 1158 s); in it the full row keeps its second receiver.\n')
     for name, _, _ in ROWS:
         c = by[(name, 0.0)]
         print('%-20s %s' % (name, 'FAILED ' + c.get('error', '')[-120:] if c.get('exit') else 'h/v %.2f/%.2f  ' % (c['h_rms'], c['v_rms']) + '  '.join(
-            '%gs: %.1f (%.1f) r%.2f' % (d, by[(name, d)]['end_h_mean'], by[(name, d)]['end_h_max'], by[(name, d)]['end_ratio_rms']) for d in durations[1:] if not by[(name, d)].get('exit'))))
+            '%gs: %.1f (%.1f) r%.2f' % (d, by[(name, d)]['end_h_mean'], by[(name, d)]['end_h_max'], by[(name, d)]['end_ratio_rms']) for d in durations[1:] if not by[(name, d)].get('exit')) +
+            ('  standing: %.1f' % by[(name, 'standing')]['end_h_mean'] if not by[(name, 'standing')].get('exit') else '  standing: failed')))
     print('wrote', a.out, 'and', a.md)
     return 1 if failed else 0
 

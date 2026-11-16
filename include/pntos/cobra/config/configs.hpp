@@ -123,6 +123,11 @@ struct ConstantStateBlockConfig final : StateBlockConfig {
 /// Reserved aux channel names.
 inline constexpr const char* kAuxInertialPva = "INERTIAL_PVA";
 inline constexpr const char* kAuxInertialForcesAndRates = "INERTIAL_FORCES_AND_RATES";
+/// C++ addition: the sensor errors the inertial is applying at the filter's time, as a MeasurementImu whose
+/// accelerometer and gyro fields hold the two biases (m/s^2, rad/s) and whose source identifier is
+/// kAuxSourceSensorErrors. pinson_zero_rate needs it to tell a gyro reading from the bias already removed.
+inline constexpr const char* kAuxInertialSensorErrors = "INERTIAL_SENSOR_ERRORS";
+inline constexpr const char* kAuxSourceSensorErrors = "Orchestration sensor errors";
 
 struct MeasurementProcessorConfig : BaseConfig {
   std::string group_;
@@ -184,6 +189,9 @@ inline constexpr const char* kDirection3DToPoints = "direction3D_to_points";
 /// C++ addition (not in the Python original): body velocity with odometer calibration states, see
 /// PinsonOdometryMeasurementProcessor.
 inline constexpr const char* kPinsonOdometry = "pinson_odometry";
+/// C++ addition: an angular rate the vehicle is known to have (zero when it stands) against the gyro, see
+/// PinsonZeroRateMeasurementProcessor.
+inline constexpr const char* kPinsonZeroRate = "pinson_zero_rate";
 
 // Factory helpers mirroring the Python *MPConfig dataclasses (identifier + fixed aux_channels).
 LeverArmMPConfig PinsonPositionMPConfig();
@@ -196,6 +204,7 @@ LeverArmMPConfig PosVelMPConfig();
 LeverArmMPConfig PositionMPConfig();
 LeverArmOrientationMPConfig Direction3dToPointsMPConfig();
 LeverArmOrientationMPConfig PinsonOdometryMPConfig();
+PlainMPConfig PinsonZeroRateMPConfig();
 }  // namespace mp
 
 // ------------------------------------------------------------------------- virtual state blocks
@@ -399,6 +408,33 @@ struct ZeroVelocity2dGeneratorConfig final : PreprocessorConfig {
   ZeroVelocity2dGeneratorConfig() { identifier = kIdentifier; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<ZeroVelocity2dGeneratorConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
+/// C++ addition: tells the filter that the vehicle stands (extras/AdvancedPreprocessorPlugin.hpp, DESIGN.md §7.25).
+/// On its IMU channel it watches for a quiet window (inertial/Stationarity.hpp) and, while there is one, emits
+/// every `trigger_dt_sec` a zero velocity (NED) on `velocity_channel` and a zero angular rate (sensor frame) on
+/// `rate_channel`, stamped at the middle of the window. A `PinsonVelocityMPConfig` and a `PinsonZeroRateMPConfig`
+/// on those channels take them; an empty channel name leaves that message out. The messages are a second behind
+/// the IMU: `measurement_reorder_s` has to be on (2.5 s), or every fix behind them is dropped as old.
+struct ZeroMotionGeneratorConfig final : PreprocessorConfig {
+  static constexpr const char* kIdentifier = "zero_motion_generator";
+  double window = 2.0;            ///< s the IMU has to stay quiet; at least 1 (the rate is averaged over a second)
+  double sub_window = 0.2;        ///< s the samples are averaged over before they are compared
+  double gyro_deviation = 0.003;  ///< rad/s
+  double accel_deviation = 0.15;  ///< m/s^2
+  double max_rate = 0.02;         ///< rad/s, of the window's mean rate (the gyro bias has to fit under it)
+  double trigger_dt_sec = 1.0;    ///< s between the generated measurements (in effect a multiple of sub_window)
+  std::string velocity_channel;   ///< output; empty = no zero-velocity messages
+  /// m/s per axis. Not how still a standing car is (millimetres per second) but what the filter can make of it:
+  /// the detector also fires while the car creeps (up to 0.5 m/s on the example recording), and a 15-state
+  /// filter that is told "zero" to centimetres per second pins its accelerometer biases harder than they hold
+  /// once the car drives. 0.2 keeps the gain through an outage and costs nothing with the receiver present.
+  double velocity_sigma = 0.2;
+  std::string rate_channel;       ///< output; empty = no zero-rate messages
+  double rate_sigma = 3.0e-4;     ///< rad/s per axis
+  ZeroMotionGeneratorConfig() { identifier = kIdentifier; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<ZeroMotionGeneratorConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
 /// C++ addition (roadmap Phase 2): degrades IMU / position / velocity messages to emulate worse sensors.

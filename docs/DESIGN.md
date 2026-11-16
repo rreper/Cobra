@@ -987,12 +987,12 @@ until it moves.
   velocity as a filter measurement does not help (it makes the position worse, 2.1 m against 1.5 m).
 - The remaining worst cases with the constraints (4 to 6° half a minute to a minute after the hand-over, three
   of the 64, with a filter sigma of 5 to 8° that says so) are switch-on times shortly before a stop: a standing
-  vehicle shows the constraints nothing. Zero-rate updates from a stationarity detector would settle the bias
-  there; they are the next item (§9.6).
+  vehicle shows the constraints nothing. The zero-rate updates of §7.25 settle the bias there: with them the
+  heading is 0.7° RMS (1.7° worst) 30 s after the hand-over.
 
 `configs/pos_ins_align_in_motion.json` is `pos_ins.json` with this alignment; `configs/pos_ins_ground_vehicle.json`
-adds the constraints from the IMU clock: a vehicle with a receiver and an IMU, no odometer and no heading from
-outside.
+adds the constraints from the IMU clock and the zero-motion updates of §7.25: a vehicle with a receiver and an
+IMU, no odometer and no heading from outside.
 
 | Key (`InMotionAlignmentConfig`) | Default | Meaning |
 |---|---|---|
@@ -1009,6 +1009,105 @@ outside.
 Not in it: an estimate of the receiver's time offset (the largest error source left, see the table); the
 correlation between heading and gyro bias at the hand-over (the initial-solution interface carries the two
 covariance blocks separately); a heading for a vehicle that never accelerates horizontally.
+
+### 7.25 Standing still: zero-velocity and zero-rate updates (`inertial/Stationarity.hpp`, `zero_motion_generator`, `pinson_zero_rate`)
+
+A standing vehicle tells a filter two things for free: it does not move and it does not turn. Without them the
+example filter, started with the gyro bias unknown and fed position fixes only, lets its heading run away at the
+bias about the vertical (8.9° in the minute of `Filter.StandingStillTheHeadingDriftsWithTheGyroBias`), drifts
+11 m through a 40 s outage while the car stands, and after an alignment in motion (§7.24) needs a manoeuvre to learn
+what a stop would have shown at once. Three pieces, all opt-in:
+
+**Seeing that the vehicle stands (`inertial::StationarityDetector`).** From the IMU alone, because the receiver
+is what is missing when it matters most. Sample by sample a standing car with its engine running is not quieter
+than a driving one: on the recording the largest gyro deviation within a second is 0.010 rad/s at rest (median)
+and 0.007 rad/s in the quietest second of driving. Averaged over 0.2 s the vibration is gone and the vehicle's
+own motion remains. The detector keeps the 0.2 s means of a 2 s window and calls it quiet when none deviates
+from the window's mean by more than 0.003 rad/s and 0.15 m/s² (per axis) and the mean rate is below 0.02 rad/s
+(a bias fits under it, a steady turn does not). In non-overlapping windows of the recording that holds for 95 %
+of the standing windows and none of the 1030 windows above 0.5 m/s. As the generator runs it (sliding, one
+message a second): 420 messages in the 2602 s of the drive, of which the car stands for 502 s; 396 of them at a
+true standstill, 24 while it creeps (up to 0.49 m/s within the second around the stamp), none faster.
+
+**Saying so (`ZeroMotionGenerator`, preprocessor `zero_motion_generator` of the advanced plugin).** While the
+window is quiet, a zero velocity (`MeasurementVelocity`, NED) and a zero angular rate
+(`MeasurementAngularVelocity`, sensor frame) follow the IMU message every `trigger_dt_sec`, stamped at the
+middle of the window, so that the second the filter averages the gyro over lies inside it. The messages are
+therefore a second behind the IMU and, like the constraints of §7.23, need `measurement_reorder_s` (2.5 s): a
+fix that has waited in the controller's buffer is older still.
+
+**Using it.** The zero velocity goes to the existing `pinson_velocity` processor. The zero rate needs a new one,
+`pinson_zero_rate` (`PinsonZeroRateMPConfig`, the eleventh processor), and the one thing no processor could
+see so far: the bias the inertial is applying. The orchestration hands it over as a third kind of aux data,
+`INERTIAL_SENSOR_ERRORS` (a `MeasurementImu` holding the two biases, source `kAuxSourceSensorErrors`), next to
+`INERTIAL_FORCES_AND_RATES`, which is the gyro's mean over the second around the filter's time with the Earth's
+and the transport rate removed but the bias still in. With the Pinson gyro-bias state `x = applied − true`:
+
+```
+z = measured rate − (inertial rate − applied bias) = x + noise,   H = I at states 12..14
+```
+
+A known rate other than zero would be taken the same way; only zero is generated.
+
+**How much the zero velocity may weigh.** A standing car moves by millimetres per second, and the first
+version said so (0.05 m/s). With the receiver present that made the solution worse, 1.55 / 1.58 m (horizontal
+/ vertical RMS over the drive) became 1.85 / 2.51 m, although it more than halved the outage errors. Two
+reasons, both measured. The detector also fires while the car creeps, 17 times above 0.1 m/s. And told "zero"
+to centimetres per second at every stop, the 15-state filter pins its accelerometer biases far tighter than
+they hold: the vertical accelerometer error, taken with the reference attitude over every standing and driving stretch of
+the recording, wanders by 2.3 mm/s² from one stretch to the next, and the IMU model allows 0.6. The filter then
+trusts its own dead reckoning over the receiver and sits a metre off in altitude. Loosening the bias model to
+the measured wander repairs about half of the vertical and none of the horizontal part. The weight does:
+
+| zero-velocity sigma | no outage, h / v RMS | 60 s outages while driving: mean (worst) | 40 s outage while standing |
+|---|---|---|---|
+| none | 1.55 / 1.58 m | 25.1 (56.6) m | 10.9 m |
+| zero rate only | 1.56 / 1.58 | 23.0 (50.1) | 8.9 |
+| 0.05 m/s | 1.85 / 2.51 | 9.9 (22.3) | 2.0 |
+| 0.1 | 1.66 / 1.94 | 10.0 (21.7) | 2.0 |
+| **0.2** | 1.58 / 1.68 | 10.7 (23.4) | 2.2 |
+| 0.3 | 1.57 / 1.62 | 11.3 (27.3) | 2.4 |
+| 0.5 | 1.56 / 1.60 | 13.0 (32.6) | 2.8 |
+| 1.0 | 1.56 / 1.59 | 16.3 (41.1) | 4.3 |
+
+0.2 m/s is the default: it is also about what the detector can vouch for. The zero rate is harmless at its
+3·10⁻⁴ rad/s. The outages while driving gain as well, presumably because every stop before them calibrated
+the IMU.
+
+**Results** (`docs/AIDING_MATRIX.md`, `docs/ALIGNMENT_MATRIX.md`):
+
+- Standing for a minute with the gyro bias unknown (`Filter.ZeroRateAndZeroVelocityUpdatesHoldAStandingVehicle`):
+  heading drift 0.15° instead of 8.9°, speed of the solution about 0.02 m/s at most.
+- Outages, horizontal error at the end, mean (worst): the IMU alone 25.1 (56.6) m after 60 s and 130.8 (290.7) m
+  after 120 s; with the zero-motion updates 10.7 (23.4) and 33.8 (65.6) m; the constraints alone 13.3 (25.6) and
+  15.6 (27.3) m; both 6.2 (12.2) and 9.3 (15.7) m. No extra sensor in any of these.
+- After an alignment in motion, heading RMS over the 64 switch-on times 30 s after the hand-over: 3.1° (9.4°
+  worst) for the plain filter, 1.3° (5.1°) with the constraints, 0.7° (1.7°) with the constraints and the
+  zero-motion updates, against 0.7° for the run that was given its heading. The three bad cases of §7.24, stops
+  right after the hand-over, are gone.
+
+`configs/pos_ins_ground_vehicle.json` now has all three: alignment in motion, constraints, zero-motion updates.
+
+| Key (`ZeroMotionGeneratorConfig`) | Default | Meaning |
+|---|---|---|
+| `channels` | required | the IMU channel |
+| `velocity_channel`, `rate_channel` | empty | where the two messages go; an empty name leaves that message out |
+| `velocity_sigma`, `rate_sigma` | 0.2 m/s, 3·10⁻⁴ rad/s | per axis; see above for the first |
+| `window`, `sub_window` | 2 s, 0.2 s | how long the IMU has to stay quiet, and the averaging inside it; `window` at least 1 s |
+| `gyro_deviation`, `accel_deviation`, `max_rate` | 0.003 rad/s, 0.15 m/s², 0.02 rad/s | the thresholds |
+| `trigger_dt_sec` | 1 s | between messages; in effect a multiple of `sub_window` |
+
+Limits. The detector knows the vehicle only by its vibration and its manoeuvres: something that glides at a
+constant velocity (a train, a ship, an aircraft in cruise) looks like a standing car, and a zero velocity
+believed during an outage would be a large error. This is for road vehicles; both processors should carry an
+innovation gate (the examples use 0.999), which catches a wrong "zero" as long as the filter knows its velocity.
+Creeping below 0.5 m/s is not told from standing. The thresholds are those of one car and one IMU.
+
+Found on the way, not fixed: with the `pva_message` initialization the PVA reaches the orchestration through the
+controller's buffer, two seconds behind the IMU, and the first IMU sample after it is mechanized across that gap.
+Three seconds after the start the solution falls at 19.5 m/s, in the default mode; `imu_gap_policy: "hold"`
+reduced it in one configuration (5.8 m/s) and not in another, which I have not followed up. The standing-still
+tests therefore start from the `manual` initialization.
 
 ## 8. Deviations from the Python original
 
@@ -1040,6 +1139,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 22 | Tenth measurement processor `pinson_odometry` (body velocity with scale-factor and misalignment states); `SensorDegradationConfig::velocity_scale`, `velocity_forward_only` | — | C++ additions; the nine Python processors keep their indices |
 | 23 | Initialization `in_motion_align` (`InMotionAlignment`, `InMotionAlignInitializationPlugin`, `InMotionAlignmentConfig`); `AlignBase::accepts_velocity()` and `summary()`, by which the alignment strategy passes a `MeasurementVelocity` on and logs one INFO line (§7.24) | — | C++ additions; the static alignments answer as before (a velocity message is still "Could not convert message", no summary line) |
 | 24 | A `measurement_reorder_s` that is not longer than the controller's buffer is a WARN at start-up | — | such a window orders nothing that passed the buffer; v0.2.10 recommended one (§7.23) |
+| 25 | `inertial::StationarityDetector`; third preprocessor of the advanced plugin, `zero_motion_generator` (`ZeroMotionGeneratorConfig`); eleventh measurement processor `pinson_zero_rate` (`PinsonZeroRateMPConfig`); aux channel `INERTIAL_SENSOR_ERRORS`, by which the orchestration hands a processor the biases the inertial is applying (§7.25) | — | C++ additions; nothing is generated, created or handed over unless a configuration names them |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1146,10 +1246,11 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.24, in the order of what a vehicle installation misses first: zero-velocity and zero-rate
-updates from a stationarity detector (they would give the gyro bias about the vertical at every stop, which the
-alignment in motion cannot when it is switched on under way); an estimate of the receiver's time offset;
-measurement weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
+Open after §7.25, in the order of what a vehicle installation misses first: an estimate of the receiver's time
+offset (the largest error source of the alignment in motion); an IMU error model that holds under driving
+(accelerometer bias wander, scale factors), so that the zero velocity can be given its real weight; the start-up
+gap of the `pva_message` initialization (§7.25); measurement weighting that adapts to a receiver whose reported
+covariance is optimistic; tightly coupled GNSS.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport
