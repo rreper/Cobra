@@ -2,7 +2,7 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
-## 2026-11-16 — The receiver's time offset, found by the alignment (branch time-offset, not released)
+## 2026-11-16 — v0.2.16: the receiver's time offset, found by the alignment
 
 - Asked for: the receiver time-offset estimate. A receiver's velocity is older than its time stamp, and the
   alignment in motion is only as good as the figure configured for that: 1.6° of heading at 250 ms, 3.1° at the
