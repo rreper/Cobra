@@ -1,0 +1,301 @@
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10, alignment in motion (v0.2.11)
+
+Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
+layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
+5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are next.
+
+## 1. What was asked
+
+In order, after the v0.2.9 notes were committed:
+
+1. "can you improve the INS so it is state of the art with respect to 3D fusion and detection of jammed or
+   spoofed outputs?"
+2. "commit it, merge and push. Then work to improve the fusion core to make it something I can use that will be
+   an outstanding performer with GNSS, m-code GPS, IMU, odometry and other inputs."
+3. "commit, merge, tag v0.2.10 and push, then do alignment in motion"
+4. "update your md files" (this file, the dashboard, the memory notes), after stopping an experiment run.
+5. "copy the scripts somewhere durable, then continue the comparison run"
+6. "commit, merge, tag v0.2.11 and push, then do the zero-rate updates"
+
+## 2. State at the end
+
+| Item | State |
+|---|---|
+| cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine |
+| Cobra (this repository) | v0.2.11: commit `67870dd` on `main`, tag `v0.2.11` (alignment in motion, correction to v0.2.10); before it v0.2.10 = `03f2947`, whose `ci` and `release` workflows were green |
+| Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree |
+| Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
+| pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
+
+## 3. cobra-integrity v0.2 (released)
+
+Full account in that repository: `docs/DESIGN.md` §8, `docs/PROGRESS.md`, `docs/MONTE_CARLO.md`,
+`docs/PROTECTED_MATRIX.md`. In short, all opt-in:
+
+- Vertical separation test and a vertical protection level. An altitude pull of 0.5 m/s on one of two sources
+  is isolated in 20 of 20 seeds after 42.5 ± 5.5 s (5.1 m vertical RMS, 51 m unprotected).
+- An INS monitor for a receiver that stands alone: each fix against a ladder of six IMU-only coasts. On the
+  recorded drive it excludes a horizontal pull of 1 m/s in 5 to 8 s and of 0.75 m/s in 6 to 8 s (one case
+  34 s); 0.5 m/s horizontal is never detected. Vertical: 0.5 m/s in 14 to 15 s, 0.3 m/s in 2 of 6 cases.
+- Readmission only while the test could still see a fault of the alert-limit size, and an "unverified margin"
+  on the protection levels after a readmission that only the IMU vouched for.
+- Every v0.1 scenario reproduces v0.1 exactly. 30 tests.
+
+Limits stated in its documents: with one receiver the protection level covers the fault-free case only; an
+excluded lone receiver that is not re-validated within about 35 s stays out and the output is free inertial,
+flagged EMERGENCY; receiver signal indicators (C/N0, AGC, the u-blox jamming and spoofing flags), tightly
+coupled GNSS and a clock test are not there.
+
+## 4. Cobra v0.2.10 (released)
+
+Full account: `docs/DESIGN.md` §7.23, `docs/AIDING_MATRIX.md`, `docs/PROGRESS.md`. Two defects, each remedy
+opt-in:
+
+- A measurement stream faster than the receiver's time bias made the filter discard the receiver's fixes as
+  "older than the filter" (2493 of 2602, logged at DEBUG). `measurement_reorder_s` applies measurements in
+  time order behind a window; a discard is now a WARN whatever the setting.
+- Body velocity without calibration states degraded the solution (1.55 m became 3.3 m; 7.9 m for a wheel speed
+  2 % off). Processor `pinson_odometry` carries scale-factor and pitch / yaw misalignment states.
+
+Horizontal error at the end of a complete GNSS outage, mean (worst of six), metres:
+
+| Aiding during the outage | no outage, RMS | 60 s | 120 s |
+|---|---|---|---|
+| IMU alone | 1.55 | 25.1 (56.6) | 130.8 (290.7) |
+| constraints from the IMU clock | 1.52 | 13.3 (25.6) | 15.6 (27.3) |
+| wheel speed (2 % off) + constraints | 1.58 | 4.9 (10.6) | 7.4 (19.9) |
+| the same without calibration states | 7.92 | 12.5 (24.2) | 19.8 (31.1) |
+| wheel + second receiver + barometer, first receiver lost | 1.16 | 1.8 (3.9) | 1.2 (2.0) |
+
+The wheel speed and the second receiver are emulated from the recording.
+
+Gates on the committed tree: 23 suites / 245 tests, also under ASan + UBSan; parity dump byte-identical to
+v0.2.9 (sha256 `add099b17da4…`, unchanged since v0.2.8); `inertial_parity_check.py` exit 0; acceptance 24 / 24;
+`compare_logs.py`: 24 logs, 61,772 messages identical.
+
+Not in it: alignment in motion (section 5), zero-velocity updates from a stationarity detector, adaptive
+measurement weighting, tightly coupled GNSS. A military-code receiver is a position / velocity source to the
+filter (the second receiver of `configs/pos_ins_full.json`); its own interface belongs in pnt-edge and needs
+the receiver's interface document.
+
+## 5. Alignment in motion: where it stands
+
+### 5.1 Why
+
+Every example configuration takes the heading from the configuration file (`ManualHeadingAlignmentConfig`,
+0.069 rad for this drive) or from a PVA message. `StaticAlignment` gyro-compasses, which a MEMS gyro cannot do:
+the VN-100's turn-on bias on this recording is 20 to 40 times the Earth's rate. A vehicle that is switched on
+somewhere else therefore has no heading.
+
+### 5.2 The recording
+
+- The car stands for the first 125 s, then drives in town with thirteen stops; 19.7 % of the log is stationary,
+  top speed 19.1 m/s.
+- Course minus heading above 3 m/s: mean −0.34°, standard deviation 0.73°, largest 7.7°.
+- Horizontal velocity change per second: median 0.26 m/s, 90 % below 1.36 m/s, largest 3.73 m/s.
+- Mean gyro output while standing (the turn-on bias): (−1.61, −1.99, −2.75) mrad/s, that is
+  (−0.092, −0.114, −0.158) °/s.
+- Channels: IMU 100 Hz (integrated type), receiver position, velocity (NED) and PVA at 1 Hz, reference
+  `/sensor/ins-d/pva` at 200 Hz. Antenna lever arm in the configurations: (−0.5, 0.38, −0.05) m.
+
+### 5.3 Method of the prototype
+
+Alignment as an attitude-determination problem (the velocity integration formula of the optimization-based
+alignment literature, Wu and Pan 2013), extended by the gyro bias. No assumption about how the sensor is
+mounted or that the vehicle moves forward.
+
+For the velocity epochs `i = 0..n` of a window (at most 30 s), with `X(t)` the body rotation since the window
+start from the gyros (bias `b` removed) and `f` the specific force:
+
+```
+x_i = ∫ X f dt  (+ X_i (ω_i × l) − X_0 (ω_0 × l) for an antenna lever arm l)
+y_i = v_i − v_0 − ∫ (g − 2 ω_ie × v) dt                (NED, from the receiver)
+y_i = C0 (x_i + G_i δb) + c + e_z d_z τ_i + noise_i
+```
+
+- `C0`: attitude at the window start. `δb`: gyro-bias correction, `G_i = ∂x_i/∂b` accumulated with the
+  integration. `c`: absorbs the velocity noise of the first epoch. `d_z`: vertical accelerometer bias and
+  gravity-model error (it cannot be absorbed by a rotation; without it the residuals grew to 0.3 m/s over 30 s).
+- Solved by alternating a weighted Wahba problem (SVD) for `C0` with a linear least-squares step for
+  `(δb, d_z, c)`, with priors on `b` (3 mrad/s) and `d_z` (0.072 m/s²). The Wahba step is global, so a heading
+  that is wrong by any angle is no obstacle.
+- Covariance from the Gauss–Newton Hessian over (rotation, bias, `d_z`, `c`), scaled by `max(1, χ²/dof)`, and
+  carried to the last epoch including the bias uncertainty times the elapsed time.
+- While the vehicle stands (receiver speed below 0.25 m/s and a quiet gyro) the gyro mean becomes the bias
+  prior, minus the vertical part of the Earth's rate, which needs no heading; the window then starts at the
+  last stationary epoch.
+- Declared aligned when the heading sigma is below 3° with at least five epochs in the window.
+- Approximations, with their size: the frame is NED at the start (0.16 mrad per kilometre travelled); the
+  Earth's rate is left out of the attitude kinematics (0.25° per minute, and a bias taken at standstill already
+  contains it); the Coriolis term is kept.
+
+### 5.4 Results so far
+
+Without bias estimation the plain method is useless on this sensor: heading errors of 5 to 30°, residuals
+growing with the window. With it, switched on at 64 times through the drive (every 40 s, standing and moving),
+receiver velocity at the configured 150 ms time bias unless noted:
+
+| Variant | aligned | heading error RMS (max) | error / sigma RMS (max) | tilt RMS (max) | time, median (max) |
+|---|---|---|---|---|---|
+| as described, no lever arm | 64 / 64 | 3.85° (8.84°) | 1.65 (5.08) | 0.41° (2.34°) | 16 s (134 s) |
+| lever arm compensated | 64 / 64 | 3.18° (7.19°) | 1.40 (4.04) | 0.36° (1.87°) | 16 s (134 s) |
+| lever arm, velocity 0.05 s earlier | 64 / 64 | 2.30° (6.39°) | 1.01 (3.25) | 0.25° (1.06°) | 16 s |
+| lever arm, velocity 0.10 s earlier | 64 / 64 | 2.02° (7.53°) | 0.80 (2.71) | 0.22° (1.26°) | 16 s |
+| lever arm, velocity 0.05 s later | 64 / 64 | 3.81° (10.07°) | 1.58 (5.78) | 0.41° | 16 s |
+| lever arm, no bias from standstill | 64 / 64 | 2.75° (7.19°) | 1.05 (2.44) | 0.36° | 15 s (130 s) |
+| lever arm, velocity from position differences (σ 0.3 / 0.6 m/s) | 64 / 64 | 1.82° (4.15°) | 0.63 (1.48) | 0.22° (1.19°) | 43 s (166 s) |
+
+The 134 s is the standing start: 125 s of it are the car not moving.
+
+The comparison that decides the default source (`exp3.py`, results in `exp3_results.txt` beside it), lever arm
+compensated unless noted:
+
+| Variant | aligned | heading error RMS (max) | error / sigma RMS (max) | tilt RMS (max) | time, median |
+|---|---|---|---|---|---|
+| receiver velocity 0.20 s earlier | 64 / 64 | 2.51° (7.19°) | 1.26 (3.34) | 0.27° (1.30°) | 15 s |
+| the same, declared at 2° instead of 3° | 64 / 64 | 1.93° (5.77°) | 1.20 (3.34) | 0.21° (1.12°) | 18 s |
+| the same, reported sigmas × 1.5 | 64 / 64 | 2.40° (7.40°) | 0.99 (2.65) | 0.25° (1.24°) | 17 s |
+| the same, no bias from standstill | 64 / 64 | 2.33° (7.19°) | 1.04 (3.28) | 0.27° (1.30°) | 15 s |
+| position differences, σ 0.15 m/s | 64 / 64 | 3.07° (8.82°) | 1.17 (3.25) | 0.30° (1.58°) | 24 s |
+| position differences, σ 0.10 m/s | 64 / 64 | 3.02° (8.18°) | 1.20 (3.74) | 0.33° (1.47°) | 20 s |
+| position differences, σ 0.15 m/s, no lever arm | 64 / 64 | 2.54° (8.83°) | 0.94 (3.26) | 0.30° (1.58°) | 24 s |
+| position differences, σ 0.15 m/s, 60 s window | 64 / 64 | 3.22° (8.82°) | 1.21 (3.25) | 0.31° (1.58°) | 24 s |
+
+### 5.5 Findings
+
+1. **Gyro bias must be estimated in the alignment.** Taking it from a standstill is not enough on its own
+   either: a vehicle switched on while moving has none.
+2. **The receiver's velocity is older than its time stamp says.** Against the reference, RMS horizontal error
+   of the velocity stream by time shift beyond the configured 150 ms:
+
+   | shift (s) | −0.30 | −0.25 | −0.20 | −0.15 | −0.10 | −0.05 | 0 | +0.05 | +0.10 |
+   |---|---|---|---|---|---|---|---|---|---|
+   | m/s | 0.091 | 0.076 | 0.069 | 0.073 | 0.086 | 0.105 | 0.127 | 0.150 | 0.175 |
+
+   Best at 0.35 s total. The position fits best about 0.03 to 0.05 s beyond its 150 ms. `configs/pos_vel_ins.json`
+   applies 150 ms to both channels. Not changed: it is a default configuration and its acceptance rows would
+   move.
+3. **Velocity from position differences is a sound alternative, not a better one.** Against the reference
+   displacement it is good to 0.10 m/s per axis and it does not depend on the velocity stream's latency. Its
+   1.8° in the first table came from waiting longer (the cautious 0.3 m/s); given a realistic 0.10 to 0.15 m/s
+   it declares after 20 to 24 s with 3.0° RMS, against 2.0 to 2.5° after 15 s for the receiver's velocity.
+   How long the method waits, that is the heading sigma it is asked for, decides the accuracy more than the
+   source does.
+   The alignment itself puts the velocity 0.10 s earlier than configured (2.02°) rather than 0.20 s (2.51°):
+   the reference solution has a time offset of its own against the IMU, and it is the offset between receiver
+   and IMU that counts. So the velocity stream is 0.25 to 0.35 s old, not 0.15 s.
+4. **The antenna lever arm matters at low speed**: 0.63 m at a turn rate of 20°/s is 0.2 m/s of lateral
+   velocity.
+5. The reported sigma is optimistic by a factor of about 1.4 to 1.65 when the velocity timing is off, and
+   about right (0.8 to 1.0) when it is corrected.
+
+### 5.6 Not done, not decided
+
+- Decided by the comparison above: the receiver's velocity when a velocity channel is among the alignment
+  channels, position differences otherwise; threshold 3° until the filter's behaviour after the hand-over is
+  measured (2° costs 3 s and gives 1.9° RMS).
+- Not explained: the lever-arm compensation helps with the receiver's velocity (3.85° to 3.18°) and does not
+  with position differences (2.54° without, 3.07° with). With 64 starts a difference of 0.5° is about two
+  standard deviations of the RMS estimate, so this may be noise.
+- An estimate of the receiver's time offset inside the alignment would remove the largest error source; not
+  in the prototype.
+- Nothing in C++ yet. Plan:
+  - `inertial::InMotionAlignment` beside `StaticAlignment`, an initialization plugin and an
+    `InMotionAlignmentConfig` (JSON), selected by the application's `initialization` entry. Nothing changes for
+    a configuration that does not name it.
+  - Hand-over at the latest IMU time (the receiver's fixes arrive 2 s behind the IMU): position, velocity,
+    attitude with the full 3×3 tilt covariance, the gyro bias as an inertial error with its covariance.
+  - A stationarity detector as its own small class; the zero-velocity updates that come next need the same one.
+  - Failing tests first; `tools/run_alignment_matrix.py`: switch-on at many times of the drive, time to align,
+    heading error and sigma at hand-over, navigation error a minute later against the run that is given the
+    heading.
+- After a hand-over with a few degrees of heading error the filter has to finish the job; whether the
+  15-state linear model does that well from 3° has not been measured yet.
+
+### 5.7 C++ implementation (released as v0.2.11)
+
+Written after the notes above. The full account is `docs/DESIGN.md` §7.24 and `docs/ALIGNMENT_MATRIX.md`.
+
+- `inertial::InMotionAlignment` (`include/pntos/cobra/initialization/InMotionAlignment.hpp`, `.cpp`),
+  `InMotionAlignInitializationPlugin`, `InMotionAlignmentConfig` (registry and JSON), application entry
+  `"initialization": "in_motion_align"`. `AlignBase` gained `accepts_velocity()` and `summary()`; the static
+  alignments are untouched.
+- Differences from the prototype: the whole accelerometer bias is estimated (three parameters with the model's
+  initial sigma as prior, in place of the vertical term). `InMotionAlignment.TheGyroBiasHasToBeEstimatedAlong`
+  showed why: on a gentle simulated drive 3 milli-g of level accelerometer bias passed for a vertical gyro bias
+  and the method claimed 3 degrees while being 12.4 degrees off; with the bias modelled 2.6 degrees. Lost IMU
+  samples are held (as the inertial's `imu_gap_policy` "hold"); the hand-over is at the last IMU sample.
+- `tests/test_alignment_in_motion.cpp`: 16 tests on simulated drives (standing start, switched on under way,
+  any heading and mounting, no heading claimed without horizontal acceleration, positions only, lever arm,
+  honest sigma over 40 drives, lost samples, IMU gap, plugin, config and JSON, and the example configuration
+  through `cobra::Filter`: first solution 15 s into the drive with the heading 1.1 deg off, then at worst
+  0.9 deg, 0.8 m and 0.2 m/s). All pass.
+- `tools/run_alignment_matrix.py`: the recorded drive, switched on at 64 times, through `cobra_run`
+  (`docs/ALIGNMENT_MATRIX.md`):
+
+  | velocity from | aligned | time: median, 90 %, longest | heading RMS (worst) | sigma | error / sigma | tilt RMS |
+  |---|---|---|---|---|---|---|
+  | receiver, 150 ms | 64 / 64 | 19, 42, 136 s | 3.06 deg (7.45) | 2.66 | 1.19 | 0.74 |
+  | receiver, 250 ms | 64 / 64 | 18, 42, 136 s | 1.61 deg (3.84) | 2.55 | 0.63 | 0.32 |
+  | receiver, 350 ms | 64 / 64 | 19, 42, 137 s | 2.54 deg (8.48) | 2.49 | 1.13 | 0.42 |
+  | receiver, 250 ms, declared at 2 deg | 64 / 64 | 23, 53, 137 s | 1.11 deg (3.97) | 1.79 | 0.64 | 0.33 |
+  | position differences | 64 / 64 | 30, 62, 139 s | 2.65 deg (5.22) | 2.74 | 0.95 | 0.49 |
+  | receiver, 250 ms, no lever arm | 64 / 64 | 18, 42, 136 s | 2.15 deg (4.89) | 2.54 | 0.98 | 0.35 |
+
+  So against the IMU the velocity stream is 250 ms old (350 ms was the fit against the reference solution).
+- After the hand-over (plain `pos_ins`, position fixes only), heading RMS over the switch-on times: 1.6 deg at
+  the hand-over, 2.2 after 10 s, 2.5 after 30 s, 2.4 after 60 s, 1.0 after 120 s. Switched on under way the
+  vertical gyro bias is still unknown (estimate near 0, truth -2.7 mrad/s), the heading drifts by 0.15 deg/s
+  until the filter has found it (worst case 10.7 deg after 60 s). With the motion constraints of v0.2.10 in
+  the filter: 1.6, 1.2, 0.8, 0.8, 0.6 deg. With the receiver's velocity as a filter measurement: no better
+  (1.8, 2.2, 2.4, 0.9) and the position gets worse (2.1 m against 1.5 m).
+  `prototypes/align-in-motion/after_handover.py` prints this per switch-on time.
+- **Flaw found in v0.2.10 on the way:** `measurement_reorder_s` counts back from the IMU's time, and a
+  measurement that passed the controller's 2 s buffer is already 2 s behind it. The 0.5 s that v0.2.10
+  recommended for that case orders nothing; `configs/pos_ins_full.json` as released drops ten or more fixes of
+  the first receiver. Fixed here, test first (`Filter.ReorderWindowMustExceedTheControllerBuffer`): a window
+  not longer than the buffer is a WARN at start-up, the documents say 2.5 s, the two example configurations are
+  regenerated with 2.5 s. The aiding table moved by at most 0.4 m (worst cases; the means by 0.2 m).
+- With the constraints the three worst cases (4 to 6 deg within a minute of the hand-over) are switch-on times
+  shortly before a stop; the filter's sigma there is 5 to 8 deg. Zero-rate updates at standstill are what is
+  missing.
+- New example configurations: `configs/pos_ins_align_in_motion.json`, `configs/pos_ins_ground_vehicle.json`
+  (alignment and constraints: a receiver and an IMU, nothing else).
+- Gates on this tree (`scratchpad/align_gates.sh`): 24 suites / 262 tests, also under ASan + UBSan with no
+  report; parity dump byte-identical (`add099b17da4`); `inertial_parity_check.py` exit 0; acceptance 24 / 24;
+  `compare_logs.py`: 24 logs, 61,772 messages identical.
+- Documents: DESIGN.md §7.24, deviations 23 and 24, §9.6; PROGRESS.md; GETTING_STARTED.md; TESTING.md;
+  TEST_MATRIX.md regenerated; README; AIDING_MATRIX.md regenerated with the 2.5 s window.
+- Not done: zero-velocity / zero-rate updates from a stationarity detector, an estimate of the receiver's time
+  offset, the heading / gyro-bias correlation in the hand-over.
+
+## 6. Open decisions carried forward
+
+- `pos_vel_ins.json`: velocity time bias 150 ms where 250 ms fits against the IMU (350 ms against the reference
+  solution). Change the default configuration, or leave it and use the measured figure in new configurations
+  only? The two new configurations use 250 ms.
+- cobra-integrity: should an excluded lone receiver's fix be offered as an unassured last resort?
+- Bump the `pntos-cpp` pins to v0.2.10 (cobra-integrity v0.2.7, pnt-edge v0.2.8) and surface the new integrity
+  status keys in pnt-edge.
+- Receiver signal indicators into the integrity monitor.
+- The items of `SESSION_NOTES_2026-11-15.md` §6 and §7 are unchanged.
+
+## 7. How to pick this up again
+
+- Build and gates: `export PATH=$PWD/Cobra/.venv/bin:$PATH; meson compile -C build; meson test -C build`;
+  `tools/inertial_parity_check.py`; `build/tools/inertial_parity_dump <log> 25` against a pristine build;
+  `tools/run_acceptance.py`; `tools/compare_logs.py`. The recipe for the pristine reference is in
+  `SESSION_NOTES_2026-11-15.md` §8; use `REF=v0.2.10`.
+- Prototype: `/home/rreper/orin/work/prototypes/align-in-motion/` (copied there on 16 November; its
+  `README.md` lists the scripts). `oba3.py` is the prototype of §5.3, `exp2.py` the table of §5.4, `exp3.py`
+  the comparison of §5.6, `lag.py` finding 2, `profile.py` §5.2. Run with `Cobra/.venv/bin/python`.
+- Scratch directory of this session (gone after a reboot):
+  `/tmp/claude-1000/-home-rreper-orin-work/390f72b7-9ad8-4396-8ce9-ea4300851024/scratchpad/` with `baseline/`
+  (pristine build outputs), `rel0210/` (the v0.2.10 gate outputs), `asan/` (sanitizer build).
+
+## 8. Where the rest is
+
+- Design: `docs/DESIGN.md` (§7.22 inertial for live sensors, §7.23 aiding beside the receiver, §9.6 open items).
+- Progress log: `docs/PROGRESS.md`. Measurements: `docs/AIDING_MATRIX.md`, `docs/TEST_MATRIX.md`.
+- Integrity layer: `/home/rreper/orin/work/cobra-integrity/docs/`.
+- Dashboard: `~/projects/_dashboard/projects/{pntos,cobra-integrity,pnt-edge}.{json,md}`.
