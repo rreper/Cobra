@@ -1,8 +1,9 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10, alignment in motion (v0.2.11)
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10, v0.2.11 (alignment in motion), v0.2.12 (standing still)
 
 Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
 layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
-5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are next.
+5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
+released as v0.2.12 (section 5.8). The start-up gap of the `pva_message` initialization is next.
 
 ## 1. What was asked
 
@@ -15,7 +16,8 @@ In order, after the v0.2.9 notes were committed:
 3. "commit, merge, tag v0.2.10 and push, then do alignment in motion"
 4. "update your md files" (this file, the dashboard, the memory notes), after stopping an experiment run.
 5. "copy the scripts somewhere durable, then continue the comparison run"
-6. "commit, merge, tag v0.2.11 and push, then do the zero-rate updates"
+6. "commit, merge, tag v0.2.11 and push, then do the zero-rate updates" (the notes were committed with it as `2044a47`)
+7. "commit, merge, tag v0.2.12 and push, then fix the pva_message gap"
 
 ## 2. State at the end
 
@@ -23,7 +25,8 @@ In order, after the v0.2.9 notes were committed:
 |---|---|
 | cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine |
 | Cobra (this repository) | v0.2.11: commit `67870dd` on `main`, tag `v0.2.11` (alignment in motion, correction to v0.2.10); before it v0.2.10 = `03f2947`, whose `ci` and `release` workflows were green |
-| Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree |
+| Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree; `ci` (on `2044a47`) and the `release` workflow for the tag are both green |
+| Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -268,6 +271,31 @@ Written after the notes above. The full account is `docs/DESIGN.md` §7.24 and `
   TEST_MATRIX.md regenerated; README; AIDING_MATRIX.md regenerated with the 2.5 s window.
 - Not done: zero-velocity / zero-rate updates from a stationarity detector, an estimate of the receiver's time
   offset, the heading / gyro-bias correlation in the hand-over.
+
+### 5.8 Standing still: zero-velocity and zero-rate updates (released as v0.2.12)
+
+Full account: `docs/DESIGN.md` §7.25. In short:
+
+- `inertial::StationarityDetector` (IMU only: 0.2 s means over a 2 s window, 0.003 rad/s and 0.15 m/s²),
+  preprocessor `zero_motion_generator`, measurement processor `pinson_zero_rate` (eleventh), aux channel
+  `INERTIAL_SENSOR_ERRORS`. The zero velocity goes through the existing `pinson_velocity`.
+- Measured first on the recording (`prototypes/align-in-motion/stationarity*.py`): per sample an idling engine
+  hides the difference between standing and driving; the 0.2 s means separate them (95 % of standing windows,
+  0 of 1030 above 0.5 m/s). As run: 420 messages, 396 at a true standstill, 24 while creeping (up to 0.49 m/s).
+- Results: standing a minute, heading drift 0.15° instead of 8.9°. Outages, mean (worst): 60 s 10.7 (23.4) m
+  instead of 25.1 (56.6); 120 s 33.8 (65.6) m instead of 130.8 (290.7); with the constraints 6.2 (12.2) and
+  9.3 (15.7) m; 40 s while standing 2.2 m instead of 10.9. After an alignment in motion with constraints and
+  zero-motion updates: heading 0.7° RMS (1.7° worst) 30 s after the hand-over.
+- The zero velocity is weighted at 0.2 m/s, not at what a standing car does: at 0.05 m/s the whole-drive error
+  with the receiver present rose from 1.55 / 1.58 m to 1.85 / 2.51 m. Causes measured: detections while
+  creeping, and accelerometer biases that wander by 2.3 mm/s² between stretches of the drive against 0.6 in
+  the IMU model (`prototypes/align-in-motion/accel_regime.py`, `zero_motion_sigma.py`).
+- Found, not fixed: the `pva_message` initialization leaves a 2 s gap before the first IMU sample; the solution
+  falls at 19.5 m/s three seconds after the start.
+- Gates on this tree: 24 suites / 272 tests, also under ASan + UBSan with no report; parity dump
+  byte-identical; acceptance 24 / 24; 61,772 messages identical.
+- `configs/pos_ins_ground_vehicle.json` now has alignment in motion, constraints and zero-motion updates;
+  `docs/AIDING_MATRIX.md` has two new rows and a standing-outage column; `docs/ALIGNMENT_MATRIX.md` two new rows.
 
 ## 6. Open decisions carried forward
 
