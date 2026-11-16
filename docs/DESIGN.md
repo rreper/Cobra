@@ -819,6 +819,73 @@ Things the options assume or do not cover:
 - **Allocations**: 2 per sample (the two vectors the ASPN getters return) and 2 µs per `add`; 4 per
   force/rate query, about 400 for a one-second average. No change was warranted.
 
+### 7.23 Aiding beside the receiver: measurement order, odometry, motion constraints
+
+Measured first, on the full example log with `vn100_measured` (`docs/AIDING_MATRIX.md`, `tools/run_aiding_matrix.py`):
+with the IMU alone a complete GNSS outage of 60 s ends 25 m off on average (57 m worst of six), one of 120 s
+131 m (291 m). Two things stood between that and a usable vehicle filter, and a third is still open (§9.6).
+
+**Measurements out of time order (`StandardOrchestrationConfig::measurement_reorder_s`).** Cobra discards a
+measurement that is older than the filter, and the filter is wherever the last measurement took it. The log's
+receiver carries a time bias of 150 ms, so any stream that runs faster than that puts the filter ahead of every
+fix: with the motion constraints generated at 1 Hz from the IMU clock, 2493 of the 2602 position fixes were
+dropped, at DEBUG level, and the solution drifted by hundreds of metres with a healthy receiver attached. An
+odometer at 10 Hz does the same. Two changes:
+
+- The discard is now a WARN, at the 1st, 10th, 100th, ... occurrence per channel (measurements that predate the
+  filter's start are not counted). Default behaviour is otherwise untouched.
+- With `measurement_reorder_s` > 0 a measurement waits until the IMU is that far ahead of its (preprocessed)
+  time stamp, and the waiting ones are applied in time order; the outage propagation never passes one that is
+  waiting. The window has to cover how late the slowest stream is against the fastest: the largest time bias
+  when every measurement passes the controller's buffer (0.5 s is plenty); the buffer length on top when
+  measurements are generated from IMU messages, which the controller passes on at once (2.5 s with the standard
+  2 s buffer). At most 5 s. Solutions are extrapolated to the IMU's time as before; the filter merely runs
+  that much further behind it. `Filter.ReorderWindowKeepsEveryFixOfADelayedReceiver`.
+
+**Odometry with calibration states (`pinson_odometry`, `PinsonOdometryMPConfig`).** The tenth measurement
+processor, after the nine of the Python original: the body-velocity model with an optional second state block of
+three states, the scale factor error of the forward axis and the pitch and yaw misalignment of the sensor's axes
+(small rotations about the nominal sensor y and z). Why they are needed, from the log: its simulated velocity
+sensor is the truth body velocity plus 0.05 m/s, in a frame that differs from the filter's platform frame by
+about a tenth of a degree. Through `pinson_body_velocity` at 1 Hz that is a constant velocity error of a few
+centimetres per second, which the filter can only hide in the receiver's bias states: the solution with a
+perfect velocity sensor and a healthy receiver was 3.3 m RMS, against 1.55 m without the sensor (the shipped
+`pos_ins_bodyvel` thins the sensor to 0.1 Hz). A wheel speed with a 2 % scale error is worse: 7.9 m.
+
+The message is a SENSOR-frame `MeasurementVelocity`; axes that are absent are not used, and a 3×3 covariance is
+cut down to the present ones. So one processor serves a wheel speed (x only), a three-axis sensor, and the
+constraints of a ground vehicle, "no sideways and no vertical motion", as (absent, 0, 0) from
+`ZeroVelocity2dGeneratorConfig`: triggered by the odometer's channel they arrive with every speed message, and
+triggered by the IMU channel they exist without any odometer (with the 2.5 s reorder window above). The
+processors of one vehicle name the same calibration block. With one state block label the model is exactly
+`pinson_body_velocity` (`StateModelingTest.OdometryWithoutCalibrationBlockIsTheBodyVelocityModel`); H is checked
+against central differences of h.
+
+Weights found on this log: constraints at 0.2 m/s, a wheel speed not better than 0.1 m/s, the calibration block
+a FOGM with sigma (0.03, 0.02 rad, 0.02 rad) and a time constant of 600 s. Results (`docs/AIDING_MATRIX.md`;
+horizontal error at the end of the outage, mean and worst of six, metres):
+
+| aiding during the outage | no outage, h RMS | 60 s | 120 s |
+|---|---|---|---|
+| IMU alone | 1.55 | 25.1 (56.6) | 130.8 (290.7) |
+| constraints from the IMU clock | 1.52 | 13.3 (25.6) | 15.6 (27.3) |
+| wheel speed (2 % scale error) and constraints | 1.58 | 4.9 (10.6) | 7.4 (19.9) |
+| the same without calibration states | 7.92 | 12.5 (24.2) | 19.8 (31.1) |
+| three-axis body velocity | 1.72 | 5.6 (11.2) | 6.6 (11.4) |
+| wheel, a second receiver (3 m) and the barometer; only the first receiver is lost | 1.16 | 1.8 (3.9) | 1.2 (2.0) |
+
+The filter's own sigma at the end of the outage is within a factor 1.0 to 1.4 of the error for the calibrated
+rows (1.7 to 1.9 for the three-axis sensor) and a factor 5 too small without calibration states. The wheel speed
+and the second receiver are emulated from the recording (`SensorDegradationConfig::velocity_forward_only`,
+`velocity_scale`, `derived_position_channel`); a real odometer brings its own lever arm, quantisation and wheel
+slip, which the innovation gate (§7.15) is there for.
+
+`configs/pos_ins_odometry.json` and `configs/pos_ins_full.json` are the wheel and the full row without the
+outages. A second receiver, whatever its signal (a military-code receiver included), is to this filter a
+position or velocity source with its own channel, lever arm, time bias, bias block and gate, as the second one
+of `pos_ins_full.json`; which of two receivers is believed when they disagree is the integrity plugin's question
+(its `primary_sources`), not the filter's.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -845,6 +912,8 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 12 | `has_virtual_state_block` returns true only for nodes known to the manager (roots included, as Python) | identical; listed because the API doc says otherwise (§12 #5). |
 | 19 | `InertialConfig::robustness` (sampled IMU, non-finite input, lost samples, corrupt stamps, windowed dt estimate, quaternion interpolation): C++ additions, all off by default | §7.22. Without them the inertial is NavToolkit's to the last bit, including that a SAMPLED message throws (NavToolkit in `ErrorMode::DIE`; the Python apps run it with `OFF`, where the message is dropped silently). |
 | 20 | A non-positive or non-finite `expected_dt` / `inertial_buffer_length` is refused with an ERROR; interpolation next to a solution without a quaternion treats it as level | Both were undefined behaviour (§7.22). |
+| 21 | `StandardOrchestrationConfig::measurement_reorder_s` (measurements applied in time order behind a window); a measurement discarded as older than the filter is a WARN at the 1st, 10th, 100th, ... occurrence instead of a DEBUG line: C++ additions (§7.23) | — | off by default, key written only when set |
+| 22 | Tenth measurement processor `pinson_odometry` (body velocity with scale-factor and misalignment states); `SensorDegradationConfig::velocity_scale`, `velocity_forward_only` | — | C++ additions; the nine Python processors keep their indices |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -950,6 +1019,11 @@ propagate/update (plus `<path>.aux` with the Pinson aux inputs from the orchestr
 the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
+
+Open after §7.23, in the order of what a vehicle installation misses first: alignment in motion (the heading
+comes from the config or a PVA message; a MEMS IMU cannot find north standing still, GNSS velocity can once the
+vehicle moves); zero-velocity and zero-rate updates from a stationarity detector; measurement weighting that
+adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport

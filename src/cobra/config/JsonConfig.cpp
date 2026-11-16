@@ -327,6 +327,7 @@ const std::vector<MpKind>& mp_kinds() {
       {"PosVelMPConfig", mp::kPinsonPosVel, MpKind::LeverArm},
       {"PositionMPConfig", mp::kPosition, MpKind::LeverArm},
       {"Direction3dToPointsMPConfig", mp::kDirection3DToPoints, MpKind::LeverArmOrientation},
+      {"PinsonOdometryMPConfig", mp::kPinsonOdometry, MpKind::LeverArmOrientation},
   };
   return k;
 }
@@ -344,7 +345,10 @@ LeverArmMPConfig mp_factory<LeverArmMPConfig>(const char* id) {
 }
 template <>
 LeverArmOrientationMPConfig mp_factory<LeverArmOrientationMPConfig>(const char* id) {
-  return std::string(id) == mp::kPinsonBodyVelocity ? mp::PinsonBodyVelocityMPConfig() : mp::Direction3dToPointsMPConfig();
+  const std::string s = id;
+  if (s == mp::kPinsonBodyVelocity) return mp::PinsonBodyVelocityMPConfig();
+  if (s == mp::kPinsonOdometry) return mp::PinsonOdometryMPConfig();
+  return mp::Direction3dToPointsMPConfig();
 }
 
 void mp_base_from(const json& jc, MeasurementProcessorConfig& c) {
@@ -488,6 +492,8 @@ StandardOrchestrationConfig orch_from(const json& jc) {
   c.publish_before_update = get_or(jc, "publish_before_update", false);
   c.publish_after_update = get_or(jc, "publish_after_update", false);
   c.max_filter_lag = get_or(jc, "max_filter_lag", ControllerConfig::kDefaultBufferLengthSec);
+  c.measurement_reorder_s = get_or(jc, "measurement_reorder_s", 0.0);
+  if (!(c.measurement_reorder_s >= 0.0)) throw std::runtime_error("StandardOrchestrationConfig: measurement_reorder_s must be >= 0");
   if (jc.contains("stream_config")) c.stream_config = stream_config_from(jc.at("stream_config"));
   return c;
 }
@@ -508,6 +514,7 @@ json orch_to(const StandardOrchestrationConfig& c) {
   o["publish_before_update"] = c.publish_before_update;
   o["publish_after_update"] = c.publish_after_update;
   o["max_filter_lag"] = c.max_filter_lag;
+  if (c.measurement_reorder_s != 0.0) o["measurement_reorder_s"] = c.measurement_reorder_s;
   o["stream_config"] = stream_config_to(c.stream_config);
   return o;
 }
@@ -669,6 +676,8 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->position_covariance_scale = get_or(jc, "position_covariance_scale", 1.0);
     if (jc.contains("velocity_noise_sigma")) c->velocity_noise_sigma = vec3(jc, "velocity_noise_sigma");
     c->velocity_covariance_scale = get_or(jc, "velocity_covariance_scale", 1.0);
+    c->velocity_scale = get_or(jc, "velocity_scale", 1.0);
+    c->velocity_forward_only = get_or(jc, "velocity_forward_only", false);
     if (jc.contains("position_jumps"))
       for (const auto& row : jc.at("position_jumps")) {
         if (!row.is_array() || row.size() != 4) fail("position_jumps entries must be [time_s, north, east, down]");
@@ -967,6 +976,8 @@ json config_to_json(const BaseConfig& c) {
     o["position_covariance_scale"] = p->position_covariance_scale;
     o["velocity_noise_sigma"] = j(p->velocity_noise_sigma);
     o["velocity_covariance_scale"] = p->velocity_covariance_scale;
+    if (p->velocity_scale != 1.0) o["velocity_scale"] = p->velocity_scale;
+    if (p->velocity_forward_only) o["velocity_forward_only"] = true;
     json jumps = json::array();
     for (const auto& r : p->position_jumps) jumps.push_back(json::array({r[0], r[1], r[2], r[3]}));
     o["position_jumps"] = jumps;

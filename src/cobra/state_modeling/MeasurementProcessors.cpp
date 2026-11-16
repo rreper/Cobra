@@ -297,7 +297,14 @@ PinsonBodyVelocityMeasurementProcessor::PinsonBodyVelocityMeasurementProcessor(s
                                                                                api::Mediator* mediator,
                                                                                const Vector3& l_ps_p,
                                                                                const nav::Vector4& orientation_ps_p)
-    : PinsonProcessorBase("PinsonBodyVelocityMeasurementProcessor", std::move(label), std::move(labels), mediator, 0),
+    : PinsonBodyVelocityMeasurementProcessor("PinsonBodyVelocityMeasurementProcessor", std::move(label), std::move(labels), mediator,
+                                             l_ps_p, orientation_ps_p) {}
+
+PinsonBodyVelocityMeasurementProcessor::PinsonBodyVelocityMeasurementProcessor(std::string name, std::string label,
+                                                                               std::vector<std::string> labels,
+                                                                               api::Mediator* mediator, const Vector3& l_ps_p,
+                                                                               const nav::Vector4& orientation_ps_p)
+    : PinsonProcessorBase(std::move(name), std::move(label), std::move(labels), mediator, 0),
       l_ps_p_(l_ps_p),
       orientation_ps_p_(orientation_ps_p) {}
 
@@ -407,6 +414,132 @@ std::optional<api::StandardMeasurementModel> PinsonBodyVelocityMeasurementProces
     const Vector3 sensor_vel = C_ned_to_sensor * corr_inertial_vel_ned + tan_vel_sensor;
     Vector out(static_cast<Eigen::Index>(mask.size()));
     for (std::size_t i = 0; i < mask.size(); ++i) out(static_cast<Eigen::Index>(i)) = sensor_vel(mask[i]);
+    return out;
+  };
+  return model;
+}
+
+// ======================================================== PinsonOdometryMeasurementProcessor
+
+PinsonOdometryMeasurementProcessor::PinsonOdometryMeasurementProcessor(std::string label, std::vector<std::string> labels,
+                                                                       api::Mediator* mediator, const Vector3& l_ps_p,
+                                                                       const nav::Vector4& orientation_ps_p)
+    : PinsonBodyVelocityMeasurementProcessor("PinsonOdometryMeasurementProcessor", std::move(label), std::move(labels), mediator,
+                                             l_ps_p, orientation_ps_p) {}
+
+std::optional<api::StandardMeasurementModel> PinsonOdometryMeasurementProcessor::generate_model(
+    const api::Message& message, const api::GenXandP& gen_x_and_p) {
+  auto vel = message.as<aspn23_eigen::MeasurementVelocity>();
+  if (!vel) {
+    log(LoggingLevel::ERROR, name_ + " expected message of type MeasurementVelocity. Cannot process message.");
+    return std::nullopt;
+  }
+  const api::Timestamp time(vel->get_time_of_validity());
+  if (!check_common(time)) return std::nullopt;
+  if (vel->get_reference_frame() != ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR) {
+    log(LoggingLevel::ERROR, name_ + " expected MeasurementVelocity with a SENSOR reference frame at time " + secs(time) +
+                                 ". Cannot process message.");
+    return std::nullopt;
+  }
+  if (!force_and_rate_aux_) {
+    log(LoggingLevel::ERROR, name_ + " cannot process message at time " + secs(time) + " as it has not received IMU aux data.");
+    return std::nullopt;
+  }
+  auto ewc = gen_x_and_p(state_block_labels_);
+  if (!ewc) return std::nullopt;
+  const Vector& x = ewc->estimate;
+  const Eigen::Index n = x.size();
+  const bool calibrated = state_block_labels_.size() >= 2;
+  if (n < 9 || (calibrated && n != 15 + kCalibrationStates)) {
+    log(LoggingLevel::ERROR, name_ + " expected 15 Pinson states" + (calibrated ? " and 3 calibration states (scale, pitch and yaw misalignment)" : "") +
+                                 " but was given " + std::to_string(n) + " states. Cannot process message.");
+    return std::nullopt;
+  }
+  const Eigen::Index c0 = n - kCalibrationStates;
+
+  const double raw[3] = {vel->get_x(), vel->get_y(), vel->get_z()};
+  std::vector<int> mask;
+  for (int i = 0; i < 3; ++i)
+    if (utils::present(raw[i])) mask.push_back(i);
+  if (mask.empty()) {
+    log(LoggingLevel::ERROR, name_ + " received a velocity without any axis at time " + secs(time) + ". Cannot process message.");
+    return std::nullopt;
+  }
+  const Eigen::Index m = static_cast<Eigen::Index>(mask.size());
+  Matrix R = vel->get_covariance();
+  if (R.rows() == 3 && R.cols() == 3 && m < 3) {  // of the axes that are present
+    Matrix cut(m, m);
+    for (Eigen::Index i = 0; i < m; ++i)
+      for (Eigen::Index j = 0; j < m; ++j) cut(i, j) = R(mask[static_cast<std::size_t>(i)], mask[static_cast<std::size_t>(j)]);
+    R = cut;
+  }
+  if (R.rows() != m || R.cols() != m) {
+    log(LoggingLevel::ERROR, name_ + " received " + std::to_string(m) + " velocity axes with a covariance of " + std::to_string(R.rows()) + "x" +
+                                 std::to_string(R.cols()) + " at time " + secs(time) + ". Cannot process message.");
+    return std::nullopt;
+  }
+
+  const Vector3 inertial_vel = utils::velocity(*inertial_pva_);
+  const Matrix3 C_platform_to_sensor = nav::quat_to_dcm(orientation_ps_p_);
+  const Matrix3 uncorr_C_ned_to_sensor = C_platform_to_sensor * nav::quat_to_dcm(*utils::quaternion(*inertial_pva_)).transpose();
+  const Vector3 rotation_rate = Vector3(force_and_rate_aux_->get_meas_gyro());
+  const Vector3 l = l_ps_p_;
+  const double p1 = inertial_pva_->get_p1(), p3 = inertial_pva_->get_p3();
+
+  // Velocity in the nominal sensor frame for a state: the body-velocity model, as a function of the state.
+  auto nominal = [=](const Vector& xx) -> Vector3 {
+    const Matrix3 C_ned_to_sensor = uncorr_C_ned_to_sensor * (Matrix3::Identity() + nav::skew(Vector3(xx.segment<3>(6))));
+    const Vector3 v = inertial_vel + xx.segment<3>(3);
+    Vector3 tangential = Vector3::Zero();
+    if (l.array().any()) {
+      const double alt = p3 - xx(2);
+      const double lat = p1 + nav::north_to_delta_lat(xx(0), p1, alt);
+      const double rn = nav::meridian_radius(lat), re = nav::transverse_radius(lat);
+      const Vector3 w_en_n(v(1) / (re + alt), -v(0) / (rn + alt), -v(1) * std::tan(lat) / (re + alt));
+      const Vector3 w_ie_n(nav::ROTATION_RATE * std::cos(lat), 0.0, -nav::ROTATION_RATE * std::sin(lat));
+      const Vector3 gyro_bias = xx.size() >= 15 ? Vector3(xx.segment<3>(12)) : Vector3::Zero();
+      const Matrix3 C_ned_to_imu = C_platform_to_sensor.transpose() * C_ned_to_sensor;
+      const Vector3 rate = rotation_rate + gyro_bias - C_ned_to_imu * (w_ie_n - w_en_n);
+      tangential = C_platform_to_sensor * rate.cross(l);
+    }
+    return C_ned_to_sensor * v + tangential;
+  };
+  // ... and as the odometer sees it: axes misaligned by small angles b (about y) and g (about z), forward axis scaled.
+  auto sensed = [=](const Vector& xx) -> Vector3 {
+    const Vector3 v0 = nominal(xx);
+    if (!calibrated) return v0;
+    const double s = xx(c0), b = xx(c0 + 1), g = xx(c0 + 2);
+    return Vector3((1.0 + s) * (v0(0) + g * v0(1) - b * v0(2)), v0(1) - g * v0(0), v0(2) + b * v0(0));
+  };
+
+  const Vector3 v0 = nominal(x);
+  const Matrix3 C_ned_to_sensor = uncorr_C_ned_to_sensor * (Matrix3::Identity() + nav::skew(Vector3(x.segment<3>(6))));
+  const Vector3 corr_vel = inertial_vel + x.segment<3>(3);
+  Matrix H_full = Matrix::Zero(3, n);
+  H_full.block<3, 3>(0, 3) = C_ned_to_sensor;
+  H_full.block<3, 3>(0, 6) = -uncorr_C_ned_to_sensor * nav::skew(corr_vel);
+  if (calibrated) {
+    const double s = x(c0), b = x(c0 + 1), g = x(c0 + 2);
+    Matrix3 M;
+    M << 1.0 + s, (1.0 + s) * g, -(1.0 + s) * b, -g, 1.0, 0.0, b, 0.0, 1.0;  // d sensed / d nominal
+    H_full.leftCols(9) = (M * H_full.leftCols(9)).eval();
+    H_full.col(c0) = Vector3(v0(0) + g * v0(1) - b * v0(2), 0.0, 0.0);
+    H_full.col(c0 + 1) = Vector3(-(1.0 + s) * v0(2), 0.0, v0(0));
+    H_full.col(c0 + 2) = Vector3((1.0 + s) * v0(1), -v0(0), 0.0);
+  }
+
+  api::StandardMeasurementModel model;
+  model.z = Vector(m);
+  model.H = Matrix(m, n);
+  for (Eigen::Index i = 0; i < m; ++i) {
+    model.z(i) = raw[mask[static_cast<std::size_t>(i)]];
+    model.H.row(i) = H_full.row(mask[static_cast<std::size_t>(i)]);
+  }
+  model.R = R;
+  model.h = [sensed, mask, m](const Vector& xx) {
+    const Vector3 v = sensed(xx);
+    Vector out(m);
+    for (Eigen::Index i = 0; i < m; ++i) out(i) = v(mask[static_cast<std::size_t>(i)]);
     return out;
   };
   return model;

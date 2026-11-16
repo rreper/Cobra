@@ -31,7 +31,7 @@ executable `build/tests/test_<name>` linked against `cobra_dep`, `gtest_main` an
 protocol is `gtest`, so individual test names show up in `build/meson-logs/testlog.txt` and in
 `testlog.junit.xml`.
 
-Current status: **23 suites, 238 tests, all green** (2026-11-15). A test run takes a few seconds.
+Current status: **23 suites, 245 tests, all green** (2026-11-15). A test run takes a few seconds.
 
 The `diagnostics` suite writes small HDF5 files; set `PNTOS_TEST_OUT=<dir>` to choose where (default: the
 system temp directory) and open them with h5py to double-check the writer (`tools/run_acceptance.py` does this
@@ -250,6 +250,7 @@ RMS 0.084 / 0.093 / 0.043 m/s, tilt RMS 0.074 / 0.092 / 0.811°, 2570 epochs, 37
 | `--no-record-input` on any app or `cobra_run` | Output log holds only the broadcast solutions (about 1 MB instead of a copy of the 476 MB input); the acceptance tools use it, with truth read from the input log. |
 | `--dump-registry f` on any app or `cobra_run` | Every registry group/key/value as JSON; diff a compiled app against its config file. |
 | `Cobra/.venv/bin/python tools/compare_logs.py dir_a dir_b` | Compares two acceptance work directories (`run_acceptance.py --workdir`) message by message, channel and payload bytes. This is the check that a change left the default behaviour untouched: run the previous release and the new build, then compare. The files never hash the same (LCM stores the wall-clock time of writing with each message); the payloads must. For the inertial alone, `inertial_parity_dump` prints the same JSON byte for byte from both builds. |
+| `Cobra/.venv/bin/python tools/run_aiding_matrix.py [--write-configs]` | Runs `pos_ins` through complete GNSS outages of 60 and 120 s with the IMU alone, the motion constraints, a wheel speed, a three-axis velocity and the full sensor set; writes `docs/AIDING_MATRIX.md` and `docs/aiding_matrix.json`. About 15 s on 12 cores. |
 | Epoch-by-epoch comparison | To compare two solution logs directly, read both with `run_acceptance.read_pva`, interpolate truth to each grid and difference the NED errors (that is how the outage_sim grid-phase issue was found: filters identical to 1 cm, solution epochs 0.4 s apart). |
 
 Use the first two whenever a numerical component changes; use the trace when an application-level result

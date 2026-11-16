@@ -2,6 +2,28 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-15 — v0.2.10: fusion core, measurement order and odometry with calibration states
+
+- Asked for: a filter that performs with GNSS, a second (military-code) receiver, IMU, odometry and more.
+  Measured first (`docs/AIDING_MATRIX.md`): the IMU alone ends a 60 s GNSS outage 25 m off (57 m worst), a 120 s
+  one 131 m (291 m). And two defects: (1) any measurement stream faster than the receiver's time bias makes the
+  filter drop the receiver's fixes as "old" (2493 of 2602, at DEBUG level); (2) body velocity without calibration
+  states degrades the solution with the receiver present (3.3 m against 1.55 m; 7.9 m for a wheel speed with a
+  2 % scale error).
+- `measurement_reorder_s`: measurements wait behind a window and are applied in time order; the discard is a
+  WARN. `pinson_odometry`: body velocity with scale-factor and pitch / yaw misalignment states, for wheel speeds,
+  three-axis sensors and the ground-vehicle constraints alike. `SensorDegradationConfig` can emulate a wheel
+  odometer. DESIGN.md §7.23.
+- Result with a wheel speed and the constraints: 4.9 m (10.6) after 60 s, 7.4 m (19.9) after 120 s, the filter's
+  sigma within a factor 1.4 of the error, 1.58 m with the receiver present. Constraints alone: 13.3 / 15.6 m.
+  With a second receiver and the barometer the loss of the first costs nothing (1.2 to 1.8 m).
+- `tools/run_aiding_matrix.py` (the table, and `--write-configs` for `configs/pos_ins_odometry.json` and
+  `configs/pos_ins_full.json`). 23 suites / 245 tests. Default mode unchanged: parity dump byte-identical,
+  acceptance 24 / 24, the 61,772 output messages identical to v0.2.9.
+- Not done: alignment in motion (the heading still comes from the config or a PVA message), zero-velocity
+  updates from a stationarity detector, robust or adaptive measurement weighting, tightly coupled GNSS. A
+  military-code receiver's own interface is not here either: to the filter it is a position / velocity source.
+
 ## 2026-11-15 — v0.2.9: opt-in handling of live IMU data
 
 - Review of the inertial for live sensors (DESIGN.md §7.22). Six defects, all inherited from NavToolkit and all

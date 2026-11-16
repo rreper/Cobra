@@ -451,3 +451,53 @@ TEST(JsonConfig, RegistryConfigRoundTrip) {
   EXPECT_EQ(std::get<api::StringArray>(got->values.at("sources"))[1], "/b");
   EXPECT_FALSE(RegistryConfig::from_registry(med, "config/nope"));
 }
+
+TEST(JsonConfig, OdometryProcessorReorderWindowAndWheelEmulation) {
+  using namespace cobra;
+  auto src = [](const char* rel) {
+    const char* s = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(s ? s : "..") + "/" + rel;
+  };
+  // the example config written by tools/run_aiding_matrix.py --write-configs
+  auto app = jsoncfg::load_app_config(src("configs/pos_ins_odometry.json"));
+  const StandardOrchestrationConfig* orch = nullptr;
+  for (const auto& c : app.configs)
+    if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) orch = o;
+  ASSERT_NE(orch, nullptr);
+  EXPECT_DOUBLE_EQ(orch->measurement_reorder_s, 0.5);
+  int odometry = 0;
+  ASSERT_TRUE(orch->mp_configs.has_value());
+  for (const auto& mp : *orch->mp_configs) {
+    if (mp->identifier != std::string(mp::kPinsonOdometry)) continue;
+    ++odometry;
+    ASSERT_EQ(mp->state_block_labels.size(), 2u);
+    EXPECT_EQ(mp->state_block_labels[1], "odometer_calibration");
+  }
+  EXPECT_EQ(odometry, 2);  // the wheel speed and the constraints share the calibration states
+  bool wheel = false;
+  ASSERT_TRUE(orch->preprocessor_configs.has_value());
+  for (const auto& pp : *orch->preprocessor_configs)
+    if (auto* d = dynamic_cast<const SensorDegradationConfig*>(pp.get())) {
+      wheel = d->velocity_forward_only;
+      EXPECT_DOUBLE_EQ(d->velocity_scale, 1.02);
+    }
+  EXPECT_TRUE(wheel);
+  // through JSON and back
+  const auto j = jsoncfg::app_config_to_json(app);
+  const auto again = jsoncfg::app_config_to_json(jsoncfg::app_config_from_json(j));
+  EXPECT_EQ(j, again);
+  EXPECT_NE(j.dump().find("\"PinsonOdometryMPConfig\""), std::string::npos);
+  EXPECT_NE(j.dump().find("\"measurement_reorder_s\""), std::string::npos);
+  // none of it appears in a config that does not ask for it
+  const auto plain = jsoncfg::app_config_to_json(jsoncfg::load_app_config(src("configs/pos_ins_bodyvel.json"))).dump();
+  EXPECT_EQ(plain.find("measurement_reorder_s"), std::string::npos);
+  EXPECT_EQ(plain.find("velocity_forward_only"), std::string::npos);
+  EXPECT_EQ(plain.find("velocity_scale"), std::string::npos);
+  EXPECT_THROW(jsoncfg::app_config_from_json([&] {
+                 auto bad = j;
+                 for (auto& c : bad["configs"])
+                   if (c["type"] == "StandardOrchestrationConfig") c["measurement_reorder_s"] = -1.0;
+                 return bad;
+               }()),
+               std::runtime_error);
+}

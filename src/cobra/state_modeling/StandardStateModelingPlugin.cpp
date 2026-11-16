@@ -16,7 +16,8 @@ StandardStateModelProvider::StandardStateModelProvider(api::Mediator* mediator)
     : mediator_(mediator),
       processor_ids_{mp::kPinsonPosition,     mp::kPinsonVelocity,     mp::kPinsonWithNedFogmPosition,
                      mp::kPinsonAltitude,     mp::kPinsonWithLeverArmPosition, mp::kPinsonBodyVelocity,
-                     mp::kPinsonPosVel,       mp::kPosition,           mp::kDirection3DToPoints},
+                     mp::kPinsonPosVel,       mp::kPosition,           mp::kDirection3DToPoints,
+                     mp::kPinsonOdometry},  // C++ addition, after the nine of the Python original
       block_ids_{PinsonStateBlockConfig::kIdentifier, FogmStateBlockConfig::kIdentifier,
                  ClockBiasStateBlockConfig::kIdentifier, ConstantStateBlockConfig::kIdentifier},
       vsb_ids_{PinsonErrorToStandardVSBConfig::kIdentifier, StateExtractorConfig::kIdentifier} {}
@@ -45,7 +46,7 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
     err("A config group is required for processor " + id);
     return nullptr;
   }
-  if (id == mp::kPinsonBodyVelocity || id == mp::kDirection3DToPoints) {
+  if (id == mp::kPinsonBodyVelocity || id == mp::kDirection3DToPoints || id == mp::kPinsonOdometry) {
     auto c = LeverArmOrientationMPConfig::from_registry(*mediator_, *config_group);
     if (!c) {
       err("Could not get " + id + " sensor config from registry.");
@@ -54,6 +55,9 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
     if (id == mp::kPinsonBodyVelocity)
       return std::make_unique<PinsonBodyVelocityMeasurementProcessor>(label, state_block_labels, mediator_,
                                                                       v3(c->lever_arm), v4(c->orientation));
+    if (id == mp::kPinsonOdometry)
+      return std::make_unique<PinsonOdometryMeasurementProcessor>(label, state_block_labels, mediator_, v3(c->lever_arm),
+                                                                  v4(c->orientation));
     return std::make_unique<Direction3DToPointsMeasurementProcessor>(label, state_block_labels, mediator_,
                                                                      v3(c->lever_arm), v4(c->orientation));
   }

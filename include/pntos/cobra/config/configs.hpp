@@ -181,6 +181,9 @@ inline constexpr const char* kPinsonBodyVelocity = "pinson_body_velocity";
 inline constexpr const char* kPinsonPosVel = "pinson_posvel";
 inline constexpr const char* kPosition = "position";
 inline constexpr const char* kDirection3DToPoints = "direction3D_to_points";
+/// C++ addition (not in the Python original): body velocity with odometer calibration states, see
+/// PinsonOdometryMeasurementProcessor.
+inline constexpr const char* kPinsonOdometry = "pinson_odometry";
 
 // Factory helpers mirroring the Python *MPConfig dataclasses (identifier + fixed aux_channels).
 LeverArmMPConfig PinsonPositionMPConfig();
@@ -192,6 +195,7 @@ LeverArmOrientationMPConfig PinsonBodyVelocityMPConfig();
 LeverArmMPConfig PosVelMPConfig();
 LeverArmMPConfig PositionMPConfig();
 LeverArmOrientationMPConfig Direction3dToPointsMPConfig();
+LeverArmOrientationMPConfig PinsonOdometryMPConfig();
 }  // namespace mp
 
 // ------------------------------------------------------------------------- virtual state blocks
@@ -414,6 +418,10 @@ struct SensorDegradationConfig final : PreprocessorConfig {
   double position_covariance_scale = 1.0;
   Vec3 velocity_noise_sigma{0, 0, 0};         ///< m/s, per message axis
   double velocity_covariance_scale = 1.0;
+  /// Emulating a wheel odometer from a three-axis velocity (written only when set): the forward (x) axis is
+  /// multiplied by `velocity_scale`, and with `velocity_forward_only` the other two axes are removed.
+  double velocity_scale = 1.0;
+  bool velocity_forward_only = false;
   std::vector<std::array<double, 4>> position_jumps;  ///< {time_s, north_m, east_m, down_m}
   /// Slow pulls: from `start_s` (relative to the first position message) the offset grows at the given NED
   /// rates for `duration_s` (0 = until the end), then stays at its final value. {start_s, n_mps, e_mps, d_mps, duration_s}
@@ -514,6 +522,14 @@ struct StandardOrchestrationConfig final : BaseConfig {
   bool publish_before_update = false;
   bool publish_after_update = false;
   double max_filter_lag = ControllerConfig::kDefaultBufferLengthSec;  ///< s
+  /// C++ addition, 0 = off (Cobra: a measurement older than the filter is discarded, and the filter is wherever
+  /// the last measurement took it). With a window, measurements wait this long behind the IMU's time and are
+  /// applied in the order of their (preprocessed) time stamps, so that a receiver with a latency or a time bias
+  /// is not starved by a faster stream such as an odometer. It has to cover how late the slowest stream is
+  /// against the fastest: the largest time bias when every measurement passes the controller's buffer (0.5 s is
+  /// plenty), the buffer length on top when measurements are generated from the IMU clock, which the controller
+  /// passes on at once (2.5 s with the standard 2 s buffer). At most 5 s. Written only when set.
+  double measurement_reorder_s = 0.0;
   StreamConfig stream_config = default_stream_config();
 
   const std::string& group() const override { return group_; }

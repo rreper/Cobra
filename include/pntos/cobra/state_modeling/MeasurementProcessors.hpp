@@ -92,7 +92,7 @@ class PinsonPosVelMeasurementProcessor final : public PinsonProcessorBase {
 
 /// Sensor-frame (1-3 axis) velocity -> Pinson velocity/tilt states, with lever-arm tangential
 /// velocity correction using the gyro rates (aux IMU) and gyro bias states.
-class PinsonBodyVelocityMeasurementProcessor final : public PinsonProcessorBase {
+class PinsonBodyVelocityMeasurementProcessor : public PinsonProcessorBase {
  public:
   PinsonBodyVelocityMeasurementProcessor(std::string label, std::vector<std::string> state_block_labels,
                                          api::Mediator* mediator, const api::Vector3& l_ps_p,
@@ -105,10 +105,39 @@ class PinsonBodyVelocityMeasurementProcessor final : public PinsonProcessorBase 
   }
   bool has_force_and_rate_aux() const { return force_and_rate_aux_ != nullptr; }
 
- private:
+ protected:
+  /// For a derived model that reports under its own name.
+  PinsonBodyVelocityMeasurementProcessor(std::string name, std::string label, std::vector<std::string> state_block_labels,
+                                         api::Mediator* mediator, const api::Vector3& l_ps_p,
+                                         const nav::Vector4& orientation_ps_p);
   api::Vector3 l_ps_p_;
   nav::Vector4 orientation_ps_p_;
   std::shared_ptr<const aspn23_eigen::MeasurementImu> force_and_rate_aux_;
+};
+
+/// C++ addition: the body-velocity model for an odometer (wheel speed, Doppler radar, ...) and for the motion
+/// constraints of a ground vehicle, with an optional second state block of three calibration states:
+///
+///   [0] scale factor error of the forward axis (measured = (1 + s) * true)
+///   [1] pitch misalignment, [2] yaw misalignment (rad): small rotations of the sensor's axes about the nominal
+///       sensor y and z axes (LeverArmOrientationMPConfig::orientation is the nominal mounting)
+///
+/// Without them a mounting error of a tenth of a degree is a constant lateral and vertical velocity error of
+/// 2 mm/s per m/s, which the filter can only hide in other states (docs/DESIGN.md 7.23). The message is a
+/// SENSOR-frame MeasurementVelocity; axes that are absent (NaN) are not used, so a wheel speed is (x, NaN, NaN)
+/// and the constraints "no sideways, no vertical motion" are (NaN, 0, 0) with the covariance that expresses how
+/// well they hold. A covariance of 3x3 is cut down to the axes that are present. With one state block label the
+/// model is exactly PinsonBodyVelocityMeasurementProcessor's.
+class PinsonOdometryMeasurementProcessor final : public PinsonBodyVelocityMeasurementProcessor {
+ public:
+  PinsonOdometryMeasurementProcessor(std::string label, std::vector<std::string> state_block_labels, api::Mediator* mediator,
+                                     const api::Vector3& l_ps_p, const nav::Vector4& orientation_ps_p);
+  std::optional<api::StandardMeasurementModel> generate_model(const api::Message& message,
+                                                              const api::GenXandP& gen_x_and_p) override;
+  std::unique_ptr<api::StandardMeasurementProcessor> clone() const override {
+    return std::make_unique<PinsonOdometryMeasurementProcessor>(*this);
+  }
+  static constexpr int kCalibrationStates = 3;
 };
 
 /// Altitude (MeasurementAltitude HAE, geodetic position or PVA) -> Pinson down-position error +

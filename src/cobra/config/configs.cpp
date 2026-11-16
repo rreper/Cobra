@@ -342,6 +342,9 @@ LeverArmOrientationMPConfig PinsonBodyVelocityMPConfig() {
   return LeverArmOrientationMPConfig(kPinsonBodyVelocity,
                                      std::vector<std::string>{kAuxInertialPva, kAuxInertialForcesAndRates});
 }
+LeverArmOrientationMPConfig PinsonOdometryMPConfig() {
+  return LeverArmOrientationMPConfig(kPinsonOdometry, std::vector<std::string>{kAuxInertialPva, kAuxInertialForcesAndRates});
+}
 LeverArmMPConfig PosVelMPConfig() { return LeverArmMPConfig(kPinsonPosVel, pva_aux()); }
 LeverArmMPConfig PositionMPConfig() { return LeverArmMPConfig(kPosition, std::nullopt); }
 LeverArmOrientationMPConfig Direction3dToPointsMPConfig() {
@@ -731,6 +734,8 @@ PNTOS_PP_IMPL(
       w.scalar("position_covariance_scale", position_covariance_scale);
       w.vector("velocity_noise_sigma", to_vector(velocity_noise_sigma));
       w.scalar("velocity_covariance_scale", velocity_covariance_scale);
+      if (velocity_scale != 1.0) w.scalar("velocity_scale", velocity_scale);
+      if (velocity_forward_only) w.scalar("velocity_forward_only", velocity_forward_only);
       api::Matrix jumps(static_cast<Eigen::Index>(position_jumps.size()), 4);
       for (std::size_t i = 0; i < position_jumps.size(); ++i)
         for (int k = 0; k < 4; ++k) jumps(static_cast<Eigen::Index>(i), k) = position_jumps[i][static_cast<std::size_t>(k)];
@@ -756,6 +761,8 @@ PNTOS_PP_IMPL(
       c.position_covariance_scale = r.optional<double>("position_covariance_scale").value_or(1.0);
       c.velocity_noise_sigma = read_arr<3>(r, "velocity_noise_sigma").value_or(Vec3{0, 0, 0});
       c.velocity_covariance_scale = r.optional<double>("velocity_covariance_scale").value_or(1.0);
+      c.velocity_scale = r.optional<double>("velocity_scale").value_or(1.0);
+      c.velocity_forward_only = r.optional<bool>("velocity_forward_only").value_or(false);
       if (auto m = r.optional<api::Matrix>("position_jumps"); m && m->cols() == 4)
         for (Eigen::Index i = 0; i < m->rows(); ++i)
           c.position_jumps.push_back({(*m)(i, 0), (*m)(i, 1), (*m)(i, 2), (*m)(i, 3)});
@@ -889,6 +896,7 @@ void StandardOrchestrationConfig::to_registry(api::Mediator& m) const {
   w.scalar("publish_before_update", publish_before_update);
   w.scalar("publish_after_update", publish_after_update);
   w.scalar("max_filter_lag", max_filter_lag);
+  if (measurement_reorder_s != 0.0) w.scalar("measurement_reorder_s", measurement_reorder_s);
   w.nested("stream_config", stream_config);
 }
 
@@ -905,6 +913,7 @@ std::optional<StandardOrchestrationConfig> StandardOrchestrationConfig::from_reg
   c.publish_before_update = r.optional<bool>("publish_before_update").value_or(false);
   c.publish_after_update = r.optional<bool>("publish_after_update").value_or(false);
   c.max_filter_lag = r.optional<double>("max_filter_lag").value_or(ControllerConfig::kDefaultBufferLengthSec);
+  c.measurement_reorder_s = r.optional<double>("measurement_reorder_s").value_or(0.0);
   if (!r.ok()) return std::nullopt;
 
   auto single = [&](const char* key, bool required) -> std::optional<std::string> {

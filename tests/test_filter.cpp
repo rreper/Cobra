@@ -2,9 +2,11 @@
 #include <pntos/cobra/app/AppBuilder.hpp>
 #include <pntos/cobra/app/Filter.hpp>
 #include <pntos/cobra/capi/cobra.h>
+#include <pntos/cobra/config/JsonConfig.hpp>
 #include <pntos/cobra/transport/LcmConversions.hpp>
 #include <pntos/cobra/transport/LcmLog.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
+#include <pntos/cobra/utils/logging.hpp>
 
 #include "test_support.hpp"
 
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -378,4 +381,97 @@ TEST(CApi, PushAndPoll) {
   cobra_filter_destroy(f);
   cobra_filter_destroy(nullptr);
   EXPECT_EQ(cobra_filter_push_imu(nullptr, "/imu", 0, cov, cov, 0), 0);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Measurements that arrive out of time order (StandardOrchestrationConfig::measurement_reorder_s)
+
+namespace {
+/// pos_ins plus lateral / vertical zero-velocity constraints generated from the IMU clock every 0.1 s: a second
+/// measurement stream that is always ahead of the GNSS fixes, which carry a time bias of 150 ms in this log.
+cobra::AppConfig with_fast_constraints(double reorder_s) {
+  std::ifstream in(src("configs/pos_ins.json"));
+  cobra::jsoncfg::json j;
+  in >> j;
+  j["app"]["preprocessors"] = {"standard", "advanced"};
+  j["app"]["logging_level"] = "WARN";
+  for (auto& c : j["configs"]) {
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    c["preprocessor_configs"].push_back({{"type", "ZeroVelocity2dGeneratorConfig"},
+                                         {"group", "config/constraints"},
+                                         {"channels", {"/sensor/vn-100/imu"}},
+                                         {"trigger_dt_sec", 0.1},
+                                         {"lateral_vel_sigma", 0.5},
+                                         {"vertical_vel_sigma", 0.5},
+                                         {"output_channel", "/generated/zero/velocity2d"}});
+    c["mp_configs"].push_back({{"type", "PinsonBodyVelocityMPConfig"},
+                               {"group", "config/constraints_mp"},
+                               {"label", "constraints"},
+                               {"channel", "/generated/zero/velocity2d"},
+                               {"lever_arm", {0.0, 0.0, 0.0}},
+                               {"orientation", {1.0, 0.0, 0.0, 0.0}},
+                               {"state_block_labels", {"pinson15"}},
+                               {"aux_channels", {"INERTIAL_PVA", "INERTIAL_FORCES_AND_RATES"}}});
+    for (auto& mp : c["mp_configs"])
+      if (mp["label"] == "pos") mp["innovation_gate_probability"] = 0.999999;  // only to count what reaches the filter
+    if (reorder_s > 0) c["measurement_reorder_s"] = reorder_s;
+  }
+  return cobra::jsoncfg::app_config_from_json(j);
+}
+struct Fed {
+  int fixes = 0;       ///< position fixes in the log after the filter aligned
+  int reached = 0;     ///< of those, how many the fusion engine saw (accepted or gated)
+  int warnings = 0;    ///< WARN lines about discarded measurements
+  bool error = false;
+};
+Fed feed_with_fast_constraints(double reorder_s) {
+  Fed out;
+  cobra::utils::set_log_sink([&](api::LoggingLevel level, const std::string&, const std::string& m) {
+    if (level == api::LoggingLevel::WARN && m.find("older than the filter") != std::string::npos) ++out.warnings;
+  });
+  cobra::app::RunOptions o;
+  o.progress = false;
+  {
+    cobra::Filter f(with_fast_constraints(reorder_s), o);
+    bool aligned = false;
+    f.set_solution_callback([&](const api::Message&) { aligned = true; });
+    cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+    while (auto ev = r.next()) {
+      if (ev->channel != "/sensor/vn-100/imu" && ev->channel != "/sensor/ublox-ZED-F9T/position") continue;
+      if (aligned && ev->channel == "/sensor/ublox-ZED-F9T/position") ++out.fixes;
+      f.push(cobra::lcm::decode(ev->data), ev->channel);
+    }
+    if (f.registry().has_group("fusion/gating")) {
+      auto kv = f.registry().batch("fusion/gating");
+      out.reached = static_cast<int>(kv->template get_value<std::int64_t>("pos_accepted").value_or(0) +
+                                     kv->template get_value<std::int64_t>("pos_rejected").value_or(0));
+    }
+    out.error = f.stop() != 0;
+  }
+  cobra::utils::set_log_sink(nullptr);
+  return out;
+}
+}  // namespace
+
+TEST(Filter, FastAidingStreamStarvesADelayedReceiverByDefault) {
+  // Cobra's behaviour, kept as the default: a measurement older than the filter is dropped, and the filter is
+  // wherever the last measurement took it. With a second stream at 10 Hz almost every GNSS fix arrives "old".
+  const Fed fed = feed_with_fast_constraints(0.0);
+  ASSERT_GE(fed.fixes, 40);
+  EXPECT_LT(fed.reached, fed.fixes / 4);
+  EXPECT_GE(fed.warnings, 1);  // ... but no longer in silence (it was a DEBUG line)
+}
+
+TEST(Filter, ReorderWindowKeepsEveryFixOfADelayedReceiver) {
+  // The window has to cover how late the slowest stream is against the fastest. The constraints here are made
+  // from IMU messages, which the controller passes on at once, while the fixes go through its 2 s buffer and
+  // carry a 150 ms time bias on top: they are 2.15 s late. A window of 0.5 s does not cover that, 2.5 s does.
+  const Fed too_short = feed_with_fast_constraints(0.5);
+  EXPECT_LT(too_short.reached, too_short.fixes / 4);
+  EXPECT_GE(too_short.warnings, 1);
+  const Fed fed = feed_with_fast_constraints(2.5);
+  ASSERT_GE(fed.fixes, 40);
+  EXPECT_FALSE(fed.error);
+  EXPECT_GE(fed.reached, fed.fixes - 4);  // all but what is still waiting in the window when the log ends
+  EXPECT_EQ(fed.warnings, 0);
 }

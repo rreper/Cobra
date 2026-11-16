@@ -153,6 +153,16 @@ std::optional<std::vector<Message>> SensorDegradationPreprocessor::process_pntos
     if (utils::present(vel->get_y())) out->set_y(vel->get_y() + cfg_.velocity_noise_sigma[1] * gauss());
     if (utils::present(vel->get_z())) out->set_z(vel->get_z() + cfg_.velocity_noise_sigma[2] * gauss());
     if (cfg_.velocity_covariance_scale != 1.0) out->set_covariance(vel->get_covariance() * cfg_.velocity_covariance_scale);
+    if (cfg_.velocity_scale != 1.0 && utils::present(out->get_x())) out->set_x(out->get_x() * cfg_.velocity_scale);
+    if (cfg_.velocity_forward_only) {  // a wheel speed: the forward axis and its variance, nothing else
+      const double nan = std::numeric_limits<double>::quiet_NaN();
+      const auto cov = out->get_covariance();
+      Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> one(1, 1);
+      one(0, 0) = cov.rows() >= 1 ? cov(0, 0) : 0.0;
+      out->set_y(nan);
+      out->set_z(nan);
+      out->set_covariance(one);
+    }
     return std::vector<Message>{Message(out, message.source_identifier)};
   }
   return std::vector<Message>{message};

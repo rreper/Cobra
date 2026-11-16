@@ -80,6 +80,11 @@ void StandardOrchestrationPlugin::store_config_data(const StandardOrchestrationC
   inertial_group_ = cfg.inertial_config.group_;
   max_prop_dt_ns_ = static_cast<std::int64_t>(cfg.max_prop_interval * 1e9);
   buffer_time_ns_ = static_cast<std::int64_t>(cfg.max_filter_lag * 1e9);
+  reorder_ns_ = static_cast<std::int64_t>(std::max(0.0, cfg.measurement_reorder_s) * 1e9);
+  if (reorder_ns_ > kMaxReorderNs) {  // the filter must stay inside the inertial buffer (10 s by default)
+    log(LoggingLevel::WARN, "measurement_reorder_s (" + std::to_string(cfg.measurement_reorder_s) + " s) is limited to 5 s.");
+    reorder_ns_ = kMaxReorderNs;
+  }
   feedback_config_ = cfg.feedback_config;
 }
 
@@ -131,6 +136,7 @@ void StandardOrchestrationPlugin::try_initialize() {
   if (!initializer_ || !orch::initialization_ready(*initializer_)) return;
   if (!generate_initial_inertial_solution()) return;
   if (!initialize_filter()) return;
+  if (fusion_engine_) filter_start_ns_ = fusion_engine_->time().elapsed_nsec;
   send_inertial_aux_to_pinson();
 }
 
@@ -485,11 +491,11 @@ void StandardOrchestrationPlugin::propagate_during_outage() {
   if (!init_solution_) return;
   const Timestamp earliest = inertial_->request_earliest_time();
   const Timestamp latest = inertial_->request_latest_time();
-  const Timestamp prop_time{earliest.elapsed_nsec + inertial_drift_prop_dt_};
-  if (prop_time.elapsed_nsec < latest.elapsed_nsec - buffer_time_ns_)
-    propagate_to_time(prop_time);
-  else
-    propagate_to_time(earliest);
+  Timestamp prop_time{earliest.elapsed_nsec + inertial_drift_prop_dt_};
+  if (prop_time.elapsed_nsec >= latest.elapsed_nsec - buffer_time_ns_) prop_time = earliest;
+  // never past a measurement that is still waiting in the reorder window
+  if (!pending_.empty() && prop_time.elapsed_nsec > pending_.begin()->first) prop_time = Timestamp{pending_.begin()->first};
+  propagate_to_time(prop_time);
 }
 
 void StandardOrchestrationPlugin::send_message_as_aux_data(const Message& message) {
@@ -544,21 +550,71 @@ void StandardOrchestrationPlugin::process_pntos_message(const Message& message, 
       }
       continue;
     }
-    if (!orch::has_valid_time(true, *fusion_engine_, msg, logfn)) continue;
-
-    if (contains(inertial_channels_, channel)) {
-      inertial_->process_pntos_message(msg);
-    } else if (auto it = measurement_channels_.find(channel); it != measurement_channels_.end()) {
-      auto tov = utils::time_of_validity(*msg.wrapped_message);
-      if (tov) {
-        propagate_to_time(*tov);
-        for (const auto& mp : it->second) perform_measurement_update(msg, mp);
+    // With a reorder window a measurement waits until the IMU is that far ahead of it and is then applied in the
+    // order of the time stamps (release_pending). Inertial data and pure aux data are never held back.
+    if (reorder_ns_ > 0 && !contains(inertial_channels_, channel) && measurement_channels_.count(channel) && msg.wrapped_message) {
+      if (auto tov = utils::time_of_validity(*msg.wrapped_message)) {
+        pending_.emplace(tov->elapsed_nsec, msg);
+        continue;
       }
     }
-    if (sb_aux_channels_.count(channel) || mp_aux_channels_.count(channel) || vsb_aux_channels_.count(channel))
-      send_message_as_aux_data(msg);
+    if (!orch::has_valid_time(true, *fusion_engine_, msg, logfn)) {
+      note_discarded(msg);
+      continue;
+    }
+    apply_measurement(msg);
   }
+  if (reorder_ns_ > 0) release_pending();
   propagate_during_outage();
+}
+
+void StandardOrchestrationPlugin::apply_measurement(const Message& msg) {
+  const std::string& channel = msg.source_identifier;
+  if (contains(inertial_channels_, channel)) {
+    inertial_->process_pntos_message(msg);
+  } else if (auto it = measurement_channels_.find(channel); it != measurement_channels_.end()) {
+    auto tov = utils::time_of_validity(*msg.wrapped_message);
+    if (tov) {
+      propagate_to_time(*tov);
+      for (const auto& mp : it->second) perform_measurement_update(msg, mp);
+    }
+  }
+  if (sb_aux_channels_.count(channel) || mp_aux_channels_.count(channel) || vsb_aux_channels_.count(channel))
+    send_message_as_aux_data(msg);
+}
+
+void StandardOrchestrationPlugin::release_pending() {
+  if (pending_.empty() || !inertial_) return;
+  const std::int64_t horizon = inertial_->request_latest_time().elapsed_nsec - reorder_ns_;
+  auto logfn = [this](LoggingLevel l, const std::string& m) { log(l, m); };
+  while (!pending_.empty() && pending_.begin()->first <= horizon) {
+    const Message msg = pending_.begin()->second;
+    pending_.erase(pending_.begin());
+    if (!orch::has_valid_time(true, *fusion_engine_, msg, logfn)) {
+      note_discarded(msg);
+      continue;
+    }
+    apply_measurement(msg);
+  }
+}
+
+void StandardOrchestrationPlugin::note_discarded(const Message& msg) {
+  // A measurement older than the filter is lost for good. Cobra says so at DEBUG level only; a receiver whose
+  // every fix arrives behind a faster stream then disappears from the solution without a word. Said once per
+  // channel, then at the 10th, 100th, ... occurrence.
+  if (!msg.wrapped_message || !fusion_engine_) return;
+  auto tov = utils::time_of_validity(*msg.wrapped_message);
+  if (!tov || fusion_engine_->time().elapsed_nsec <= tov->elapsed_nsec) return;
+  if (tov->elapsed_nsec < filter_start_ns_) return;  // it predates the filter itself (taken before the alignment finished)
+  if (contains(inertial_channels_, msg.source_identifier) || !measurement_channels_.count(msg.source_identifier)) return;
+  const std::uint64_t n = ++discarded_old_[msg.source_identifier];
+  std::uint64_t p = 1;
+  while (p < n) p *= 10;
+  if (p != n) return;
+  log(LoggingLevel::WARN, std::to_string(n) + " measurement(s) from \"" + msg.source_identifier + "\" discarded as older than the filter (the last one " +
+                              std::to_string((fusion_engine_->time().elapsed_nsec - tov->elapsed_nsec) * 1e-9) +
+                              " s behind it). Another measurement stream is ahead of this one" +
+                              (reorder_ns_ > 0 ? "; it is later than measurement_reorder_s allows." : "; see StandardOrchestrationConfig::measurement_reorder_s."));
 }
 
 std::vector<std::string> StandardOrchestrationPlugin::filter_description_list() const {

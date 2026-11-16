@@ -105,8 +105,17 @@ class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
   std::int64_t buffer_time_ns_ = 2'000'000'000;
   std::optional<FeedbackConfig> feedback_config_;
   std::int64_t inertial_drift_prop_dt_ = 100'000'000;
+  std::int64_t reorder_ns_ = 0;  ///< StandardOrchestrationConfig::measurement_reorder_s
+  static constexpr std::int64_t kMaxReorderNs = 5'000'000'000;
 
   // runtime state
+  /// Measurements waiting for the reorder window to pass, by time of validity (empty unless reorder_ns_ > 0).
+  std::multimap<std::int64_t, api::Message> pending_;
+  std::map<std::string, std::uint64_t> discarded_old_;  ///< per channel: measurements dropped as older than the filter
+  std::int64_t filter_start_ns_ = 0;                    ///< filter time when the alignment finished
+  void apply_measurement(const api::Message& msg);
+  void release_pending();
+  void note_discarded(const api::Message& msg);
   std::vector<std::pair<std::unique_ptr<api::Preprocessor>, std::optional<std::vector<std::string>>>> preprocessors_;
   std::unique_ptr<api::InertialInitializationStrategy> initializer_;
   std::unique_ptr<api::StandardInertialMechanization> inertial_;

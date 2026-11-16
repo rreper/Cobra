@@ -153,7 +153,7 @@ TEST_F(StateModelingTest, EnoughLabelsAndInvalidIndex) {
   EXPECT_EQ(provider->new_virtual_block(provider->virtual_block_identifiers().size() + 1, "source", "target",
                                         "config/vsb"),
             nullptr);
-  EXPECT_EQ(provider->processor_identifiers().size(), 9u);
+  EXPECT_EQ(provider->processor_identifiers().size(), 10u);  // the nine of the Python original and pinson_odometry
   EXPECT_EQ(provider->block_identifiers().size(), 4u);
   EXPECT_EQ(provider->virtual_block_identifiers().size(), 2u);
 }
@@ -651,4 +651,108 @@ TEST(Geoid, AltitudeProcessorConvertsMslWithGeoid) {
   EXPECT_FALSE(without.generate_model(msl(ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_MSL, 1617.0), gen));
   EXPECT_TRUE(med.has_error());
   EXPECT_TRUE(without.generate_model(msl(ASPN23_MEASUREMENT_ALTITUDE_REFERENCE_HAE, 1600.0), gen));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// pinson_odometry (C++ addition, provider index 9): the body-velocity model with three calibration states, the
+// odometer's scale factor error and the pitch and yaw misalignment of its axes against the platform's.
+
+namespace {
+constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+/// 15 Pinson states and the calibration block [scale, pitch misalignment, yaw misalignment].
+EstimateWithCovariance odometry_state(double scale, double pitch, double yaw) {
+  Vector x(18);
+  x << 0.3, -0.2, 0.1, 0.05, -0.04, 0.02, 2e-3, -1e-3, 3e-3, 1e-3, 2e-3, -1e-3, 1e-5, -2e-5, 3e-5, scale, pitch, yaw;
+  return {EstimateWithCovarianceType::EWC_GENERIC, x, Matrix::Identity(18, 18)};
+}
+}  // namespace
+
+TEST_F(StateModelingTest, OdometryIsTheTenthProcessor) {
+  ASSERT_EQ(provider->processor_identifiers().size(), 10u);
+  EXPECT_EQ(provider->processor_identifiers().back(), "pinson_odometry");
+  EXPECT_TRUE(processor(9, "odo", {"pinson"}));
+}
+
+TEST_F(StateModelingTest, OdometryWithoutCalibrationBlockIsTheBodyVelocityModel) {
+  auto odo = processor(9, "odo", {"pinson"});
+  auto body = processor(5, "body_velocity", {"pinson"});
+  ASSERT_TRUE(odo);
+  ASSERT_TRUE(body);
+  Message m(make_velocity(kSec, 4.4, 3.3, 2.2, Vector3(0.5, 0.5, 0.5), ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR), "v");
+  odo->receive_aux_data({pva_aux, force_aux});
+  body->receive_aux_data({pva_aux, force_aux});
+  auto xp = gxp(15);
+  auto a = odo->generate_model(m, fixed(xp));
+  auto b = body->generate_model(m, fixed(xp));
+  ASSERT_TRUE(a);
+  ASSERT_TRUE(b);
+  EXPECT_ALLCLOSE(a->z, b->z);
+  EXPECT_ALLCLOSE(a->H, b->H);
+  EXPECT_EQ(a->R, b->R);
+  EXPECT_ALLCLOSE(a->h(xp.estimate), b->h(xp.estimate));
+}
+
+TEST_F(StateModelingTest, OdometryJacobianMatchesItsMeasurementFunction) {
+  auto odo = processor(9, "odo", {"pinson", "odometer_calibration"});
+  ASSERT_TRUE(odo);
+  odo->receive_aux_data({pva_aux, force_aux});
+  Message m(make_velocity(kSec, 4.4, 0.3, -0.2, Vector3(0.01, 0.04, 0.04), ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR), "v");
+  const auto xp = odometry_state(0.03, 0.01, -0.02);
+  auto mm = odo->generate_model(m, fixed(xp));
+  ASSERT_TRUE(mm);
+  ASSERT_EQ(mm->H.rows(), 3);
+  ASSERT_EQ(mm->H.cols(), 18);
+  // velocity, tilt and the three calibration states (the model, like the body-velocity one, leaves the weak
+  // dependence on position and on the gyro bias through the lever arm out of H)
+  for (int col : {3, 4, 5, 6, 7, 8, 15, 16, 17}) {
+    const double d = col >= 6 ? 1e-6 : 1e-4;
+    Vector up = xp.estimate, dn = xp.estimate;
+    up(col) += d;
+    dn(col) -= d;
+    const Vector numeric = (mm->h(up) - mm->h(dn)) / (2 * d);
+    // the tilt also turns the earth and transport rate that enter the lever-arm term (5e-4 m/s per rad with the
+    // 6 m lever arm of this fixture); H leaves that out, as the body-velocity model does
+    const double tolerance = col >= 6 && col <= 8 ? 1e-3 : 2e-6;
+    for (int row = 0; row < 3; ++row) EXPECT_NEAR(mm->H(row, col), numeric(row), tolerance) << "row " << row << " col " << col;
+  }
+  // what the calibration states mean, on a vehicle that moves forward: a scale error shows in the forward
+  // axis, the yaw misalignment in the lateral one, the pitch misalignment in the vertical one
+  const Vector3 v = mm->h(xp.estimate);
+  EXPECT_NEAR(mm->H(0, 15), v(0) / 1.03, 1e-9);
+  EXPECT_DOUBLE_EQ(mm->H(1, 15), 0.0);
+  EXPECT_DOUBLE_EQ(mm->H(2, 15), 0.0);
+  EXPECT_NE(mm->H(1, 17), 0.0);
+  EXPECT_NE(mm->H(2, 16), 0.0);
+  EXPECT_DOUBLE_EQ(mm->H(1, 16), 0.0);
+  EXPECT_DOUBLE_EQ(mm->H(2, 17), 0.0);
+}
+
+TEST_F(StateModelingTest, OdometryUsesTheAxesThatArePresent) {
+  auto odo = processor(9, "odo", {"pinson", "odometer_calibration"});
+  ASSERT_TRUE(odo);
+  odo->receive_aux_data({pva_aux, force_aux});
+  const auto xp = odometry_state(0.0, 0.0, 0.0);
+  const auto frame = ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR;
+  // a wheel speed: forward only
+  auto speed = odo->generate_model(Message(make_velocity(kSec, 4.4, kNaN, kNaN, Vector3(0.01, 0.04, 0.04), frame), "v"), fixed(xp));
+  ASSERT_TRUE(speed);
+  ASSERT_EQ(speed->z.size(), 1);
+  EXPECT_DOUBLE_EQ(speed->z(0), 4.4);
+  ASSERT_EQ(speed->H.rows(), 1);
+  ASSERT_EQ(speed->R.rows(), 1);
+  EXPECT_DOUBLE_EQ(speed->R(0, 0), 0.01);
+  // a ground vehicle's constraints: no forward axis, lateral and vertical velocity zero
+  auto nhc = odo->generate_model(Message(make_velocity(kSec, kNaN, 0.0, 0.0, Vector3(0.01, 0.04, 0.09), frame), "v"), fixed(xp));
+  ASSERT_TRUE(nhc);
+  ASSERT_EQ(nhc->z.size(), 2);
+  ASSERT_EQ(nhc->R.rows(), 2);
+  EXPECT_DOUBLE_EQ(nhc->R(0, 0), 0.04);
+  EXPECT_DOUBLE_EQ(nhc->R(1, 1), 0.09);
+  EXPECT_DOUBLE_EQ(nhc->H(0, 15), 0.0);  // no scale without a speed
+  EXPECT_DOUBLE_EQ(nhc->H(1, 15), 0.0);
+  // a calibration block of the wrong size is refused
+  auto bad = odometry_state(0, 0, 0);
+  bad.estimate.conservativeResize(17);
+  bad.covariance = Matrix::Identity(17, 17);
+  EXPECT_FALSE(odo->generate_model(Message(make_velocity(kSec, 4.4, kNaN, kNaN, Vector3(0.01, 0.04, 0.04), frame), "v"), fixed(bad)));
 }
