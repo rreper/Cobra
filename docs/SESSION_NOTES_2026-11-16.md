@@ -1,12 +1,12 @@
 # Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.16
 
-Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
-layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
-5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
-released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
-5.9), the IMU model for a driving car as v0.2.14 (section 5.10). A standstill confirmed by the receiver's
-velocity is released as v0.2.15 (section 5.11), the estimate of the receiver's time offset as v0.2.16 (section
-5.12).
+Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Everything below is released; nothing is
+left on a branch or uncommitted. In order: the integrity layer's v0.2 (section 3), Cobra v0.2.10 (fusion core,
+section 4), v0.2.11 (alignment in motion, 5.7; sections 5.1 to 5.6 are its prototype stage, kept as written),
+v0.2.12 (zero-velocity and zero-rate updates, 5.8), v0.2.13 (the start-up gap of the `pva_message`
+initialization, 5.9), v0.2.14 (the IMU model for a driving car, 5.10), v0.2.15 (a standstill confirmed by the
+receiver's velocity, 5.11) and v0.2.16 (the receiver's time offset found by the alignment, 5.12). Section 6
+is what is open, section 7 how to pick it up.
 
 ## 1. What was asked
 
@@ -26,20 +26,23 @@ In order, after the v0.2.9 notes were committed:
 10. "commit, merge, tag v0.2.15 and push, then do the receiver time-offset estimate"
 11. "commit and push" (the time-offset work: committed on its branch and pushed; no merge and no tag were asked for)
 12. "please release it"
+13. "update docs and get me to a good stopping point" (this revision of the notes, the roadmap, the gates kept outside `/tmp`)
 
 ## 2. State at the end
 
 | Item | State |
 |---|---|
 | cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine |
-| Cobra (this repository) | v0.2.11: commit `67870dd` on `main`, tag `v0.2.11` (alignment in motion, correction to v0.2.10); before it v0.2.10 = `03f2947`, whose `ci` and `release` workflows were green |
+| Cobra (this repository) | v0.2.16 = `34c9a6b` (tag), `main` a notes commit or two beyond it, working tree clean. Tags of the day: v0.2.10 `03f2947`, v0.2.11 `67870dd`, v0.2.12 `84deb76`, v0.2.13 `6c7d695`, v0.2.14 `239846b`, v0.2.15 `cca2b41`, v0.2.16 `34c9a6b`. The `release` workflow is green for every one of them, `ci` for every push up to v0.2.15's; `ci` for the v0.2.16 push was still running when this was written |
+| Tests and gates at v0.2.16 | 24 suites / 295 tests, also under ASan + UBSan; parity dump byte-identical to v0.2.8 (`add099b17da4…`); acceptance 24 / 24; the 24 acceptance logs hold the same 61,772 messages |
 | Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree; `ci` (on `2044a47`) and the `release` workflow for the tag are both green |
 | Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree; `ci` (on `c510049`) and the `release` workflow are green |
 | Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
 | Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
 | Branch `confirmed-standstill` | merged into `main` (fast-forward) as v0.2.15 = `cca2b41`: `ZeroMotionGeneratorConfig::confirmation_channels`, two new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the confirmation (section 5.11). All gates passed on the released tree |
 | Branch `time-offset` | merged into `main` (fast-forward) as v0.2.16 = `34c9a6b` (the work is `26eb184`, the version commit on top): `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`, seven new alignment rows, both alignment example configurations with the estimate (section 5.12). All gates passed on the released tree. The branch also exists on `origin`, where it was pushed before the release |
-| Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
+| Prototype and experiment scripts | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; its `README.md` lists them) |
+| Gates | `/home/rreper/orin/work/prototypes/gates/cobra_gates.sh` with its baseline (section 7); no longer in `/tmp` |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
 ## 3. cobra-integrity v0.2 (released)
@@ -417,35 +420,70 @@ Full account: `docs/DESIGN.md` §7.29.
 - Gates on this tree: 24 suites / 295 tests, also under ASan + UBSan with no report; parity dump byte-identical;
   acceptance 24 / 24; 61,772 messages identical. v0.2.15's `ci` and `release` workflows are green.
 
-## 6. Open decisions carried forward
+## 6. What is open
 
+Decisions that are Rich's:
 
-
-- `pos_vel_ins.json`: velocity time bias 150 ms where the alignment now measures 280 ms against the IMU (350 ms
-  against the reference solution); the fixes measure 70 ms against the IMU where every configuration applies 150. Change the default configuration, or leave it and use the measured figure in new configurations
-  only? The two new configurations use 250 ms.
+- `configs/pos_vel_ins.json` gives the velocity channel 150 ms; the alignment measures 280 ms against the IMU
+  (§5.12). Changing it moves that configuration's pinned acceptance rows. The fixes measure 70 ms against the
+  IMU where every configuration applies 150 ms; there the reference solution's own time base is in the way
+  (DESIGN.md §7.29) and I would not change anything without a second recording.
+- `origin/time-offset` still exists on GitHub. It was pushed before the release and is contained in `main`;
+  delete it or keep it.
 - cobra-integrity: should an excluded lone receiver's fix be offered as an unassured last resort?
-- Bump the `pntos-cpp` pins to the latest tag (cobra-integrity v0.2.7, pnt-edge v0.2.8) and surface the new integrity
-  status keys in pnt-edge.
-- Receiver signal indicators into the integrity monitor.
-- The items of `SESSION_NOTES_2026-11-15.md` §6 and §7 are unchanged.
+- Bump the `pntos-cpp` pins (cobra-integrity v0.2.7, pnt-edge v0.2.8) to v0.2.16 and surface the new integrity
+  status keys in pnt-edge. No behaviour changes by the bump itself: every option added today is off by default.
+
+Work, in the order I would take it (DESIGN.md §9.6 has the same list with the reasons):
+
+1. The receiver's time offsets as filter states. The alignment finds the velocity's offset once and only
+   reports it; the filter keeps the configured time biases, and the fixes' offset is not estimated when there
+   is a velocity channel.
+2. An accelerometer bias that may step when the vehicle starts and stops: 2 mm/s² on the vertical axis of the
+   VN-100 (§5.11), which is what keeps the vertical zero velocity at 0.2 m/s.
+3. Creeping in an outage, where the IMU decides alone and takes it for standing.
+4. Measurement weighting that adapts to a receiver whose reported covariance is optimistic; receiver signal
+   indicators into the integrity monitor; tightly coupled GNSS.
+
+Leads not followed: a gyro bias sigma four times larger halves the outage error with constraints and
+zero-motion updates and worsens the rows without constraints (§5.10); `imu_gap_policy` "hold" does not close
+the `pva_message` start-up hole completely (§5.9); the heading / gyro-bias correlation is not handed over by
+the alignment. The items of `SESSION_NOTES_2026-11-15.md` §6 and §7 are unchanged.
 
 ## 7. How to pick this up again
 
-- Build and gates: `export PATH=$PWD/Cobra/.venv/bin:$PATH; meson compile -C build; meson test -C build`;
-  `tools/inertial_parity_check.py`; `build/tools/inertial_parity_dump <log> 25` against a pristine build;
-  `tools/run_acceptance.py`; `tools/compare_logs.py`. The recipe for the pristine reference is in
-  `SESSION_NOTES_2026-11-15.md` §8; use `REF=v0.2.10`.
-- Prototype: `/home/rreper/orin/work/prototypes/align-in-motion/` (copied there on 16 November; its
-  `README.md` lists the scripts). `oba3.py` is the prototype of §5.3, `exp2.py` the table of §5.4, `exp3.py`
-  the comparison of §5.6, `lag.py` finding 2, `profile.py` §5.2. Run with `Cobra/.venv/bin/python`.
-- Scratch directory of this session (gone after a reboot):
-  `/tmp/claude-1000/-home-rreper-orin-work/390f72b7-9ad8-4396-8ce9-ea4300851024/scratchpad/` with `baseline/`
-  (pristine build outputs), `rel0210/` (the v0.2.10 gate outputs), `asan/` (sanitizer build).
+- Build: `export PATH=$PWD/Cobra/.venv/bin:$PATH; meson compile -C build; meson test -C build` (the system
+  meson is too old for the build directory).
+- Gates before any commit: `bash /home/rreper/orin/work/prototypes/gates/cobra_gates.sh <name>`, about five
+  minutes. It runs the unit suite, the parity dump against the baseline beside it (a pristine build of
+  v0.2.8, which the default mode has matched ever since), `tools/inertial_parity_check.py`, the acceptance
+  run, `tools/compare_logs.py` on the 24 acceptance logs, and the unit suite under ASan + UBSan. A pass is
+  exit 0 on every line, "byte-identical", "PASS rows 24 | FAIL rows 0", "identical" and
+  "sanitizer reports: 0". Do not rebuild while the acceptance part runs. The script and the baseline were in
+  the session's `/tmp` scratch directory until the end of this session; that directory does not survive a
+  reboot and nothing in it is needed any more.
+- Release convention: bump `version:` in `meson.build` and title the `docs/PROGRESS.md` entry "vX.Y.Z: ..."
+  before the release commit; gates on that exact tree; fast-forward `main`; annotated tag; these notes as a
+  separate commit after the tag; push `main` and the tag. A push to `main` starts `ci` (about eight minutes), a
+  tag starts `release`. `gh` is not logged in here; `https://api.github.com/repos/rreper/Cobra/actions/runs`
+  answers without a token, 60 calls an hour.
+- Measurement tables: `tools/run_aiding_matrix.py` (40 runs, half a minute) and
+  `tools/run_alignment_matrix.py` (18 rows of 64 runs, five minutes); both rewrite their documents under
+  `docs/`, and `--write-configs` rewrites the four vehicle example configurations.
+- Prototype and experiment scripts: `/home/rreper/orin/work/prototypes/align-in-motion/`, run with
+  `Cobra/.venv/bin/python`. Figures about what the C++ does come from the C++ (§5.11); the scripts there that
+  are replicas say so in the `README.md`.
 
 ## 8. Where the rest is
 
-- Design: `docs/DESIGN.md` (§7.22 inertial for live sensors, §7.23 aiding beside the receiver, §9.6 open items).
-- Progress log: `docs/PROGRESS.md`. Measurements: `docs/AIDING_MATRIX.md`, `docs/TEST_MATRIX.md`.
+- Design: `docs/DESIGN.md`. The sections of this session: §7.23 aiding beside the receiver, §7.24 alignment in
+  motion, §7.25 standing still, §7.26 an initial solution older than the IMU, §7.27 the IMU model in a driving
+  car, §7.28 a standstill confirmed by the receiver, §7.29 the receiver's time offset; §8 deviations 21 to 29;
+  §9.6 open items.
+- Progress log: `docs/PROGRESS.md`. Measurements: `docs/AIDING_MATRIX.md`, `docs/ALIGNMENT_MATRIX.md`,
+  `docs/TEST_MATRIX.md`. What to configure for which vehicle: `docs/GETTING_STARTED.md`.
+- Example configurations for a road vehicle: `configs/pos_ins_align_in_motion.json` (no heading from outside),
+  `configs/pos_ins_ground_vehicle.json` (that, the motion constraints and the confirmed zero-motion updates),
+  `configs/pos_ins_odometry.json`, `configs/pos_ins_full.json`.
 - Integrity layer: `/home/rreper/orin/work/cobra-integrity/docs/`.
 - Dashboard: `~/projects/_dashboard/projects/{pntos,cobra-integrity,pnt-edge}.{json,md}`.

@@ -42,7 +42,7 @@ Cobra/                  the Python original, as a submodule, used for golden-vec
 python3 -m venv .venv && .venv/bin/pip install meson ninja
 .venv/bin/meson setup build
 .venv/bin/meson compile -C build
-.venv/bin/meson test -C build          # 22 suites
+.venv/bin/meson test -C build          # 24 suites, 295 tests
 ```
 
 All dependencies are fetched as meson subprojects on first `setup`; nothing needs to be installed system-wide.

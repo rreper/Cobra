@@ -98,3 +98,23 @@ virtual per-step methods on the standard orchestration, `app::register_orchestra
 `RegistryConfig` entry and `app::cobra_run_main`, a side-effect-free innovation probe on the fusion engine, and
 degradation ramps plus a synthesised second position source. Next in Cobra: keep those hooks stable across tags
 (consumers pin tags), a second recorded dataset, and the ROS 2 / UI items when an environment exists.
+
+## After v0.2.16 (16 November 2026)
+
+Since the paragraph above the work has been on what a road vehicle with a receiver and an IMU needs, each piece
+opt-in and measured on the example drive (`docs/DESIGN.md` §7.22 to §7.29, `docs/AIDING_MATRIX.md`,
+`docs/ALIGNMENT_MATRIX.md`):
+
+| Tag | What it added |
+|---|---|
+| v0.2.9 | the inertial for live sensors: lost, late, sampled and non-finite IMU data |
+| v0.2.10, v0.2.11 | measurements applied in time order (`measurement_reorder_s`), odometry with calibration states (`pinson_odometry`), and the alignment in motion: a heading without one from outside |
+| v0.2.12 | zero-velocity and zero-rate updates while the IMU says that the vehicle stands |
+| v0.2.13 | an initial solution older than the IMU no longer leaves a hole (`initialization_imu_replay_s`) |
+| v0.2.14 | IMU preset `vn100_driving`: the accelerometer noise of a driving car |
+| v0.2.15 | a standstill confirmed by the receiver's velocity, so that creeping is not taken for standing |
+| v0.2.16 | the receiver's time offset, found by the alignment in motion |
+
+`configs/pos_ins_ground_vehicle.json` puts them together. Unit tests: 24 suites, 295 tests. The default mode
+still reproduces the Python reference and the outputs of v0.2.8 byte for byte. What is next is listed, with the
+reasons, in `docs/DESIGN.md` §9.6: the receiver's time offsets as filter states first.
