@@ -119,7 +119,7 @@
         "imu_model": {
           "type": "ImuConfig",
           "group": "config/inertial_state",
-          "preset": "vn100_measured"
+          "preset": "vn100_driving"
         },
         "static_time": 10.0,
         "type": "ManualHeadingAlignmentConfig"
@@ -230,7 +230,7 @@
         "imu_model": {
           "type": "ImuConfig",
           "group": "config/inertial_state",
-          "preset": "vn100_measured"
+          "preset": "vn100_driving"
         },
         "label": "pinson15",
         "legacy_q_rotation": false,

@@ -37,7 +37,7 @@ Start from `configs/pos_ins.json` and change, in `StandardOrchestrationConfig`:
 
 | What you have | Where it goes |
 |---|---|
-| A different IMU | `pinson_sb_config.imu_model` and `alignment_config.imu_model`: `{"preset": "stim300", "group": "config/inertial_state"}` or the six sigma/tau triples explicitly. Presets: vn100, vn100_corrected, vn100_datasheet, stim300, adis16488, hg1700, hg4930, consumer_mems. Datasheet presets are starting points; tune the random-walk sigmas until about 68 % of your errors fall inside one sigma. |
+| A different IMU | `pinson_sb_config.imu_model` and `alignment_config.imu_model`: `{"preset": "stim300", "group": "config/inertial_state"}` or the six sigma/tau triples explicitly. Presets: vn100, vn100_corrected, vn100_measured, vn100_driving, vn100_datasheet, stim300, adis16488, hg1700, hg4930, consumer_mems. Datasheet presets are starting points; tune the random-walk sigmas until about 68 % of your errors fall inside one sigma. An accelerometer noise measured at rest (an Allan deviation) is several times too small for a vehicle that drives: `vn100_driving` against `vn100_measured`, DESIGN.md §7.27. |
 | IMU mounting | `inertial_config.C_imu_to_platform` and the `ImuRotatorConfig` preprocessor (same matrix), `inertial_config.expected_dt` |
 | GNSS position only | one `PinsonWithNedFogmPositionMPConfig` with the antenna lever arm (platform frame, metres) and a `FogmStateBlockConfig` for the receiver's correlated error (sigma 1.5 m / tau 300 s for a code receiver; shrink both for RTK) |
 | GNSS velocity too | add a `PinsonVelocityMPConfig` on the velocity channel |

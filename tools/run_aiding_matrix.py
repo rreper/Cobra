@@ -3,7 +3,7 @@
 
     Cobra/.venv/bin/python tools/run_aiding_matrix.py [--build build] [--outages 60,120] [--write-configs]
 
-configs/pos_ins.json with the measured VN-100 tuning is run over the full example log with every GNSS channel
+configs/pos_ins.json with the VN-100 tuning for a driving car (preset vn100_driving) is run over the full example log with every GNSS channel
 withheld for the given duration at six points of the drive; the horizontal error at the end of each outage is
 compared with the truth channel, for:
 
@@ -50,7 +50,7 @@ def orch(cfg):
     return next(e for e in cfg['configs'] if e['type'] == 'StandardOrchestrationConfig')
 
 
-def base(preset='vn100_measured'):
+def base(preset='vn100_driving'):
     cfg = json.load(open(os.path.join(ROOT, 'configs', 'pos_ins.json')))
     cfg['app']['logging_level'] = 'WARN'
     o = orch(cfg)
@@ -250,7 +250,7 @@ def main():
               open(a.out, 'w'), indent=1)
     with open(a.md, 'w') as f:
         f.write('# Aiding matrix: a complete GNSS outage, by what else the filter has\n\n')
-        f.write('Generated %s by `tools/run_aiding_matrix.py` in %.0f s. `configs/pos_ins.json` with the `vn100_measured` tuning on the full example log; '
+        f.write('Generated %s by `tools/run_aiding_matrix.py` in %.0f s. `configs/pos_ins.json` with the `vn100_driving` tuning on the full example log; '
                 'every channel of the receiver withheld at %s s of the drive. Horizontal error against the truth channel at the end of each outage, in metres: '
                 'mean and worst of the six, the filter\'s own sigma, and their ratio (near 1: the covariance is honest). "No outage": RMS over the drive, '
                 'horizontal / vertical.\n\n' % (time.strftime('%Y-%m-%d %H:%M'), time.time() - t0, ', '.join('%g' % o for o in OUTAGE_STARTS)))

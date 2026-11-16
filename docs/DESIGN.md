@@ -607,7 +607,8 @@ rotation), `vn100_measured` (the recorded unit as `tools/imu_allan.py` measures 
 noise 0.5–1.2e-4 rad/s/√Hz, accelerometer 2–2.7e-3 m/s²/√Hz, bias instabilities 1–2e-5 rad/s and 3–6e-4 m/s²,
 i.e. a tenth of the Cobra tuning on the gyro noise and a quarter on the bias sigmas; the tuning absorbs
 installation effects the measurement does not show, so the measured preset is for consistency-sensitive uses such
-as integrity monitoring, not the default), and datasheet-derived starting points converted by `imu_from_datasheet` (`stim300`, `adis16488`, `hg1700`,
+as integrity monitoring, not the default), `vn100_driving` (the measured unit with the accelerometer noise of a
+driving car, 1.4e-2 m/s/√s instead of 2.4e-3: §7.27; what the vehicle examples use), and datasheet-derived starting points converted by `imu_from_datasheet` (`stim300`, `adis16488`, `hg1700`,
 `hg4930`, `consumer_mems`, `vn100_datasheet`). The conversion is 1 °/√h = 2.909e-4 rad/√s, 1 °/h = 4.848e-6 rad/s,
 1 mg = 9.807e-3 m/s², velocity random walk in m/s/√h divided by 60; the initial bias sigma is the turn-on
 repeatability or three times the in-run stability, whichever is larger. The datasheet presets are untuned: Cobra's
@@ -1052,12 +1053,11 @@ A known rate other than zero would be taken the same way; only zero is generated
 **How much the zero velocity may weigh.** A standing car moves by millimetres per second, and the first
 version said so (0.05 m/s). With the receiver present that made the solution worse, 1.55 / 1.58 m (horizontal
 / vertical RMS over the drive) became 1.85 / 2.51 m, although it more than halved the outage errors. Two
-reasons, both measured. The detector also fires while the car creeps, 17 times above 0.1 m/s. And told "zero"
-to centimetres per second at every stop, the 15-state filter pins its accelerometer biases far tighter than
-they hold: the vertical accelerometer error, taken with the reference attitude over every standing and driving stretch of
-the recording, wanders by 2.3 mm/s² from one stretch to the next, and the IMU model allows 0.6. The filter then
-trusts its own dead reckoning over the receiver and sits a metre off in altitude. Loosening the bias model to
-the measured wander repairs about half of the vertical and none of the horizontal part. The weight does:
+reasons, sorted out in §7.27 (the account given here in v0.2.12, accelerometer biases that wander, was half
+wrong). Horizontally: the detector also fires while the car creeps, 17 times above 0.1 m/s, and a creeping car
+that is told it stands falls behind. Vertically: the accelerometer noise in the IMU model was the noise at
+rest, a sixth of what it is in a driving car, so the filter trusted its dead reckoning too far once the zero
+velocity had pinned the bias. With the model of that release the weight was the remedy:
 
 | zero-velocity sigma | no outage, h / v RMS | 60 s outages while driving: mean (worst) | 40 s outage while standing |
 |---|---|---|---|
@@ -1142,6 +1142,81 @@ cover how old the initial solution can be: 2.5 s with the standard 2 s buffer.
 Off by default, the key is written only when set, and with an initialization whose solution is as new as the
 IMU there is nothing to replay. No shipped configuration uses `pva_message`.
 
+### 7.27 The IMU model in a driving car (preset `vn100_driving`)
+
+§7.25 ended with an open item: an IMU error model under which the zero velocity could be given its real weight.
+I had put the cost of a tightly weighted zero velocity down to accelerometer biases that wander more than the
+model allows. That was half wrong, and measuring it gave three separate results.
+
+**1. The accelerometer noise of `vn100_measured` is the noise at rest.** That preset comes from the Allan
+deviation of the static start of the recording; the filter used it while driving. Against the reference
+solution, the vertical accelerometer error (specific force rotated with the reference attitude, plus gravity
+and Coriolis, minus the reference's velocity change) averaged over windows of T seconds has this standard
+deviation, in mm/s²:
+
+| T | 1 s | 2 s | 5 s | 10 s | 20 s | 40 s |
+|---|---|---|---|---|---|---|
+| standing | 5.1 | 2.8 | 1.8 | 1.4 | 1.2 | – |
+| driving (above 3 m/s) | 48 | 24 | 10.5 | 5.2 | 3.1 | 1.8 |
+| the model: 2.4e-3 m/s/√s white, 0.6 mm/s² of bias | 2.5 | 1.8 | 1.2 | 1.0 | 0.8 | 0.7 |
+
+Below about 20 s the driving figures are the reference's own velocity noise and its time offset against the
+IMU, and on the two level axes its tilt error (0.05° is 8.5 mm/s²) hides everything; the vertical axis at 20 s
+is the cleanest number there is. As white noise it is 3.1 mm/s² · √20 = 1.4e-2 m/s/√s, six times the preset.
+The same figure explains what §7.25 called a bias wander of 2.3 mm/s² between stretches of the drive: 1.4e-2
+over a stretch of 40 s is 2.2 mm/s².
+
+Preset `vn100_driving` is `vn100_measured` with that accelerometer noise and nothing else changed. What the
+filter makes of it, `docs/AIDING_MATRIX.md` before and after (horizontal / vertical RMS with the receiver
+present; error at the end of a 60 s outage, mean (worst), and the ratio of error to the filter's sigma):
+
+| aiding | `vn100_measured` | `vn100_driving` |
+|---|---|---|
+| IMU alone | 1.55 / 1.58, 25.1 (56.6), 1.10 | 1.55 / 1.57, 24.9 (53.6), 0.97 |
+| constraints | 1.52 / 1.77, 13.3 (25.6), 1.19 | 1.52 / 1.69, 12.6 (25.4), 1.06 |
+| wheel and constraints | 1.59 / 1.75, 4.9 (10.6), 1.25 | 1.59 / 1.68, 4.8 (10.8), 1.14 |
+| three-axis velocity | 1.73 / 3.24, 5.7 (11.2), 1.96 | 1.68 / 1.65, 6.1 (11.7), 1.82 |
+| wheel, second receiver, barometer | 1.16 / 1.33, 1.8 (4.0), 0.85 | 1.16 / 1.27, 1.6 (3.5), 0.77 |
+| zero-motion updates | 1.58 / 1.68, 10.7 (23.4), 1.12 | 1.57 / 1.61, 10.7 (23.8), 1.05 |
+| constraints and zero-motion | 1.58 / 1.87, 6.2 (12.2), 1.09 | 1.57 / 1.71, 6.0 (12.5), 1.02 |
+
+The vertical error is smaller in every row, and the sigma is closer to the error in six of the seven (not in
+the full row, 0.85 to 0.77). The outage errors change little: after 60 s down in five rows by up to 0.7 m, level
+in one, up in the three-axis velocity row (5.7 to 6.1 m, and 6.4 to 7.2 m after 120 s). The 40 s outage while
+standing gets longer in the two rows that have nothing to hold the vehicle (10.9 to 11.7 m and 11.0 to 11.4 m). The tools and the four vehicle examples (`pos_ins_odometry`, `pos_ins_full`,
+`pos_ins_align_in_motion`, `pos_ins_ground_vehicle`) use the preset from here on; the numbers quoted in §7.23 to
+§7.25 were measured with `vn100_measured`.
+
+**2. A larger accelerometer bias sigma is not supported.** Raising it from 0.6 to 1.5 or 2.5 mm/s² (with any
+time constant from 30 to 300 s) made every configuration tried worse: the vertical error with the receiver
+present by about 0.1 m, the 60 s outage by 0.2 to 2.4 m. It stays at 0.6. The gyro terms were swept as well and
+no setting helped across the rows. One lead is left from that sweep: a gyro bias sigma four times larger halved
+the outage error of the row with constraints and zero-motion updates (2.8 m against 5.9 m, with a sigma twice
+too large) while it made the rows without constraints worse; not followed up.
+
+**3. The horizontal cost of a tight zero velocity is the detector, not the IMU.** With the default detector
+(0.003 rad/s, 0.15 m/s², 2 s) 21 of the 420 messages come while the car creeps above 0.05 m/s. Weighted at
+0.05 m/s each of them tells the filter that a car rolling forward in a queue stands, and the position falls
+behind by the distance rolled. With `vn100_driving`, by detector setting:
+
+| detector: gyro, accelerometer, window | messages | of them creeping | zero velocity at 0.05 m/s: h / v, 60 s outage | at 0.2 m/s |
+|---|---|---|---|---|
+| none | – | – | 1.55 / 1.57, 24.9 (53.6) | |
+| 0.003 rad/s, 0.15 m/s², 2 s (default) | 420 | 21 | 1.78 / 1.72, 10.3 (20.6) | 1.57 / 1.61, 10.7 (23.8) |
+| 0.0015, 0.08, 2 s | 375 | 6 | 1.61 / 1.73, 10.6 (19.7) | 1.56 / 1.61, 11.0 (23.4) |
+| 0.001, 0.06, 3 s | 286 | 0 | 1.55 / 1.70, 9.5 (19.8) | 1.55 / 1.60, 10.6 (24.0) |
+| 0.0008, 0.05, 4 s | 176 | 0 | 1.54 / 1.67, 9.6 (19.7) | 1.55 / 1.59, 10.9 (22.9) |
+
+Once no creeping is taken for standing, the tight weight costs nothing horizontally and takes another metre off
+the outage (four off the worst case). So 0.2 m/s is not a concession to the IMU model: it is what the default
+detector can vouch for, and a detector that is sure may say 0.05 to 0.1. The defaults stay as they are, because
+the strict thresholds are those of one car's idle and a detector that never fires is worth nothing; the table
+is the recipe for an installation whose standstill has been looked at. With the constraints in the filter the
+two settings are level (6.3 (11.8) m against 6.0 (12.5) m).
+
+What is left: with the strict detector a zero velocity at 0.05 m/s still costs 0.13 m of vertical RMS (0.08 at
+0.1, 0.03 at 0.2), which neither the accelerometer noise nor a bias model removes. I have not found its cause.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -1174,6 +1249,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 24 | A `measurement_reorder_s` that is not longer than the controller's buffer is a WARN at start-up | — | such a window orders nothing that passed the buffer; v0.2.10 recommended one (§7.23) |
 | 25 | `inertial::StationarityDetector`; third preprocessor of the advanced plugin, `zero_motion_generator` (`ZeroMotionGeneratorConfig`); eleventh measurement processor `pinson_zero_rate` (`PinsonZeroRateMPConfig`); aux channel `INERTIAL_SENSOR_ERRORS`, by which the orchestration hands a processor the biases the inertial is applying (§7.25) | — | C++ additions; nothing is generated, created or handed over unless a configuration names them |
 | 26 | `StandardOrchestrationConfig::initialization_imu_replay_s`: IMU messages received before the initialization has a solution are kept and those after the solution's time given to the new inertial (§7.26) | they are dropped | off by default, key written only when set |
+| 27 | IMU preset `vn100_driving` (§7.27) | — | C++ addition; no shipped default configuration names it, the four vehicle examples do |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1280,10 +1356,11 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.26, in the order of what a vehicle installation misses first: an estimate of the receiver's time
-offset (the largest error source of the alignment in motion); an IMU error model that holds under driving
-(accelerometer bias wander, scale factors), so that the zero velocity can be given its real weight; measurement
-weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
+Open after §7.27, in the order of what a vehicle installation misses first: an estimate of the receiver's time
+offset (the largest error source of the alignment in motion); a standstill confirmed by the receiver's velocity
+while there is one, so that creeping is not taken for standing (§7.27) and a tool that shows an installation
+how fast its vehicle is when the detector says it stands; measurement weighting that adapts to a receiver whose
+reported covariance is optimistic; tightly coupled GNSS.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport

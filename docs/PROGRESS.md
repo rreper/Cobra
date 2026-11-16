@@ -2,6 +2,30 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.14: the IMU model in a driving car (preset vn100_driving)
+
+- Asked for: the IMU error model, so that the zero velocity could carry its real weight. I had blamed the cost of
+  a tight zero velocity on accelerometer biases that wander. Measured (DESIGN.md §7.27), that was half wrong:
+  - The accelerometer noise of `vn100_measured` is the noise at rest. Against the reference the vertical
+    accelerometer error over 20 s is 1.2 mm/s2 standing and 3.1 mm/s2 driving: 1.4e-2 m/s/sqrt(s) as white
+    noise, six times the preset. New preset `vn100_driving` (that one term changed). The "bias wander of
+    2.3 mm/s2 between stretches" of v0.2.12 is the same noise over 40 s.
+  - A larger accelerometer bias sigma makes every configuration worse; it stays.
+  - The horizontal cost was the detector: 21 of its 420 messages come while the car creeps. With a detector
+    strict enough to have none (0.001 rad/s, 0.06 m/s2, 3 s: 286 messages) a zero velocity at 0.05 m/s costs
+    nothing horizontally and the 60 s outage ends at 9.5 (19.8) m instead of 10.7 (23.8). Defaults unchanged:
+    0.2 m/s is what the default detector can vouch for.
+- With `vn100_driving` the vertical error with the receiver present is smaller in every row of the aiding
+  matrix (constraints 1.77 to 1.69 m, three-axis velocity 3.24 to 1.65 m, constraints and zero-motion 1.87 to
+  1.71 m) and the filter's sigma at the end of a 60 s outage matches the error (IMU alone 0.97 instead of 1.10).
+  Outage errors move by under a metre at 60 s, mostly down; the three-axis velocity row gets 0.4 to 0.8 m worse. The tools and
+  the four vehicle examples use the preset; both matrices are regenerated.
+- 24 suites / 276 tests. Default mode unchanged: parity dump byte-identical, acceptance 24 / 24, the 61,772
+  output messages identical to v0.2.13.
+- Left: a tight zero velocity still costs 0.13 m of vertical RMS under the strict detector, cause not found; a
+  gyro bias sigma four times larger halves the outage error with constraints (2.8 m) and worsens the rows
+  without, not followed up; a standstill confirmed by the receiver's velocity.
+
 ## 2026-11-16 — v0.2.13: the start-up hole of the pva_message initialization
 
 - Asked for: the gap found while testing the zero-motion updates. The orchestration drops IMU messages until the

@@ -636,3 +636,41 @@ TEST(JsonConfig, InitializationImuReplayKey) {
   ASSERT_TRUE(back);
   EXPECT_DOUBLE_EQ(back->initialization_imu_replay_s, 2.5);
 }
+
+TEST(Presets, Vn100DrivingIsTheMeasuredUnitWithTheAccelerometerNoiseOfADrivingCar) {
+  using namespace cobra;
+  // vn100_measured holds what the unit does at rest (Allan deviation of the static start). In a driving car
+  // the accelerometer error at 20 s is six times that; everything else is left as measured.
+  const auto measured = presets::imu_preset("vn100_measured", "config/imu");
+  const auto driving = presets::imu_preset("vn100_driving", "config/imu");
+  ASSERT_TRUE(measured);
+  ASSERT_TRUE(driving);
+  EXPECT_EQ(driving->accel_random_walk_sigma, (Vec3{1.4e-2, 1.4e-2, 1.4e-2}));
+  EXPECT_EQ(measured->accel_random_walk_sigma, (Vec3{2.4e-3, 2.4e-3, 2.4e-3}));
+  EXPECT_EQ(driving->accel_bias_sigma, measured->accel_bias_sigma);
+  EXPECT_EQ(driving->accel_bias_tau, measured->accel_bias_tau);
+  EXPECT_EQ(driving->gyro_random_walk_sigma, measured->gyro_random_walk_sigma);
+  EXPECT_EQ(driving->gyro_bias_sigma, measured->gyro_bias_sigma);
+  EXPECT_EQ(driving->gyro_bias_tau, measured->gyro_bias_tau);
+  EXPECT_EQ(driving->accel_bias_initial_sigma, measured->accel_bias_initial_sigma);
+  EXPECT_EQ(driving->gyro_bias_initial_sigma, measured->gyro_bias_initial_sigma);
+  const auto names = presets::imu_preset_names();
+  EXPECT_NE(std::find(names.begin(), names.end(), "vn100_driving"), names.end());
+  // by name in a configuration file, and written back by name
+  const auto c = jsoncfg::config_from_json(jsoncfg::json{{"type", "ImuConfig"}, {"group", "config/imu"}, {"preset", "vn100_driving"}});
+  const auto* imu = dynamic_cast<const ImuConfig*>(c.get());
+  ASSERT_NE(imu, nullptr);
+  EXPECT_EQ(imu->accel_random_walk_sigma, driving->accel_random_walk_sigma);
+  EXPECT_EQ(jsoncfg::config_to_json(*c).value("preset", ""), "vn100_driving");
+  // the vehicle examples use it
+  auto src = [](const char* rel) {
+    const char* dir = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(dir ? dir : "..") + "/" + rel;
+  };
+  for (const char* name : {"configs/pos_ins_ground_vehicle.json", "configs/pos_ins_align_in_motion.json", "configs/pos_ins_odometry.json", "configs/pos_ins_full.json"}) {
+    const auto app = jsoncfg::load_app_config(src(name));
+    for (const auto& cfg : app.configs)
+      if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(cfg.get()))
+        EXPECT_EQ(o->pinson_sb_config.imu_model.accel_random_walk_sigma, driving->accel_random_walk_sigma) << name;
+  }
+}

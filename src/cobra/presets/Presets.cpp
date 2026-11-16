@@ -49,6 +49,23 @@ std::vector<ImuPreset> make_presets() {
     v.push_back({"vn100_measured", "VectorNav VN-100 as measured on the example dataset (Allan deviation of the static start, bias wander across stops)",
                  "tools/imu_allan.py on cobra_gps_ins_example_data.log, 2026-10-06", c});
   }
+  {
+    // The same unit in a driving car (2026-11-16, DESIGN.md section 7.27). vn100_measured is the unit at rest,
+    // and the filter used it while driving. Against the reference solution the vertical accelerometer error
+    // averaged over 20 s is 1.2 mm/s^2 while the car stands and 3.1 mm/s^2 while it drives, which as white noise
+    // is 1.4e-2 m/s/sqrt(s), six times the figure at rest. With it the filter's sigma at the end of a 60 s
+    // outage matches the error (ratio 0.97 against 1.10) and the vertical error with the receiver present is
+    // smaller in every row of docs/AIDING_MATRIX.md; the outage errors move by less than a metre, most of them
+    // down. The accelerometer bias sigma stays: raising it to the scatter seen between stretches of the drive
+    // made every row worse. Gyro terms and initial sigmas as measured.
+    ImuConfig c = vn100_cobra();
+    c.accel_random_walk_sigma = {1.4e-2, 1.4e-2, 1.4e-2};
+    c.gyro_random_walk_sigma = {1.0e-4, 1.0e-4, 5.0e-5};
+    c.accel_bias_sigma = {6.0e-4, 6.0e-4, 6.0e-4};
+    c.gyro_bias_sigma = {5.0e-5, 5.0e-5, 5.0e-5};
+    v.push_back({"vn100_driving", "VectorNav VN-100 in a driving car: vn100_measured with the accelerometer noise seen while driving",
+                 "accelerometer error against the reference solution of cobra_gps_ins_example_data.log, 2026-11-16", c});
+  }
   // Datasheet-derived starting points. Figures are the manufacturers' typical values.
   v.push_back({"vn100_datasheet", "VectorNav VN-100 from the datasheet (industrial MEMS)", "VN-100 datasheet rev. 2.x",
                imu_from_datasheet({0.21, 10.0, 0.5 * 3600 * 0 + 36.0, 0.14 * kG * 1e-3 * 60, 0.04, 2.0, 500.0}, "")});

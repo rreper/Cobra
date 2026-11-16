@@ -3,7 +3,7 @@
 
     Cobra/.venv/bin/python tools/run_alignment_matrix.py [--build build] [--every 40] [--write-configs]
 
-configs/pos_ins.json with the measured VN-100 tuning and initialization "in_motion_align" is run over the full
+configs/pos_ins.json with the VN-100 tuning for a driving car (preset vn100_driving) and initialization "in_motion_align" is run over the full
 example log once per switch-on time: everything before that time is ignored (InMotionAlignmentConfig.start_time),
 so the filter comes up as it would in a vehicle switched on there, standing or under way. Against the truth
 channel:
@@ -205,7 +205,7 @@ def main():
     json.dump(dict(generated=time.strftime('%Y-%m-%dT%H:%M:%S%z'), switch_on_every_s=a.every, rows=table, runs=detail), open(a.out, 'w'), indent=1)
     with open(a.md, 'w') as f:
         f.write('# Alignment matrix: the filter switched on anywhere in the drive\n\n')
-        f.write('Generated %s by `tools/run_alignment_matrix.py` in %.0f s. `configs/pos_ins.json` with the `vn100_measured` tuning and initialization '
+        f.write('Generated %s by `tools/run_alignment_matrix.py` in %.0f s. `configs/pos_ins.json` with the `vn100_driving` tuning and initialization '
                 '`in_motion_align`, run over the full example log once per switch-on time (every %g s, %d of them): everything before that time is '
                 'ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.\n\n'
                 % (time.strftime('%Y-%m-%d %H:%M'), time.time() - began, a.every, len(starts)))
