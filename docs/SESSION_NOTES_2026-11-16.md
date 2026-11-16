@@ -1,10 +1,11 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.13
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.14
 
 Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
 layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
 5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
 released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
-5.9). The IMU error model is next.
+5.9), the IMU model for a driving car as v0.2.14 (section 5.10). A standstill confirmed by the receiver's
+velocity is the work that follows (section 5.11).
 
 ## 1. What was asked
 
@@ -20,6 +21,7 @@ In order, after the v0.2.9 notes were committed:
 6. "commit, merge, tag v0.2.11 and push, then do the zero-rate updates" (the notes were committed with it as `2044a47`)
 7. "commit, merge, tag v0.2.12 and push, then fix the pva_message gap"
 8. "commit, merge, tag v0.2.13 and push, then fix the IMU error model"
+9. "commit, merge, tag v0.2.14 and push, then do the receiver-confirmed standstill"
 
 ## 2. State at the end
 
@@ -29,7 +31,8 @@ In order, after the v0.2.9 notes were committed:
 | Cobra (this repository) | v0.2.11: commit `67870dd` on `main`, tag `v0.2.11` (alignment in motion, correction to v0.2.10); before it v0.2.10 = `03f2947`, whose `ci` and `release` workflows were green |
 | Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree; `ci` (on `2044a47`) and the `release` workflow for the tag are both green |
 | Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree; `ci` (on `c510049`) and the `release` workflow are green |
-| Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13; all gates passed on the released tree |
+| Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
+| Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -317,6 +320,30 @@ Full account: `docs/DESIGN.md` §7.26.
 - Tests: `Filter.AnInitialSolutionOlderThanTheImuLeavesAHoleByDefault` (pins the default),
   `Filter.ImuKeptBeforeTheInitializationClosesTheHole` (failed before the fix), `JsonConfig.InitializationImuReplayKey`.
 - Gates on this tree: 24 suites / 275 tests, also under ASan + UBSan with no report; parity dump byte-identical;
+  acceptance 24 / 24; 61,772 messages identical.
+
+### 5.10 The IMU model in a driving car (released as v0.2.14)
+
+Full account: `docs/DESIGN.md` §7.27. The request was the IMU error model, so that the zero velocity could carry
+its real weight; my diagnosis in v0.2.12 (accelerometer biases that wander) was half wrong.
+
+- Accelerometer error against the reference by averaging time (`prototypes/align-in-motion/accel_allan.py`):
+  vertical axis at 20 s 1.2 mm/s² standing, 3.1 mm/s² driving; below 20 s and on the level axes the reference
+  itself limits what can be seen. 3.1 mm/s² at 20 s is 1.4e-2 m/s/√s of white noise, six times
+  `vn100_measured`, which is the unit at rest. New preset `vn100_driving`: that one term.
+- Sweeps through the filter (`imu_model_sweep.py`, `imu_model_candidates.py`, `vertical_test.py`): the driving
+  noise improves the vertical error in every aiding row and makes the 60 s outage sigma honest (0.97 for the
+  IMU alone, was 1.10); a larger accelerometer bias sigma makes everything worse; gyro terms help nowhere
+  consistently (one lead: gyro bias ×4 halves the outage error of constraints + zero motion).
+- The horizontal cost of a tight zero velocity is creeping detections (`creep_test.py`,
+  `zero_motion_check.py`): default detector 21 creeping messages of 420 → 1.78 m; 0.0015/0.08/2 s, 6 → 1.61 m;
+  0.001/0.06/3 s, none of 286 → 1.55 m, the same as without zero velocity, and the 60 s outage at 9.5 (19.8) m
+  against 10.7 (23.8) m for the default at 0.2 m/s. Defaults kept; the strict setting is documented as the
+  recipe for a vehicle whose standstill has been looked at.
+- Not explained: 0.13 m of vertical RMS that a zero velocity at 0.05 m/s still costs under the strict detector.
+- The tools and the four vehicle examples use `vn100_driving`; `docs/AIDING_MATRIX.md` and
+  `docs/ALIGNMENT_MATRIX.md` are regenerated with it (the alignment figures are unchanged).
+- Gates on this tree: 24 suites / 276 tests, also under ASan + UBSan with no report; parity dump byte-identical;
   acceptance 24 / 24; 61,772 messages identical.
 
 ## 6. Open decisions carried forward
