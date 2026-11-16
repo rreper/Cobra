@@ -1,11 +1,12 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.14
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.15
 
 Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
 layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
 5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
 released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
 5.9), the IMU model for a driving car as v0.2.14 (section 5.10). A standstill confirmed by the receiver's
-velocity is the work that follows (section 5.11).
+velocity is released as v0.2.15 (section 5.11). An estimate of the receiver's time offset is the work that
+follows (section 5.12).
 
 ## 1. What was asked
 
@@ -22,6 +23,7 @@ In order, after the v0.2.9 notes were committed:
 7. "commit, merge, tag v0.2.12 and push, then fix the pva_message gap"
 8. "commit, merge, tag v0.2.13 and push, then fix the IMU error model"
 9. "commit, merge, tag v0.2.14 and push, then do the receiver-confirmed standstill"
+10. "commit, merge, tag v0.2.15 and push, then do the receiver time-offset estimate"
 
 ## 2. State at the end
 
@@ -33,6 +35,7 @@ In order, after the v0.2.9 notes were committed:
 | Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree; `ci` (on `c510049`) and the `release` workflow are green |
 | Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
 | Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
+| Branch `confirmed-standstill` | merged into `main` (fast-forward) as v0.2.15 = `cca2b41`: `ZeroMotionGeneratorConfig::confirmation_channels`, two new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the confirmation (section 5.11). All gates passed on the released tree |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -346,13 +349,49 @@ its real weight; my diagnosis in v0.2.12 (accelerometer biases that wander) was 
 - Gates on this tree: 24 suites / 276 tests, also under ASan + UBSan with no report; parity dump byte-identical;
   acceptance 24 / 24; 61,772 messages identical.
 
+### 5.11 A standstill confirmed by the receiver (released as v0.2.15)
+
+Full account: `docs/DESIGN.md` §7.28.
+
+- The defect: a car creeping at a steady speed is as quiet to the IMU as one that stands. The C++ generator
+  makes 480 messages on the recording, 23 of them with the reference above 0.05 m/s (fastest 0.52 m/s).
+- The receiver's velocity (F9T) at rest never exceeds 0.026 m/s; 0.05 m/s separates standing from all but the
+  slowest creeping (`prototypes/align-in-motion/confirm_check.py`).
+- Design, decided by how messages flow: the receiver's velocity reaches the preprocessors through the
+  controller's 2 s buffer, so the IMU's window cannot be confirmed when it closes. Instead each receiver epoch
+  is judged when it arrives: slow, and a second of quiet IMU on either side → zero velocity and zero rate
+  stamped at the epoch. Fast → counted, logged with the speed (INFO at the 1st, 10th, ...; DEBUG each). No
+  usable velocity for 2.5 s → the IMU alone as in v0.2.12. The existing reorder rule (buffer plus time bias,
+  2.5 s) is enough; the filter test checks that nothing is discarded.
+- Keys: `confirmation_channels`, `confirmation_speed` 0.05, `confirmed_velocity_sigma` 0.05 (north and east),
+  `confirmed_vertical_velocity_sigma` 0.2, `confirmation_max_sigma` 0.5, `confirmation_timeout` 2.5.
+- Measured (`confirm_sweep.py`, `docs/AIDING_MATRIX.md`): h / v RMS 1.53 / 1.61 m (IMU alone at 0.2 m/s:
+  1.57 / 1.61; at 0.05: 1.78 / 1.72); 60 s outages 10.3 (22.5) m against 10.7 (23.8); standing outage 1.8
+  against 2.1 m; 120 s unchanged. With constraints and after an alignment in motion: no resolvable difference.
+  The gain on this recording is small.
+- The vertical item of §5.10 is explained (`confirm_vertical.py`, `confirm_vertical2.py`, `accel_mean.py`,
+  `confirm_axes.py`): the receiver's height is −0.89 m off the reference on average (std 1.38), which is most
+  of every "vertical RMS" here; the vertical accelerometer reads about 2 mm/s² differently driving than
+  standing (eight of eight bracketed stretches, +0.7 to +3.7); a firm vertical zero velocity pins the standstill
+  bias and the solution sinks 0.13 m against the receiver. Vertical kept at 0.2 m/s → no cost.
+- Correction: the counts 420 / 396 / 24 / 21 in the v0.2.12 to v0.2.14 documents came from a Python replica that
+  spaces messages 1.2 s apart on the raw IMU stamps; the generator makes 480 (29 above 0.03 m/s, 23 above
+  0.05). Found by printing the generator's own stamps through a temporary hook (removed; outputs kept in
+  `prototypes/align-in-motion/zm/`). Lesson: a figure about the C++ belongs to the C++'s own output.
+- A robustness hole found on review and fixed test-first: one velocity message with a future time stamp held
+  up every later epoch (`AVelocityStampedInTheFutureDoesNotHoldUpTheOthers`).
+- Gates on this tree: 24 suites / 288 tests, also under ASan + UBSan with no report; parity dump byte-identical;
+  acceptance 24 / 24; 61,772 messages identical. The aiding matrix re-run with the final binary reproduces
+  `docs/aiding_matrix.json` exactly. v0.2.14's `ci` and `release` workflows are green.
+
 ## 6. Open decisions carried forward
+
 
 - `pos_vel_ins.json`: velocity time bias 150 ms where 250 ms fits against the IMU (350 ms against the reference
   solution). Change the default configuration, or leave it and use the measured figure in new configurations
   only? The two new configurations use 250 ms.
 - cobra-integrity: should an excluded lone receiver's fix be offered as an unassured last resort?
-- Bump the `pntos-cpp` pins to v0.2.10 (cobra-integrity v0.2.7, pnt-edge v0.2.8) and surface the new integrity
+- Bump the `pntos-cpp` pins to the latest tag (cobra-integrity v0.2.7, pnt-edge v0.2.8) and surface the new integrity
   status keys in pnt-edge.
 - Receiver signal indicators into the integrity monitor.
 - The items of `SESSION_NOTES_2026-11-15.md` §6 and §7 are unchanged.
