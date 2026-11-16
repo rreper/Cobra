@@ -5,8 +5,8 @@ layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion
 5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
 released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
 5.9), the IMU model for a driving car as v0.2.14 (section 5.10). A standstill confirmed by the receiver's
-velocity is released as v0.2.15 (section 5.11). An estimate of the receiver's time offset is the work that
-follows (section 5.12).
+velocity is released as v0.2.15 (section 5.11). The estimate of the receiver's time offset is committed on
+branch `time-offset` and pushed, not merged and not tagged (section 5.12).
 
 ## 1. What was asked
 
@@ -24,6 +24,7 @@ In order, after the v0.2.9 notes were committed:
 8. "commit, merge, tag v0.2.13 and push, then fix the IMU error model"
 9. "commit, merge, tag v0.2.14 and push, then do the receiver-confirmed standstill"
 10. "commit, merge, tag v0.2.15 and push, then do the receiver time-offset estimate"
+11. "commit and push" (the time-offset work: committed on its branch and pushed; no merge and no tag were asked for)
 
 ## 2. State at the end
 
@@ -36,6 +37,7 @@ In order, after the v0.2.9 notes were committed:
 | Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
 | Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
 | Branch `confirmed-standstill` | merged into `main` (fast-forward) as v0.2.15 = `cca2b41`: `ZeroMotionGeneratorConfig::confirmation_channels`, two new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the confirmation (section 5.11). All gates passed on the released tree |
+| Branch `time-offset` | commit `26eb184` on top of `b5741a5`, pushed to `origin/time-offset`; not merged into `main`, no tag, project version still 0.2.15: `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`, seven new alignment rows, both alignment example configurations with the estimate (section 5.12). All gates passed on the committed tree |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -384,11 +386,44 @@ Full account: `docs/DESIGN.md` §7.28.
   acceptance 24 / 24; 61,772 messages identical. The aiding matrix re-run with the final binary reproduces
   `docs/aiding_matrix.json` exactly. v0.2.14's `ci` and `release` workflows are green.
 
+### 5.12 The receiver's time offset, found by the alignment (branch `time-offset`, committed and pushed)
+
+Full account: `docs/DESIGN.md` §7.29.
+
+- Prototype first (`prototypes/align-in-motion/tau_est.py`, on `oba3.py`): the offset as one more column of the
+  linear step; one window finds it to 0.03 to 0.07 s. Then C++, where the window is integrated at the shifted
+  epochs exactly and only the correction is linearised.
+- `solve()` became `solve_window<bool>`: with the offset the matrices are one larger; without it the template
+  instantiates the old fixed sizes, and the v0.2.15 alignment matrix (11 rows, 704 runs) comes out identical
+  to the last stored digit. That comparison is the proof that the option is off when it is off.
+- The first version handed over as soon as the heading sigma allowed and found 0.19 s for 0.25 s on the
+  simulated drives (shrinkage towards the prior's zero while the data has said little), heading 3.6°. Run
+  longer, the same estimator converges on 0.25 s. Hence the second key, `time_offset_sigma` (0.08 s): no
+  hand-over before the offset is known that well. Simulated: 0.248 s, 1.7°. Recording: no extra time for the
+  receiver's velocity, a third longer from position differences.
+- Recording, prior 0.3 s: heading at the hand-over 1.20 to 1.31° RMS at configured biases of 0, 150, 250 and
+  350 ms (4.41, 3.06, 1.61, 2.54° as configured); the velocity is 0.275 to 0.288 s old; the fixes 0.073 s.
+- The receiver against itself (`receiver_self_lag.py`): velocity 0.197 s older than its fixes; the alignment's
+  two figures differ by 0.211 s. Against the reference the velocity is 0.35 s old; my position comparisons
+  with the reference disagree with each other (a 2.3 m along-track offset aliases with a lag) and are not in
+  the documents as a result.
+- Tried and taken out: with the velocity from fixes, applying the offset to the fix the hand-over position
+  starts from. Right on a simulated drive (2.6 m less at the hand-over), but the filter goes on reading the
+  next fixes with the configured time bias, and on the recording the position a minute later was 1.79 m
+  instead of 1.63 m. The alignment reports the offset; the configuration applies it.
+- The filter after the hand-over does not use the offset; the log line reports it. Offsets as filter states are
+  the open item.
+- Gates on this tree: 24 suites / 295 tests, also under ASan + UBSan with no report; parity dump byte-identical;
+  acceptance 24 / 24; 61,772 messages identical. v0.2.15's `ci` and `release` workflows are green.
+
 ## 6. Open decisions carried forward
 
+- Merge the `time-offset` branch into `main` and tag it (it would be v0.2.16: bump `meson.build`, retitle the
+  PROGRESS entry, gates on that tree).
 
-- `pos_vel_ins.json`: velocity time bias 150 ms where 250 ms fits against the IMU (350 ms against the reference
-  solution). Change the default configuration, or leave it and use the measured figure in new configurations
+
+- `pos_vel_ins.json`: velocity time bias 150 ms where the alignment now measures 280 ms against the IMU (350 ms
+  against the reference solution); the fixes measure 70 ms against the IMU where every configuration applies 150. Change the default configuration, or leave it and use the measured figure in new configurations
   only? The two new configurations use 250 ms.
 - cobra-integrity: should an excluded lone receiver's fix be offered as an unassured last resort?
 - Bump the `pntos-cpp` pins to the latest tag (cobra-integrity v0.2.7, pnt-edge v0.2.8) and surface the new integrity
