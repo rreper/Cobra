@@ -968,6 +968,7 @@ void StandardOrchestrationConfig::to_registry(api::Mediator& m) const {
   w.scalar("publish_after_update", publish_after_update);
   w.scalar("max_filter_lag", max_filter_lag);
   if (measurement_reorder_s != 0.0) w.scalar("measurement_reorder_s", measurement_reorder_s);
+  if (initialization_imu_replay_s != 0.0) w.scalar("initialization_imu_replay_s", initialization_imu_replay_s);
   w.nested("stream_config", stream_config);
 }
 
@@ -985,6 +986,7 @@ std::optional<StandardOrchestrationConfig> StandardOrchestrationConfig::from_reg
   c.publish_after_update = r.optional<bool>("publish_after_update").value_or(false);
   c.max_filter_lag = r.optional<double>("max_filter_lag").value_or(ControllerConfig::kDefaultBufferLengthSec);
   c.measurement_reorder_s = r.optional<double>("measurement_reorder_s").value_or(0.0);
+  c.initialization_imu_replay_s = r.optional<double>("initialization_imu_replay_s").value_or(0.0);
   if (!r.ok()) return std::nullopt;
 
   auto single = [&](const char* key, bool required) -> std::optional<std::string> {

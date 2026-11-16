@@ -589,6 +589,14 @@ struct StandardOrchestrationConfig final : BaseConfig {
   /// 2 s buffer. A shorter one orders nothing that passed the buffer and is reported at start-up (v0.2.10 said
   /// 0.5 s would do there; it does not). At most 5 s. Written only when set.
   double measurement_reorder_s = 0.0;
+  /// C++ addition, 0 = off (Cobra: an IMU message that arrives while the initialization has no solution is
+  /// dropped). An initial solution can be older than the IMU: the PVA of "pva_message" passes the controller's
+  /// buffer and is two seconds old when it arrives. The inertial is then created two seconds in the past and
+  /// mechanizes its first sample across the hole, as free fall. With a value, the IMU messages of that many
+  /// seconds are kept until the initialization has its solution, and those after the solution's time are given
+  /// to the new inertial before anything else, the first of them cut to the part after that time. It has to
+  /// cover how old the initial solution can be: 2.5 s with the standard 2 s buffer. Written only when set.
+  double initialization_imu_replay_s = 0.0;
   StreamConfig stream_config = default_stream_config();
 
   const std::string& group() const override { return group_; }

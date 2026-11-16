@@ -91,6 +91,7 @@ void StandardOrchestrationPlugin::store_config_data(const StandardOrchestrationC
                                 " s) is not longer than the controller's buffer (" + std::to_string(cfg.max_filter_lag) +
                                 " s): measurements that pass the buffer are released at once and are not put in order. "
                                 "Use the buffer length plus the largest time bias.");
+  imu_replay_ns_ = static_cast<std::int64_t>(std::max(0.0, cfg.initialization_imu_replay_s) * 1e9);
   feedback_config_ = cfg.feedback_config;
 }
 
@@ -142,7 +143,11 @@ void StandardOrchestrationPlugin::try_initialize() {
   if (!initializer_ || !orch::initialization_ready(*initializer_)) return;
   if (!generate_initial_inertial_solution()) return;
   if (!initialize_filter()) return;
-  if (fusion_engine_) filter_start_ns_ = fusion_engine_->time().elapsed_nsec;
+  if (fusion_engine_) {
+    filter_start_ns_ = fusion_engine_->time().elapsed_nsec;
+    replay_imu_since(fusion_engine_->time());
+  }
+  pre_init_imu_.clear();
   send_inertial_aux_to_pinson();
 }
 
@@ -565,6 +570,7 @@ void StandardOrchestrationPlugin::process_pntos_message(const Message& message, 
   for (const auto& msg : *msgs) {
     const std::string& channel = msg.source_identifier;
     if (!init_solution_) {
+      if (imu_replay_ns_ > 0 && contains(inertial_channels_, channel)) keep_for_replay(msg);
       if (contains(alignment_channels_, channel)) {
         initializer_->process_pntos_message(msg);
         try_initialize();
@@ -587,6 +593,55 @@ void StandardOrchestrationPlugin::process_pntos_message(const Message& message, 
   }
   if (reorder_ns_ > 0) release_pending();
   propagate_during_outage();
+}
+
+void StandardOrchestrationPlugin::keep_for_replay(const Message& msg) {
+  if (!msg.wrapped_message) return;
+  const auto tov = utils::time_of_validity(*msg.wrapped_message);
+  if (!tov) return;
+  pre_init_imu_.push_back(msg);
+  while (pre_init_imu_.size() > 1) {
+    const auto front = utils::time_of_validity(*pre_init_imu_.front().wrapped_message);
+    if (front && tov->elapsed_nsec - front->elapsed_nsec <= imu_replay_ns_) break;
+    pre_init_imu_.pop_front();
+  }
+}
+
+void StandardOrchestrationPlugin::replay_imu_since(Timestamp initial_time) {
+  // The inertial was created at the initial solution's time. What the IMU sent since then is given to it now,
+  // in order. The sample that straddles that time carries increments of a whole interval; only the part after
+  // the initial time belongs to the inertial (a rate applies to whatever time is left as it is).
+  if (!inertial_ || pre_init_imu_.empty()) return;
+  std::optional<std::int64_t> previous;
+  std::uint64_t given = 0;
+  for (const auto& kept : pre_init_imu_) {
+    const std::int64_t t = utils::time_of_validity(*kept.wrapped_message)->elapsed_nsec;
+    if (t <= initial_time.elapsed_nsec) {
+      previous = t;
+      continue;
+    }
+    Message msg = kept;
+    if (given == 0 && previous && *previous < initial_time.elapsed_nsec && t > *previous) {
+      if (auto imu = kept.as<aspn23_eigen::MeasurementImu>(); imu && imu->get_imu_type() == ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED) {
+        const double part = static_cast<double>(t - initial_time.elapsed_nsec) / static_cast<double>(t - *previous);
+        auto cut = std::make_shared<aspn23_eigen::MeasurementImu>(*imu);
+        cut->set_meas_accel(Eigen::Matrix<double, Eigen::Dynamic, 1>(imu->get_meas_accel() * part));
+        cut->set_meas_gyro(Eigen::Matrix<double, Eigen::Dynamic, 1>(imu->get_meas_gyro() * part));
+        msg = Message(cut, kept.source_identifier);
+      }
+    }
+    inertial_->process_pntos_message(msg);
+    ++given;
+  }
+  replayed_imu_ += given;
+  if (given > 0) {
+    const double span = (utils::time_of_validity(*pre_init_imu_.back().wrapped_message)->elapsed_nsec - initial_time.elapsed_nsec) * 1e-9;
+    log(LoggingLevel::INFO, "The initial solution is " + std::to_string(span) + " s older than the IMU: " + std::to_string(given) +
+                                " IMU message(s) kept since then were given to the inertial.");
+    if (!previous)  // nothing kept from before the initial time: the window may not reach back far enough
+      log(LoggingLevel::WARN, "initialization_imu_replay_s (" + std::to_string(imu_replay_ns_ * 1e-9) +
+                                  " s) may be too short: no IMU message from before the initial solution's time was kept.");
+  }
 }
 
 void StandardOrchestrationPlugin::apply_measurement(const Message& msg) {

@@ -12,6 +12,7 @@
 #include "test_support.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -696,4 +697,109 @@ TEST(Filter, ZeroRateAndZeroVelocityUpdatesHoldAStandingVehicle) {
   EXPECT_LT(s.speed_max, 0.05);  // from 10 s on: the first update needs the 2 s window and the 2.5 s reorder window
   std::cout << "with zero-rate and zero-velocity updates: heading drift " << s.heading_drift_deg << " deg, speed up to " << s.speed_max
             << " m/s, " << s.rate_updates << " rate and " << s.velocity_updates << " velocity updates\n";
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The initial solution is older than the IMU (StandardOrchestrationConfig::initialization_imu_replay_s)
+
+namespace {
+struct StartUp {
+  int solutions = 0;
+  double fall = 0;       ///< largest vertical speed of the solution in its first 10 s, m/s (the car stands)
+  double altitude = 0;   ///< largest altitude error against the reference in those 10 s, m
+  double speed = 0;      ///< largest horizontal speed in those 10 s, m/s
+  int errors = 0;
+  int replayed = 0;      ///< IMU messages the orchestration says it gave to the inertial after the initialization
+};
+/// The 60 s log (the car stands) with the filter started from the first message of the reference solution
+/// ("pva_message"). That PVA passes the controller's buffer like any measurement and reaches the orchestration
+/// two seconds behind the IMU.
+StartUp start_from_a_pva_message(double replay_s, const char* gap_policy = nullptr) {
+  std::ifstream in(src("configs/pos_ins.json"));
+  cobra::jsoncfg::json j;
+  in >> j;
+  const char* kTruth = "/sensor/ins-d/pva";
+  const char* kImu = "/sensor/vn-100/imu";
+  j["app"]["initialization"] = "pva_message";
+  j["app"]["logging_level"] = "INFO";
+  for (auto& c : j["configs"]) {
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    c["alignment_channels"] = {kTruth};
+    c["alignment_config"] = {{"type", "PvaMessageInitializationConfig"},
+                             {"group", "config/default/alignment"},
+                             {"initial_pva_channel", kTruth},
+                             {"initial_accel_bias_sigma", {0.072, 0.072, 0.072}},
+                             {"initial_gyro_bias_sigma", {3e-3, 3e-3, 3e-3}},
+                             {"initial_pva_sigma", {1.0, 1.0, 1.0, 0.1, 0.1, 0.1, 0.01, 0.01, 0.02}}};
+    if (replay_s > 0) c["initialization_imu_replay_s"] = replay_s;
+    if (gap_policy) c["inertial_config"]["imu_gap_policy"] = gap_policy;
+  }
+  StartUp out;
+  cobra::utils::set_log_sink([&](api::LoggingLevel level, const std::string&, const std::string& m) {
+    if (level == api::LoggingLevel::ERROR) ++out.errors;
+    const auto at = m.find(" IMU message(s) kept since then were given to the inertial");
+    if (at != std::string::npos) out.replayed = std::atoi(m.substr(m.rfind(' ', at - 1) + 1).c_str());
+  });
+  std::vector<std::pair<std::int64_t, double>> reference;  // time, altitude
+  std::vector<std::array<double, 4>> solution;             // time (s), altitude, down speed, horizontal speed
+  cobra::app::RunOptions o;
+  o.progress = false;
+  {
+    cobra::Filter f(cobra::jsoncfg::app_config_from_json(j), o);
+    f.set_solution_callback([&](const api::Message& m) {
+      if (auto p = m.as<cobra::utils::PVA>())
+        solution.push_back({p->get_time_of_validity().get_elapsed_nsec() * 1e-9, p->get_p3(), p->get_v3(), std::hypot(p->get_v1(), p->get_v2())});
+    });
+    cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+    while (auto ev = r.next()) {
+      if (ev->channel != kImu && ev->channel != "/sensor/ublox-ZED-F9T/position" && ev->channel != kTruth) continue;
+      auto msg = cobra::lcm::decode(ev->data);
+      if (ev->channel == kTruth)
+        if (auto p = std::dynamic_pointer_cast<cobra::utils::PVA>(msg)) reference.emplace_back(p->get_time_of_validity().get_elapsed_nsec(), p->get_p3());
+      f.push(msg, ev->channel);
+    }
+    f.stop();
+  }
+  cobra::utils::set_log_sink(nullptr);
+  out.solutions = static_cast<int>(solution.size());
+  for (const auto& row : solution) {
+    if (row[0] > solution.front()[0] + 10.0) break;
+    auto it = std::lower_bound(reference.begin(), reference.end(), static_cast<std::int64_t>(row[0] * 1e9),
+                               [](const auto& a, std::int64_t t) { return a.first < t; });
+    if (it == reference.end()) --it;
+    out.fall = std::max(out.fall, std::abs(row[2]));
+    out.altitude = std::max(out.altitude, std::abs(row[1] - it->second));
+    out.speed = std::max(out.speed, row[3]);
+  }
+  return out;
+}
+}  // namespace
+
+TEST(Filter, AnInitialSolutionOlderThanTheImuLeavesAHoleByDefault) {
+  // Cobra's behaviour, kept as the default: IMU messages that arrive before the initialization has a solution
+  // are dropped. The solution of "pva_message" is two seconds old when it arrives; the first IMU sample after it
+  // is mechanized across those two seconds, as free fall.
+  const StartUp s = start_from_a_pva_message(0.0);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_GT(s.fall, 10.0) << s.fall;
+  EXPECT_GT(s.altitude, 5.0) << s.altitude;
+  EXPECT_EQ(s.replayed, 0);
+  std::cout << "started from a PVA message, default: the solution falls at up to " << s.fall << " m/s, altitude error up to " << s.altitude
+            << " m, horizontal speed up to " << s.speed << " m/s\n";
+  const StartUp h = start_from_a_pva_message(0.0, "hold");
+  std::cout << "with imu_gap_policy hold: " << h.fall << " m/s, " << h.altitude << " m, " << h.speed << " m/s\n";
+}
+
+TEST(Filter, ImuKeptBeforeTheInitializationClosesTheHole) {
+  // With initialization_imu_replay_s the orchestration keeps the IMU messages of that many seconds while the
+  // initialization has no solution, and gives those after the solution's time to the new inertial.
+  const StartUp s = start_from_a_pva_message(2.5);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_EQ(s.errors, 0);
+  EXPECT_GE(s.replayed, 195);  // two seconds at 100 Hz, give or take the samples around the PVA
+  EXPECT_LE(s.replayed, 215);
+  EXPECT_LT(s.fall, 0.5) << s.fall;        // what an unknown accelerometer bias of 60 mm/s^2 does before it is found
+  EXPECT_LT(s.altitude, 2.0) << s.altitude;
+  EXPECT_LT(s.speed, 0.5) << s.speed;
+  std::cout << "with the IMU replayed (" << s.replayed << " messages): " << s.fall << " m/s, altitude error up to " << s.altitude << " m, horizontal speed up to " << s.speed << " m/s\n";
 }

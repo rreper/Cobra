@@ -2,6 +2,23 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.13: the start-up hole of the pva_message initialization
+
+- Asked for: the gap found while testing the zero-motion updates. The orchestration drops IMU messages until the
+  initialization has a solution. The PVA of `pva_message` passes the controller's buffer and is two seconds old
+  when it arrives; the inertial is created two seconds in the past and mechanizes the hole as free fall.
+  Measured: on the 60 s recording the solution falls at up to 15.8 m/s and is 59 m off in altitude within ten
+  seconds; started while driving at nine points of the full recording, 62 to 73 m in altitude and 5 to 13 m
+  horizontally. Inherited from Cobra, so kept as the default.
+- `StandardOrchestrationConfig::initialization_imu_replay_s` (DESIGN.md §7.26): the IMU messages of that many
+  seconds are kept until the initialization has its solution, and those after the solution's time go to the new
+  inertial first, the straddling one cut to its part. With 2.5 s: 0.27 m/s and 0.75 m on the 60 s recording;
+  0.5 to 1.2 m in altitude and 0.6 to 1.5 m horizontally for the nine starts while driving.
+- `imu_gap_policy: "hold"` is not the answer: it lessens the fall to 5.8 m/s on the standing car (why not to
+  zero I have not established) and would hold one sample across two seconds of a moving one.
+- 24 suites / 275 tests. Default mode unchanged: parity dump byte-identical, acceptance 24 / 24, the 61,772
+  output messages identical to v0.2.12.
+
 ## 2026-11-16 — v0.2.12: standing still, zero-velocity and zero-rate updates
 
 - Asked for: zero-rate updates. A standing vehicle's heading ran away with the gyro bias (8.9 deg in a minute with

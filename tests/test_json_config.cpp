@@ -588,3 +588,51 @@ TEST(JsonConfig, ZeroMotionGeneratorAndZeroRateProcessor) {
         if (p["type"] == "ZeroMotionGeneratorConfig") p.erase("rate_channel");
   EXPECT_THROW(jsoncfg::app_config_from_json(neither), std::runtime_error);  // nothing to generate
 }
+
+TEST(JsonConfig, InitializationImuReplayKey) {
+  using namespace cobra;
+  auto src = [](const char* rel) {
+    const char* s = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(s ? s : "..") + "/" + rel;
+  };
+  std::ifstream in(src("configs/pos_ins.json"));
+  jsoncfg::json j;
+  in >> j;
+  auto orch_of = [](const AppConfig& app) {
+    const StandardOrchestrationConfig* orch = nullptr;
+    for (const auto& c : app.configs)
+      if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) orch = o;
+    return orch;
+  };
+  // absent by default, in the config and in the text written from it
+  const auto plain = jsoncfg::app_config_from_json(j);
+  ASSERT_NE(orch_of(plain), nullptr);
+  EXPECT_DOUBLE_EQ(orch_of(plain)->initialization_imu_replay_s, 0.0);
+  EXPECT_EQ(jsoncfg::app_config_to_json(plain).dump().find("initialization_imu_replay_s"), std::string::npos);
+  auto with = [&](double value) {
+    jsoncfg::json k = j;
+    for (auto& c : k["configs"])
+      if (c["type"] == "StandardOrchestrationConfig") c["initialization_imu_replay_s"] = value;
+    return k;
+  };
+  const auto set = jsoncfg::app_config_from_json(with(2.5));
+  EXPECT_DOUBLE_EQ(orch_of(set)->initialization_imu_replay_s, 2.5);
+  const auto text = jsoncfg::app_config_to_json(set);
+  EXPECT_NE(text.dump().find("\"initialization_imu_replay_s\":2.5"), std::string::npos);
+  EXPECT_DOUBLE_EQ(orch_of(jsoncfg::app_config_from_json(text))->initialization_imu_replay_s, 2.5);
+  EXPECT_THROW(jsoncfg::app_config_from_json(with(-1.0)), std::runtime_error);
+  // and through the registry, where the orchestration reads it
+  TestMediator med;
+  StandardRegistryPlugin reg{"registry", {}};
+  reg.init_plugin(std::nullopt, &med);
+  med.set_registry(reg.new_registry());
+  orch_of(plain)->to_registry(med);
+  auto back = StandardOrchestrationConfig::from_registry(med);
+  ASSERT_TRUE(back);
+  EXPECT_DOUBLE_EQ(back->initialization_imu_replay_s, 0.0);
+  EXPECT_FALSE(med.registry().batch(StandardOrchestrationConfig::kGroup)->get("initialization_imu_replay_s").has_value());
+  orch_of(set)->to_registry(med);
+  back = StandardOrchestrationConfig::from_registry(med);
+  ASSERT_TRUE(back);
+  EXPECT_DOUBLE_EQ(back->initialization_imu_replay_s, 2.5);
+}

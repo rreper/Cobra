@@ -4,6 +4,7 @@
 #include <pntos/cobra/config/configs.hpp>
 #include <pntos/cobra/orchestration/OrchestrationUtils.hpp>
 
+#include <deque>
 #include <map>
 #include <memory>
 
@@ -113,6 +114,12 @@ class StandardOrchestrationPlugin : public api::OrchestrationPlugin {
   std::multimap<std::int64_t, api::Message> pending_;
   std::map<std::string, std::uint64_t> discarded_old_;  ///< per channel: measurements dropped as older than the filter
   std::int64_t filter_start_ns_ = 0;                    ///< filter time when the alignment finished
+  // initialization_imu_replay_s: IMU messages kept while the initialization has no solution
+  std::int64_t imu_replay_ns_ = 0;
+  std::deque<api::Message> pre_init_imu_;
+  std::uint64_t replayed_imu_ = 0;
+  void keep_for_replay(const api::Message& message);
+  void replay_imu_since(api::Timestamp initial_time);
   void apply_measurement(const api::Message& msg);
   void release_pending();
   void note_discarded(const api::Message& msg);

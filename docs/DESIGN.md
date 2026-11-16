@@ -1103,11 +1103,44 @@ believed during an outage would be a large error. This is for road vehicles; bot
 innovation gate (the examples use 0.999), which catches a wrong "zero" as long as the filter knows its velocity.
 Creeping below 0.5 m/s is not told from standing. The thresholds are those of one car and one IMU.
 
-Found on the way, not fixed: with the `pva_message` initialization the PVA reaches the orchestration through the
-controller's buffer, two seconds behind the IMU, and the first IMU sample after it is mechanized across that gap.
-Three seconds after the start the solution falls at 19.5 m/s, in the default mode; `imu_gap_policy: "hold"`
-reduced it in one configuration (5.8 m/s) and not in another, which I have not followed up. The standing-still
-tests therefore start from the `manual` initialization.
+Found on the way: with the `pva_message` initialization the PVA reaches the orchestration through the
+controller's buffer, two seconds behind the IMU, and the first IMU sample after it is mechanized across that
+gap as free fall. §7.26 deals with it; the standing-still tests start from the `manual` initialization, which
+has no such gap.
+
+### 7.26 An initial solution older than the IMU (`StandardOrchestrationConfig::initialization_imu_replay_s`)
+
+The orchestration drops every IMU message that arrives while the initialization has no solution; the inertial
+is created from the initial solution and takes the IMU from then on. That is harmless as long as the solution
+is as new as the IMU, which holds for the alignments that are fed IMU messages themselves (their solution is
+stamped with the last one). It does not hold for `pva_message`: the PVA is a measurement like any other, passes
+the controller's buffer, and is two seconds old when it reaches the orchestration, while the IMU, which the
+controller passes on at once, is two seconds ahead. The inertial is created two seconds in the past, its first
+sample arrives across a hole of two seconds, and it mechanizes that hole with the increments of one sample: as
+free fall.
+
+- `Filter.AnInitialSolutionOlderThanTheImuLeavesAHoleByDefault` pins it on the 60 s recording (the car stands):
+  the published solution falls at up to 15.8 m/s and is 59 m off in altitude within its first ten seconds.
+  `imu_gap_policy: "hold"` of §7.22 lessens it (5.8 m/s, 28 m) but does not remove it, and for a moving vehicle
+  holding one sample across two seconds would be wrong anyway.
+- Started while driving, at nine points of the full recording: within the first ten seconds 62 to 73 m off in
+  altitude and 5 to 13 m horizontally, with a vertical velocity error of 15 to 20 m/s, before the receiver's
+  fixes pull it back.
+
+With `initialization_imu_replay_s` > 0 the orchestration keeps the IMU messages of that many seconds while the
+initialization has no solution. When the solution comes, the inertial is created as before, and the kept
+messages that are later than the solution's time are given to it in order, before anything else; the first of
+them, whose interval straddles that time, is cut to the part after it (integrated increments are scaled, a rate
+applies as it is). One INFO line says how old the solution was and how many messages were given; a WARN if
+nothing from before the solution's time had been kept, which means the window is too short. The value has to
+cover how old the initial solution can be: 2.5 s with the standard 2 s buffer.
+
+- The same start on the 60 s recording: 200 messages replayed, vertical speed at most 0.27 m/s (an accelerometer
+  bias the filter has yet to find), altitude within 0.75 m (`Filter.ImuKeptBeforeTheInitializationClosesTheHole`).
+- The nine starts while driving: 0.5 to 1.2 m in altitude, 0.6 to 1.5 m horizontally, 0.2 to 0.3 m/s vertically.
+
+Off by default, the key is written only when set, and with an initialization whose solution is as new as the
+IMU there is nothing to replay. No shipped configuration uses `pva_message`.
 
 ## 8. Deviations from the Python original
 
@@ -1140,6 +1173,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 23 | Initialization `in_motion_align` (`InMotionAlignment`, `InMotionAlignInitializationPlugin`, `InMotionAlignmentConfig`); `AlignBase::accepts_velocity()` and `summary()`, by which the alignment strategy passes a `MeasurementVelocity` on and logs one INFO line (§7.24) | — | C++ additions; the static alignments answer as before (a velocity message is still "Could not convert message", no summary line) |
 | 24 | A `measurement_reorder_s` that is not longer than the controller's buffer is a WARN at start-up | — | such a window orders nothing that passed the buffer; v0.2.10 recommended one (§7.23) |
 | 25 | `inertial::StationarityDetector`; third preprocessor of the advanced plugin, `zero_motion_generator` (`ZeroMotionGeneratorConfig`); eleventh measurement processor `pinson_zero_rate` (`PinsonZeroRateMPConfig`); aux channel `INERTIAL_SENSOR_ERRORS`, by which the orchestration hands a processor the biases the inertial is applying (§7.25) | — | C++ additions; nothing is generated, created or handed over unless a configuration names them |
+| 26 | `StandardOrchestrationConfig::initialization_imu_replay_s`: IMU messages received before the initialization has a solution are kept and those after the solution's time given to the new inertial (§7.26) | they are dropped | off by default, key written only when set |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1246,11 +1280,10 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.25, in the order of what a vehicle installation misses first: an estimate of the receiver's time
+Open after §7.26, in the order of what a vehicle installation misses first: an estimate of the receiver's time
 offset (the largest error source of the alignment in motion); an IMU error model that holds under driving
-(accelerometer bias wander, scale factors), so that the zero velocity can be given its real weight; the start-up
-gap of the `pva_message` initialization (§7.25); measurement weighting that adapts to a receiver whose reported
-covariance is optimistic; tightly coupled GNSS.
+(accelerometer bias wander, scale factors), so that the zero velocity can be given its real weight; measurement
+weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport

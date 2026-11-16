@@ -496,6 +496,9 @@ StandardOrchestrationConfig orch_from(const json& jc) {
   c.max_filter_lag = get_or(jc, "max_filter_lag", ControllerConfig::kDefaultBufferLengthSec);
   c.measurement_reorder_s = get_or(jc, "measurement_reorder_s", 0.0);
   if (!(c.measurement_reorder_s >= 0.0)) throw std::runtime_error("StandardOrchestrationConfig: measurement_reorder_s must be >= 0");
+  c.initialization_imu_replay_s = get_or(jc, "initialization_imu_replay_s", 0.0);
+  if (!(c.initialization_imu_replay_s >= 0.0))
+    throw std::runtime_error("StandardOrchestrationConfig: initialization_imu_replay_s must be >= 0");
   if (jc.contains("stream_config")) c.stream_config = stream_config_from(jc.at("stream_config"));
   return c;
 }
@@ -517,6 +520,7 @@ json orch_to(const StandardOrchestrationConfig& c) {
   o["publish_after_update"] = c.publish_after_update;
   o["max_filter_lag"] = c.max_filter_lag;
   if (c.measurement_reorder_s != 0.0) o["measurement_reorder_s"] = c.measurement_reorder_s;
+  if (c.initialization_imu_replay_s != 0.0) o["initialization_imu_replay_s"] = c.initialization_imu_replay_s;
   o["stream_config"] = stream_config_to(c.stream_config);
   return o;
 }
