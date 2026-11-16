@@ -2,6 +2,35 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.11: alignment in motion; the reorder window of v0.2.10 corrected
+
+- Asked for: alignment in motion. Until now the heading came from the configuration file or a PVA message; the
+  VN-100 cannot find north standing still (turn-on bias 0.16 deg/s about the vertical, forty times the Earth's
+  rate). Prototyped in Python on the recorded drive first, then `inertial::InMotionAlignment`, initialization
+  `in_motion_align`, `InMotionAlignmentConfig` (DESIGN.md §7.24): the attitude from the receiver's velocity and
+  the IMU as Wahba's problem, with the gyro and accelerometer biases estimated along; no assumption about the
+  mounting or the direction of travel; hand-over at the last IMU sample with covariance and biases.
+- Recorded drive, switched on at 64 times (`tools/run_alignment_matrix.py`, `docs/ALIGNMENT_MATRIX.md`): aligned
+  64 of 64, in 18 s median (42 s for 90 %; longer only while the car stands), heading 1.6 deg RMS (3.8 worst)
+  with a sigma of 2.6, tilt 0.3 deg. From position fixes alone: 30 s, 2.7 deg (5.2).
+- Found on the way: (1) the receiver's velocity is 250 ms old, not the 150 ms the example configurations give
+  both channels (3.1 deg RMS at 150 ms, 1.6 at 250, 2.5 at 350). (2) Leaving the accelerometer bias out, as the
+  first version did, lets 3 milli-g pass for a vertical gyro bias on a gentle drive: 12.4 deg off with 3 claimed
+  (`InMotionAlignment.TheGyroBiasHasToBeEstimatedAlong`). (3) **v0.2.10 was wrong about
+  `measurement_reorder_s`**: a window not longer than the controller's 2 s buffer orders nothing that passed the
+  buffer, and the released `pos_ins_full.json` dropped fixes with the recommended 0.5 s. Now a WARN at start-up,
+  2.5 s in the documents and the regenerated examples (`Filter.ReorderWindowMustExceedTheControllerBuffer`); the
+  aiding table moved by at most 0.4 m (worst cases; the means by 0.2 m).
+- After the hand-over, switched on under way, the vertical gyro bias is still unknown and the plain filter's
+  heading drifts for a minute (RMS 2.4 deg after 10 s, 3.1 after 30 s, 1.0 after 120 s; 9 to 11 deg worst). With
+  the ground-vehicle constraints it holds (1.2, 1.3, 0.6 deg). `configs/pos_ins_align_in_motion.json` and
+  `configs/pos_ins_ground_vehicle.json` (alignment and constraints: receiver and IMU, nothing else).
+- 24 suites / 262 tests (new suite `alignment_in_motion`, 16). Default mode unchanged: parity dump
+  byte-identical, acceptance 24 / 24, the 61,772 output messages identical to v0.2.10.
+- Not done: zero-velocity / zero-rate updates from a stationarity detector (they would give the vertical gyro
+  bias at every stop), an estimate of the receiver's time offset, the heading / gyro-bias correlation in the
+  hand-over, adaptive measurement weighting, tightly coupled GNSS.
+
 ## 2026-11-15 — v0.2.10: fusion core, measurement order and odometry with calibration states
 
 - Asked for: a filter that performs with GNSS, a second (military-code) receiver, IMU, odometry and more.

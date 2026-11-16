@@ -85,6 +85,12 @@ void StandardOrchestrationPlugin::store_config_data(const StandardOrchestrationC
     log(LoggingLevel::WARN, "measurement_reorder_s (" + std::to_string(cfg.measurement_reorder_s) + " s) is limited to 5 s.");
     reorder_ns_ = kMaxReorderNs;
   }
+  if (reorder_ns_ > 0 && reorder_ns_ <= buffer_time_ns_)
+    // The window counts back from the IMU's time; what passed the controller's buffer is already that far behind.
+    log(LoggingLevel::WARN, "measurement_reorder_s (" + std::to_string(cfg.measurement_reorder_s) +
+                                " s) is not longer than the controller's buffer (" + std::to_string(cfg.max_filter_lag) +
+                                " s): measurements that pass the buffer are released at once and are not put in order. "
+                                "Use the buffer length plus the largest time bias.");
   feedback_config_ = cfg.feedback_config;
 }
 

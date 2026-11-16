@@ -315,7 +315,7 @@
         "type": "StreamConfig"
       },
       "type": "StandardOrchestrationConfig",
-      "measurement_reorder_s": 0.5
+      "measurement_reorder_s": 2.5
     }
   ]
 }

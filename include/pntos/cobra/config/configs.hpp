@@ -494,6 +494,28 @@ struct ManualHeadingAlignmentConfig final : BaseConfig {
   static std::optional<ManualHeadingAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
 };
 
+/// Alignment in motion (C++ addition, initialization "in_motion_align"; initialization/InMotionAlignment.hpp): the
+/// attitude with the heading, and the gyro bias, from the receiver's velocity and the IMU while the vehicle
+/// drives. The alignment channels are the IMU and the receiver's position, plus its velocity channel when it has
+/// one; without a velocity channel the velocity is taken from the differences of consecutive fixes.
+struct InMotionAlignmentConfig final : BaseConfig {
+  std::string group_;
+  ImuConfig imu_model;
+  double heading_sigma = 0.05235987755982989;  ///< rad (3 degrees); aligned once the heading sigma is below it
+  double max_window = 30.0;                    ///< s of data one solution uses
+  std::int64_t min_epochs = 5;                 ///< velocity epochs after the first before a solution counts
+  Vec3 lever_arm{};                            ///< m, antenna relative to the IMU, platform frame
+  std::string velocity_source = "auto";        ///< auto | velocity | position
+  double position_difference_sigma = 0.15;     ///< m, horizontal, of the difference of two consecutive fixes
+  double stationary_speed = 0.25;              ///< m/s; below it, with a quiet gyro, the vehicle stands
+  double stationary_rate = 0.02;               ///< rad/s
+  double stationary_time = 3.0;                ///< s of standstill before the gyro mean is taken as the bias
+  std::optional<double> start_time;            ///< s; messages before it are ignored
+  const std::string& group() const override { return group_; }
+  void to_registry(api::Mediator& m) const override;
+  static std::optional<InMotionAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
+};
+
 // ----------------------------------------------------------------------------- orchestration
 
 /// Configuration of StandardOrchestrationPlugin (group "config/orchestration").
@@ -523,12 +545,13 @@ struct StandardOrchestrationConfig final : BaseConfig {
   bool publish_after_update = false;
   double max_filter_lag = ControllerConfig::kDefaultBufferLengthSec;  ///< s
   /// C++ addition, 0 = off (Cobra: a measurement older than the filter is discarded, and the filter is wherever
-  /// the last measurement took it). With a window, measurements wait this long behind the IMU's time and are
-  /// applied in the order of their (preprocessed) time stamps, so that a receiver with a latency or a time bias
-  /// is not starved by a faster stream such as an odometer. It has to cover how late the slowest stream is
-  /// against the fastest: the largest time bias when every measurement passes the controller's buffer (0.5 s is
-  /// plenty), the buffer length on top when measurements are generated from the IMU clock, which the controller
-  /// passes on at once (2.5 s with the standard 2 s buffer). At most 5 s. Written only when set.
+  /// the last measurement took it). With a window, a measurement is applied once the IMU's time is this far
+  /// past its (preprocessed) time stamp, in the order of the time stamps, so that a receiver with a latency or a
+  /// time bias is not starved by a faster stream such as an odometer. The window counts back from the IMU,
+  /// which the controller passes on at once, while a measurement leaves the controller's buffer already that
+  /// buffer behind: the window has to be the buffer length plus the largest time bias, 2.5 s with the standard
+  /// 2 s buffer. A shorter one orders nothing that passed the buffer and is reported at start-up (v0.2.10 said
+  /// 0.5 s would do there; it does not). At most 5 s. Written only when set.
   double measurement_reorder_s = 0.0;
   StreamConfig stream_config = default_stream_config();
 

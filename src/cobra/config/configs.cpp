@@ -847,6 +847,48 @@ std::optional<StaticAlignmentConfig> StaticAlignmentConfig::from_registry(api::M
   return c;
 }
 
+void InMotionAlignmentConfig::to_registry(api::Mediator& m) const {
+  ConfigWriter w(m, group_);
+  w.nested("imu_model", imu_model);
+  w.scalar("heading_sigma", heading_sigma);
+  w.scalar("max_window", max_window);
+  w.scalar("min_epochs", min_epochs);
+  w.vector("lever_arm", to_vector(lever_arm));
+  w.scalar("velocity_source", velocity_source);
+  w.scalar("position_difference_sigma", position_difference_sigma);
+  w.scalar("stationary_speed", stationary_speed);
+  w.scalar("stationary_rate", stationary_rate);
+  w.scalar("stationary_time", stationary_time);
+  w.optional("start_time", start_time);
+}
+std::optional<InMotionAlignmentConfig> InMotionAlignmentConfig::from_registry(api::Mediator& m, const std::string& group) {
+  ConfigReader r(m, group);
+  if (!r.ok()) return std::nullopt;
+  InMotionAlignmentConfig c;
+  c.group_ = group;
+  c.heading_sigma = r.optional<double>("heading_sigma").value_or(c.heading_sigma);
+  c.max_window = r.optional<double>("max_window").value_or(c.max_window);
+  c.min_epochs = r.optional<std::int64_t>("min_epochs").value_or(c.min_epochs);
+  if (auto l = read_arr<3>(r, "lever_arm")) c.lever_arm = *l;
+  c.velocity_source = r.optional<std::string>("velocity_source").value_or(c.velocity_source);
+  c.position_difference_sigma = r.optional<double>("position_difference_sigma").value_or(c.position_difference_sigma);
+  c.stationary_speed = r.optional<double>("stationary_speed").value_or(c.stationary_speed);
+  c.stationary_rate = r.optional<double>("stationary_rate").value_or(c.stationary_rate);
+  c.stationary_time = r.optional<double>("stationary_time").value_or(c.stationary_time);
+  c.start_time = r.optional<double>("start_time");
+  auto g = r.nested_group("imu_model");
+  if (!g) {
+    r.fail("imu_model");
+    return std::nullopt;
+  }
+  r.suspend();
+  auto imu = ImuConfig::from_registry(m, *g);
+  r.resume();
+  if (!imu || !r.ok()) return std::nullopt;
+  c.imu_model = *imu;
+  return c;
+}
+
 void ManualHeadingAlignmentConfig::to_registry(api::Mediator& m) const {
   ConfigWriter w(m, group_);
   w.scalar("static_time", static_time);

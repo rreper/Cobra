@@ -711,6 +711,28 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->heading_sigma = need(jc, "heading_sigma").get<double>();
     return c;
   }
+  if (type == "InMotionAlignmentConfig") {
+    auto c = std::make_shared<InMotionAlignmentConfig>();
+    c->group_ = group_of(jc);
+    c->imu_model = imu_from(need(jc, "imu_model"));
+    c->heading_sigma = get_or(jc, "heading_sigma", c->heading_sigma);
+    c->max_window = get_or(jc, "max_window", c->max_window);
+    c->min_epochs = get_or<std::int64_t>(jc, "min_epochs", c->min_epochs);
+    if (jc.contains("lever_arm")) c->lever_arm = vec3(jc, "lever_arm");
+    c->velocity_source = get_or<std::string>(jc, "velocity_source", c->velocity_source);
+    if (c->velocity_source != "auto" && c->velocity_source != "velocity" && c->velocity_source != "position")
+      fail("InMotionAlignmentConfig: velocity_source must be auto | velocity | position");
+    c->position_difference_sigma = get_or(jc, "position_difference_sigma", c->position_difference_sigma);
+    c->stationary_speed = get_or(jc, "stationary_speed", c->stationary_speed);
+    c->stationary_rate = get_or(jc, "stationary_rate", c->stationary_rate);
+    c->stationary_time = get_or(jc, "stationary_time", c->stationary_time);
+    if (jc.contains("start_time") && !jc.at("start_time").is_null()) c->start_time = jc.at("start_time").get<double>();
+    if (!(c->heading_sigma > 0) || !(c->max_window > 0) || c->min_epochs < 1 || !(c->position_difference_sigma > 0) ||
+        !(c->stationary_time > 0))
+      fail("InMotionAlignmentConfig: heading_sigma, max_window, position_difference_sigma and stationary_time must be > 0, "
+           "min_epochs >= 1");
+    return c;
+  }
   if (type == "PvaMessageInitializationConfig") {
     auto c = std::make_shared<PvaMessageInitializationConfig>();
     c->group_ = group_of(jc);
@@ -814,6 +836,7 @@ std::string type_name(const BaseConfig& c) {
   PNTOS_TN(TimeBiasConfig) PNTOS_TN(OutageConfig) PNTOS_TN(ZeroVelocity2dGeneratorConfig) PNTOS_TN(SensorDegradationConfig)
   PNTOS_TN(ManualAlignmentConfig)
   PNTOS_TN(StaticAlignmentConfig) PNTOS_TN(ManualHeadingAlignmentConfig) PNTOS_TN(PvaMessageInitializationConfig)
+  PNTOS_TN(InMotionAlignmentConfig)
   PNTOS_TN(StandardOrchestrationConfig) PNTOS_TN(TutorialOrchestrationConfig) PNTOS_TN(UiLogPlottingConfig)
   PNTOS_TN(LcmLogTransportConfig) PNTOS_TN(LcmTransportConfig) PNTOS_TN(CsvTransportConfig) PNTOS_TN(RegistryConfig)
 #undef PNTOS_TN
@@ -997,6 +1020,15 @@ json config_to_json(const BaseConfig& c) {
   if (auto* p = dynamic_cast<const ManualHeadingAlignmentConfig*>(&c))
     return json{{"type", type}, {"group", p->group_}, {"static_time", p->static_time}, {"imu_model", imu_to(p->imu_model)},
                 {"heading", p->heading}, {"heading_sigma", p->heading_sigma}};
+  if (auto* p = dynamic_cast<const InMotionAlignmentConfig*>(&c)) {
+    json o{{"type", type}, {"group", p->group_}, {"imu_model", imu_to(p->imu_model)}, {"heading_sigma", p->heading_sigma},
+           {"max_window", p->max_window}, {"min_epochs", p->min_epochs}, {"lever_arm", j(p->lever_arm)},
+           {"velocity_source", p->velocity_source}, {"position_difference_sigma", p->position_difference_sigma},
+           {"stationary_speed", p->stationary_speed}, {"stationary_rate", p->stationary_rate},
+           {"stationary_time", p->stationary_time}};
+    if (p->start_time) o["start_time"] = *p->start_time;
+    return o;
+  }
   if (auto* p = dynamic_cast<const PvaMessageInitializationConfig*>(&c)) {
     json o{{"type", type}, {"group", p->group_}, {"initial_pva_channel", p->initial_pva_channel},
            {"initial_accel_bias_sigma", j(p->initial_accel_bias_sigma)}, {"initial_gyro_bias_sigma", j(p->initial_gyro_bias_sigma)}};

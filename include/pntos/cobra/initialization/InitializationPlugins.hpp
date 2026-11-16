@@ -1,5 +1,6 @@
 // Ports of Cobra's inertial initialization plugins: TutorialInitializationPlugin (manual),
 // StaticAlignInitializationPlugin, ManualHeadingAlignInitializationPlugin, PvaMessageInitializationPlugin.
+// InMotionAlignInitializationPlugin is a C++ addition (initialization/InMotionAlignment.hpp).
 #pragma once
 
 #include <pntos/api/initialization.hpp>
@@ -40,6 +41,7 @@ class AlignmentStrategy final : public api::InertialInitializationStrategy {
  private:
   std::unique_ptr<inertial::AlignBase> aligner_;
   api::Mediator* mediator_;
+  bool summary_logged_ = false;
 };
 
 /// Takes the first PVA on a channel (after an optional start time) as the initial solution.
@@ -101,6 +103,15 @@ class StaticAlignInitializationPlugin final : public InitializationPluginBase {
 };
 
 class ManualHeadingAlignInitializationPlugin final : public InitializationPluginBase {
+ public:
+  using InitializationPluginBase::InitializationPluginBase;
+
+ protected:
+  std::unique_ptr<api::CommonInitializationStrategy> make(const std::string& group) override;
+};
+
+/// Alignment in motion from an InMotionAlignmentConfig (C++ addition).
+class InMotionAlignInitializationPlugin final : public InitializationPluginBase {
  public:
   using InitializationPluginBase::InitializationPluginBase;
 

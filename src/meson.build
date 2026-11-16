@@ -35,6 +35,7 @@ cobra_sources = files(
   'cobra/inertial/BufferedImu.cpp',
   'cobra/inertial/StandardInertialPlugin.cpp',
   'cobra/initialization/Alignment.cpp',
+  'cobra/initialization/InMotionAlignment.cpp',
   'cobra/initialization/InitializationPlugins.cpp',
   'cobra/preprocessing/StandardPreprocessorPlugin.cpp',
   'cobra/transport/LcmLog.cpp',

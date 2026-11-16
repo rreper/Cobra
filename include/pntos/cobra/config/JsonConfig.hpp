@@ -24,7 +24,7 @@ namespace pntos::cobra {
 struct AppSpec {
   std::string name = "cobra";
   std::string transport = "lcm_log";                       ///< lcm_log
-  std::string initialization = "manual_heading_align";     ///< manual_heading_align | static_align | manual | pva_message
+  std::string initialization = "manual_heading_align";     ///< manual_heading_align | static_align | manual | pva_message | in_motion_align
   std::string state_modeling = "standard";                 ///< standard | tutorial
   std::string orchestration = "standard";                  ///< standard | tutorial_pos | tutorial_pos_vel
   std::vector<std::string> preprocessors{"standard"};      ///< standard, advanced

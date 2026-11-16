@@ -98,7 +98,7 @@ def wheel(cfg, calibrated=True):
     c = advanced(copy.deepcopy(cfg))
     listen(c, VEL)
     o = orch(c)
-    o['measurement_reorder_s'] = 0.5
+    o['measurement_reorder_s'] = 2.5  # the controller's 2 s buffer and the receiver's time bias
     o['preprocessor_configs'].append(dict(type='SensorDegradationConfig', group='config/wheel_emulation', channels=[VEL], seed=3, velocity_scale=1.02,
                                           velocity_forward_only=True, velocity_covariance_scale=SPEED_COVARIANCE_SCALE))
     o['preprocessor_configs'].append(dict(type='ZeroVelocity2dGeneratorConfig', group='config/constraints', channels=[VEL], trigger_dt_sec=0.5,
@@ -112,7 +112,7 @@ def velocity3(cfg):
     c = copy.deepcopy(cfg)
     listen(c, VEL)
     o = orch(c)
-    o['measurement_reorder_s'] = 0.5
+    o['measurement_reorder_s'] = 2.5
     velocity_processor(o, 'velocity', VEL)
     return c
 

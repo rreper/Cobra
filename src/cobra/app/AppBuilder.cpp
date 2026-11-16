@@ -175,9 +175,11 @@ api::PluginList build_plugins(const AppConfig& config, const std::function<void(
     plugins.push_back(std::make_shared<TutorialInitializationPlugin>("Cobra Manual Initialization Plugin"));
   else if (s.initialization == "pva_message")
     plugins.push_back(std::make_shared<PvaMessageInitializationPlugin>("Cobra PVA Message Initialization Plugin"));
+  else if (s.initialization == "in_motion_align")
+    plugins.push_back(std::make_shared<InMotionAlignInitializationPlugin>("Cobra In-Motion Align Initialization Plugin"));
   else
     throw std::runtime_error("unknown initialization \"" + s.initialization +
-                             "\" (manual_heading_align | static_align | manual | pva_message)");
+                             "\" (manual_heading_align | static_align | manual | pva_message | in_motion_align)");
 
   plugins.push_back(std::make_shared<StandardLoggingPlugin>("Cobra Standard Logging Plugin", true, level_from(s.logging_level)));
   plugins.push_back(std::make_shared<StandardRegistryPlugin>("Cobra Standard Registry Plugin", config.configs));

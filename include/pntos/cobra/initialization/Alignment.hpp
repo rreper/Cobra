@@ -10,6 +10,7 @@
 #include <aspn23/eigen/MeasurementPosition.hpp>
 
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace pntos::cobra::inertial {
@@ -66,6 +67,11 @@ class AlignBase {
   virtual std::pair<bool, api::Matrix> get_computed_covariance() const { return {false, api::Matrix::Zero(15, 15)}; }
   virtual std::pair<bool, ImuErrors> get_imu_errors() const { return {false, ImuErrors{}}; }
   virtual MotionNeeded motion_needed() const = 0;
+  /// C++ addition: whether process() takes MeasurementVelocity (the static alignments do not; the strategy
+  /// reports such a message as an error for them, as Cobra does).
+  virtual bool accepts_velocity() const { return false; }
+  /// C++ addition: one line about a finished alignment for the log; empty = nothing to say.
+  virtual std::string summary() const { return {}; }
 
  protected:
   api::Matrix bias_stats_from_model() const;  ///< 6×6 diag(initial bias sigmas²)

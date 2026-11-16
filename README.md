@@ -91,6 +91,10 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   misalignment states) and `measurement_reorder_s` (measurements applied in time order). A 120 s GNSS outage
   ends 7 m off with a wheel speed instead of 131 m with the IMU alone: `docs/AIDING_MATRIX.md`,
   `configs/pos_ins_odometry.json`, `configs/pos_ins_full.json`.
+- Alignment in motion: initialization `in_motion_align` finds the heading (and the gyro bias) from the receiver's
+  velocity and the IMU once the vehicle drives, with no heading from outside and no assumption about the mounting.
+  Switched on at 64 points of the example drive it aligned every time, in 18 s (median), to 1.6° RMS:
+  `docs/ALIGNMENT_MATRIX.md`, `configs/pos_ins_align_in_motion.json`, `configs/pos_ins_ground_vehicle.json`.
 - Live IMU data: `inertial_config` keys `imu_gap_policy`, `max_imu_gap`, `reject_non_finite`, `sampled_imu`,
   `dt_window` and `attitude_interpolation` make the inertial hold its rate across lost samples, refuse corrupt time
   stamps and NaN, and accept rate (SAMPLED) messages. All off by default, where it behaves exactly as NavToolkit

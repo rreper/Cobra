@@ -28,6 +28,7 @@ SUITES = {
     'inertial': ('test_inertial_plugin.py', 'all tests ported + mechanization checks'),
     'inertial_live': ('— (new: live-sensor robustness)', 'lost / late / sampled / non-finite IMU data, corrupt time stamps, dt estimate, interpolation at vertical pitch; opt-in via InertialConfig'),
     'initialization': ('test_manual_initialization_plugin.py, inertial_alignment/*', 'all tests ported + PVA-message strategy'),
+    'alignment_in_motion': ('— (new: alignment in motion)', 'attitude and biases from receiver velocity and IMU on simulated drives; plugin, config, and the whole filter through the push API'),
     'preprocessors': ('test_preprocessor_plugin.py', 'all tests ported + time bias'),
     'lcm_transport': ('test_transport_plugin.py (log parts)', 'network LCM transport not ported'),
     'tutorial': ('test_orchestration.py (tutorial cases) + new', 'tutorial state model / orchestration / UI summary plugin'),

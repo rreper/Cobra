@@ -1,4 +1,5 @@
 #include <pntos/cobra/inertial/BufferedImu.hpp>
+#include <pntos/cobra/initialization/InMotionAlignment.hpp>
 #include <pntos/cobra/initialization/InitializationPlugins.hpp>
 #include <pntos/cobra/utils/logging.hpp>
 
@@ -13,6 +14,30 @@ using api::Vector3;
 
 namespace {
 Vector3 v3(const Vec3& a) { return Vector3(a[0], a[1], a[2]); }
+
+inertial::InMotionAlignmentOptions options_from(const InMotionAlignmentConfig& c) {
+  using Source = inertial::InMotionAlignmentOptions::VelocitySource;
+  inertial::InMotionAlignmentOptions o;
+  o.heading_sigma = c.heading_sigma;
+  o.max_window = c.max_window;
+  o.min_epochs = static_cast<int>(c.min_epochs);
+  o.lever_arm = v3(c.lever_arm);
+  if (c.velocity_source == "auto")
+    o.velocity_source = Source::AUTO;
+  else if (c.velocity_source == "velocity")
+    o.velocity_source = Source::VELOCITY;
+  else if (c.velocity_source == "position")
+    o.velocity_source = Source::POSITION;
+  else
+    throw std::invalid_argument("InMotionAlignmentConfig: velocity_source must be auto | velocity | position, not \"" +
+                                c.velocity_source + "\"");
+  o.position_difference_sigma = c.position_difference_sigma;
+  o.stationary_speed = c.stationary_speed;
+  o.stationary_rate = c.stationary_rate;
+  o.stationary_time = c.stationary_time;
+  o.start_time = c.start_time;
+  return o;
+}
 }  // namespace
 
 // ----------------------------------------------------------------------------- ManualInitialization
@@ -64,12 +89,18 @@ void AlignmentStrategy::process_pntos_message(const Message& message) {
   if (!message.wrapped_message) return;
   const auto type = message.message_type();
   if (type != ASPN_MEASUREMENT_IMU && type != ASPN_MEASUREMENT_POSITION &&
-      type != ASPN_MEASUREMENT_POSITION_VELOCITY_ATTITUDE) {
+      type != ASPN_MEASUREMENT_POSITION_VELOCITY_ATTITUDE &&
+      !(type == ASPN_MEASUREMENT_VELOCITY && aligner_->accepts_velocity())) {
     if (mediator_) mediator_->log_message(LoggingLevel::ERROR, "Could not convert message");
     return;
   }
   try {
-    aligner_->process(*message.wrapped_message);
+    const auto status = aligner_->process(*message.wrapped_message);
+    if (status == inertial::AlignmentStatus::ALIGNED_GOOD && !summary_logged_) {
+      summary_logged_ = true;
+      const std::string summary = aligner_->summary();
+      if (mediator_ && !summary.empty()) mediator_->log_message(LoggingLevel::INFO, summary);
+    }
   } catch (const std::exception& e) {
     if (mediator_) mediator_->log_message(LoggingLevel::ERROR, std::string("Alignment failed: ") + e.what());
   }
@@ -179,6 +210,15 @@ std::unique_ptr<api::CommonInitializationStrategy> ManualHeadingAlignInitializat
       std::make_unique<inertial::ManualHeadingAlignment>(c->heading, c->heading_sigma,
                                                          inertial::ImuModel::from_config(c->imu_model), c->static_time),
       mediator_);
+}
+
+std::unique_ptr<api::CommonInitializationStrategy> InMotionAlignInitializationPlugin::make(const std::string& group) {
+  auto c = mediator_ ? InMotionAlignmentConfig::from_registry(*mediator_, group) : std::nullopt;
+  if (!c)
+    throw std::invalid_argument("Failed to populate config from registry to config type InMotionAlignmentConfig and group " +
+                                group + ".");
+  return std::make_unique<AlignmentStrategy>(
+      std::make_unique<inertial::InMotionAlignment>(inertial::ImuModel::from_config(c->imu_model), options_from(*c)), mediator_);
 }
 
 std::unique_ptr<api::CommonInitializationStrategy> PvaMessageInitializationPlugin::make(const std::string& group) {

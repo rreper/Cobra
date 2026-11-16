@@ -464,7 +464,13 @@ TEST(JsonConfig, OdometryProcessorReorderWindowAndWheelEmulation) {
   for (const auto& c : app.configs)
     if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) orch = o;
   ASSERT_NE(orch, nullptr);
-  EXPECT_DOUBLE_EQ(orch->measurement_reorder_s, 0.5);
+  // longer than the controller's 2 s buffer, or it orders nothing (Filter.ReorderWindowMustExceedTheControllerBuffer)
+  EXPECT_DOUBLE_EQ(orch->measurement_reorder_s, 2.5);
+  {
+    auto full = jsoncfg::load_app_config(src("configs/pos_ins_full.json"));
+    for (const auto& c : full.configs)
+      if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) EXPECT_DOUBLE_EQ(o->measurement_reorder_s, 2.5);
+  }
   int odometry = 0;
   ASSERT_TRUE(orch->mp_configs.has_value());
   for (const auto& mp : *orch->mp_configs) {

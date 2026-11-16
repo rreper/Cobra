@@ -475,3 +475,79 @@ TEST(Filter, ReorderWindowKeepsEveryFixOfADelayedReceiver) {
   EXPECT_GE(fed.reached, fed.fixes - 4);  // all but what is still waiting in the window when the log ends
   EXPECT_EQ(fed.warnings, 0);
 }
+
+namespace {
+/// pos_ins plus the receiver's velocity as a second measurement. Both streams pass the controller's 2 s buffer;
+/// the velocity carries the larger time bias (250 ms against 150 ms), so each velocity arrives after the position
+/// of the same epoch and is 100 ms older.
+struct TwoStreams {
+  int fixes = 0, velocity_reached = 0, discard_warnings = 0, window_warnings = 0;
+};
+TwoStreams feed_position_and_velocity(double reorder_s) {
+  std::ifstream in(src("configs/pos_ins.json"));
+  cobra::jsoncfg::json j;
+  in >> j;
+  j["app"]["logging_level"] = "WARN";
+  for (auto& c : j["configs"]) {
+    if (c["type"] == "LcmLogTransportConfig" && c.contains("channels_to_process")) c["channels_to_process"].push_back("/sensor/ublox-ZED-F9T/velocity");
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    c["preprocessor_configs"].push_back({{"type", "TimeBiasConfig"},
+                                         {"group", "config/time_bias_velocity"},
+                                         {"channels", {"/sensor/ublox-ZED-F9T/velocity"}},
+                                         {"time_bias", 250000000}});
+    c["mp_configs"].push_back({{"type", "PinsonVelocityMPConfig"},
+                               {"group", "config/vel_measurement_processor"},
+                               {"label", "vel"},
+                               {"channel", "/sensor/ublox-ZED-F9T/velocity"},
+                               {"state_block_labels", {"pinson15"}},
+                               {"aux_channels", {"INERTIAL_PVA"}},
+                               {"innovation_gate_probability", 0.999999}});  // only to count what reaches the filter
+    if (reorder_s > 0) c["measurement_reorder_s"] = reorder_s;
+  }
+  TwoStreams out;
+  cobra::utils::set_log_sink([&](api::LoggingLevel level, const std::string&, const std::string& m) {
+    if (level != api::LoggingLevel::WARN) return;
+    if (m.find("older than the filter") != std::string::npos) ++out.discard_warnings;
+    if (m.find("controller's buffer") != std::string::npos) ++out.window_warnings;
+  });
+  cobra::app::RunOptions o;
+  o.progress = false;
+  {
+    cobra::Filter f(cobra::jsoncfg::app_config_from_json(j), o);
+    bool aligned = false;
+    f.set_solution_callback([&](const api::Message&) { aligned = true; });
+    cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
+    while (auto ev = r.next()) {
+      if (ev->channel != "/sensor/vn-100/imu" && ev->channel != "/sensor/ublox-ZED-F9T/position" && ev->channel != "/sensor/ublox-ZED-F9T/velocity")
+        continue;
+      if (aligned && ev->channel == "/sensor/ublox-ZED-F9T/velocity") ++out.fixes;
+      f.push(cobra::lcm::decode(ev->data), ev->channel);
+    }
+    if (f.registry().has_group("fusion/gating")) {
+      auto kv = f.registry().batch("fusion/gating");
+      out.velocity_reached = static_cast<int>(kv->template get_value<std::int64_t>("vel_accepted").value_or(0) +
+                                              kv->template get_value<std::int64_t>("vel_rejected").value_or(0));
+    }
+    f.stop();
+  }
+  cobra::utils::set_log_sink(nullptr);
+  return out;
+}
+}  // namespace
+
+TEST(Filter, ReorderWindowMustExceedTheControllerBuffer) {
+  // The window counts back from the IMU's time, and a measurement that passed the controller's buffer is already
+  // 2 s behind the IMU when it arrives. A window of 0.5 s therefore releases it at once and orders nothing: the
+  // velocity, 100 ms older than the position before it, is dropped every time. That is said at start-up (v0.2.10
+  // recommended 0.5 s for exactly this case). 2.5 s, the buffer and the largest time bias, orders them.
+  const TwoStreams too_short = feed_position_and_velocity(0.5);
+  ASSERT_GE(too_short.fixes, 40);
+  EXPECT_LT(too_short.velocity_reached, too_short.fixes / 4);
+  EXPECT_GE(too_short.discard_warnings, 1);
+  EXPECT_EQ(too_short.window_warnings, 1);
+  const TwoStreams ok = feed_position_and_velocity(2.5);
+  ASSERT_GE(ok.fixes, 40);
+  EXPECT_GE(ok.velocity_reached, ok.fixes - 4);
+  EXPECT_EQ(ok.discard_warnings, 0);
+  EXPECT_EQ(ok.window_warnings, 0);
+}

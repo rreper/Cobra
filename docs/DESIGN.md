@@ -589,7 +589,7 @@ The Python apps are Python files that build a config list and a plugin list. The
 types are names (`MEASUREMENT_IMU`). Comments (`//`) are allowed in the files.
 
 `AppSpec` names the plugins: `transport` (lcm_log), `initialization` (manual_heading_align | static_align | manual |
-pva_message), `state_modeling` (standard | tutorial), `orchestration` (standard | tutorial_pos | tutorial_pos_vel | a name registered with `app::register_orchestration`),
+pva_message | in_motion_align), `state_modeling` (standard | tutorial), `orchestration` (standard | tutorial_pos | tutorial_pos_vel | a name registered with `app::register_orchestration`),
 `preprocessors` (standard, advanced), `diagnostic_log`, `ui_log_plotting`, `logging_level`, `joseph_form`,
 `legacy_q_rotation`. `app::build_plugins` instantiates them and `app::run_app` runs the controller; the compiled apps
 and `cobra_run config.json` share this path, and `--dump-config` writes the compiled app's effective config, which is
@@ -823,7 +823,7 @@ Things the options assume or do not cover:
 
 Measured first, on the full example log with `vn100_measured` (`docs/AIDING_MATRIX.md`, `tools/run_aiding_matrix.py`):
 with the IMU alone a complete GNSS outage of 60 s ends 25 m off on average (57 m worst of six), one of 120 s
-131 m (291 m). Two things stood between that and a usable vehicle filter, and a third is still open (§9.6).
+131 m (291 m). Two things stood between that and a usable vehicle filter; the third, the heading, is §7.24.
 
 **Measurements out of time order (`StandardOrchestrationConfig::measurement_reorder_s`).** Cobra discards a
 measurement that is older than the filter, and the filter is wherever the last measurement took it. The log's
@@ -836,11 +836,16 @@ odometer at 10 Hz does the same. Two changes:
   filter's start are not counted). Default behaviour is otherwise untouched.
 - With `measurement_reorder_s` > 0 a measurement waits until the IMU is that far ahead of its (preprocessed)
   time stamp, and the waiting ones are applied in time order; the outage propagation never passes one that is
-  waiting. The window has to cover how late the slowest stream is against the fastest: the largest time bias
-  when every measurement passes the controller's buffer (0.5 s is plenty); the buffer length on top when
-  measurements are generated from IMU messages, which the controller passes on at once (2.5 s with the standard
-  2 s buffer). At most 5 s. Solutions are extrapolated to the IMU's time as before; the filter merely runs
-  that much further behind it. `Filter.ReorderWindowKeepsEveryFixOfADelayedReceiver`.
+  waiting. The window counts back from the IMU's time, and the controller passes the IMU on at once while a
+  measurement leaves its buffer already that buffer behind. So the window has to be the buffer length plus the
+  largest time bias, whether the competing stream is made from IMU messages or passes the buffer too: 2.5 s
+  with the standard 2 s buffer. At most 5 s. Solutions are extrapolated to the IMU's time as before; the filter
+  merely runs that much further behind it. `Filter.ReorderWindowKeepsEveryFixOfADelayedReceiver`.
+  *Correction to v0.2.10:* that release said 0.5 s is enough when every measurement passes the buffer, and its
+  two example configurations used it. It is not: such a window releases every measurement on arrival and orders
+  nothing. The examples did not show it because their wheel speed comes once a second; `pos_ins_full.json`
+  still dropped ten or more fixes of the first receiver. A window not longer than the buffer is now a WARN at
+  start-up and the examples use 2.5 s (`Filter.ReorderWindowMustExceedTheControllerBuffer`).
 
 **Odometry with calibration states (`pinson_odometry`, `PinsonOdometryMPConfig`).** The tenth measurement
 processor, after the nine of the Python original: the body-velocity model with an optional second state block of
@@ -869,10 +874,10 @@ horizontal error at the end of the outage, mean and worst of six, metres):
 |---|---|---|---|
 | IMU alone | 1.55 | 25.1 (56.6) | 130.8 (290.7) |
 | constraints from the IMU clock | 1.52 | 13.3 (25.6) | 15.6 (27.3) |
-| wheel speed (2 % scale error) and constraints | 1.58 | 4.9 (10.6) | 7.4 (19.9) |
-| the same without calibration states | 7.92 | 12.5 (24.2) | 19.8 (31.1) |
-| three-axis body velocity | 1.72 | 5.6 (11.2) | 6.6 (11.4) |
-| wheel, a second receiver (3 m) and the barometer; only the first receiver is lost | 1.16 | 1.8 (3.9) | 1.2 (2.0) |
+| wheel speed (2 % scale error) and constraints | 1.59 | 4.9 (10.6) | 7.4 (19.5) |
+| the same without calibration states | 7.92 | 12.4 (24.0) | 19.7 (31.0) |
+| three-axis body velocity | 1.73 | 5.7 (11.2) | 6.4 (11.0) |
+| wheel, a second receiver (3 m) and the barometer; only the first receiver is lost | 1.16 | 1.8 (4.0) | 1.2 (2.0) |
 
 The filter's own sigma at the end of the outage is within a factor 1.0 to 1.4 of the error for the calibrated
 rows (1.7 to 1.9 for the three-axis sensor) and a factor 5 too small without calibration states. The wheel speed
@@ -885,6 +890,125 @@ outages. A second receiver, whatever its signal (a military-code receiver includ
 position or velocity source with its own channel, lever arm, time bias, bias block and gate, as the second one
 of `pos_ins_full.json`; which of two receivers is believed when they disagree is the integrity plugin's question
 (its `primary_sources`), not the filter's.
+
+### 7.24 Alignment in motion (`initialization/InMotionAlignment.hpp`, initialization `in_motion_align`)
+
+The alignments of the Python original need a heading from outside (`ManualHeadingAlignment`: a number in the
+configuration file; `PvaMessageInitialization`: a PVA message) or a gyro that senses the Earth's rate
+(`StaticAlignment`). The VN-100 of the example recording has a turn-on bias of 0.16 °/s about the vertical, forty
+times the Earth's rate, so a vehicle that is switched on anywhere but at the start of that recording has no
+heading. This one finds the whole attitude from the receiver's velocity and the IMU while the vehicle drives. It
+assumes nothing about how the sensor is mounted or about the direction of travel (a sideways or backwards
+mounting aligns like any other), and nothing about the heading before it starts.
+
+**Method.** The velocity integration formula of the optimization-based alignment (Wu and Pan 2013), extended by
+the sensor biases. For the velocity epochs `i = 0..n` of a window of at most `max_window` (30 s), with `X(t)` the
+body rotation since the window start from the gyros (bias `b` removed) and `f` the specific force:
+
+```
+x_i = ∫ X f dt  (+ X_i (ω_i × l) − X_0 (ω_0 × l) for an antenna lever arm l)      body frame at the window start
+y_i = v_i − v_0 − ∫ (g − 2 ω_ie × v) dt                                           NED, from the receiver
+y_i = C0 (x_i + G_i δb + Θ_i b_a) + c + noise_i
+```
+
+`C0` is the attitude at the window start, `δb` the gyro-bias correction (`G_i = ∂x_i/∂b`, `Θ_i = −∫X dt` both
+accumulated with the integration), `b_a` the accelerometer bias and `c` absorbs the noise of the first epoch.
+Given the rest, `C0` is the solution of Wahba's problem (SVD); given `C0`, the rest is linear least squares with
+the IMU model's initial sigmas as priors. The two alternate until the bias stops moving, and the window is
+integrated again with the new bias at the next epoch. The Wahba step is global: a heading that is wrong by any
+angle is no obstacle, which is what a linearised filter cannot offer. The covariance is the inverse Gauss–Newton
+Hessian over (rotation, `δb`, `b_a`, `c`), scaled by χ²/dof where the residuals exceed the stated noise, and
+carried to the last epoch with the bias uncertainty times the elapsed time. The alignment is declared when the
+heading sigma is below `heading_sigma` (3°) with at least `min_epochs` (5) epochs in the window.
+
+- *Why the gyro bias is in it.* Without it the method is useless on this sensor: 0.1 °/s tilts the integrated
+  attitude by degrees within a window, and gravity leaks into the velocity
+  (`InMotionAlignment.TheGyroBiasHasToBeEstimatedAlong`: tilt 0.2° against 0.8°, heading 2.6° against 31°).
+- *Why the accelerometer bias is in it.* A level accelerometer bias is a tilt as long as the vehicle does not
+  turn, and a first version left it out. On a gentle simulated drive 3 milli-g then passed for a gyro bias about
+  the vertical and the method claimed 3° while being 12.4° off; with the bias modelled 2.6°. The level
+  components stay near their prior, which is the point: the tilt covariance then contains what cannot be told
+  apart (0.42° with the VN-100 model).
+- *Standstill.* While the receiver's horizontal speed is below `stationary_speed` and the gyro is quiet
+  (`stationary_rate`), the gyro mean is the bias, less the vertical part of the Earth's rate, which needs no
+  heading; after `stationary_time` (3 s) it replaces the prior, weighted against the model's initial sigma (a
+  gyro better than the Earth's rate keeps its zero). The window then starts at the last epoch at rest.
+- *Velocity.* `velocity_source` "auto": the receiver's velocity (`MeasurementVelocity` in NED, or a PVA) once
+  one has arrived, the differences of consecutive position fixes until then, each stamped at mid-interval with
+  `position_difference_sigma` (0.15 m) over the interval. "velocity" and "position" force one of them.
+- *Lost IMU samples* are held as by the inertial's `imu_gap_policy` "hold" (§7.22); a gap of more than 0.5 s or
+  a non-finite sample starts the window again.
+- *Approximations.* The frame is NED at the receiver (0.16 mrad per kilometre travelled within a window); the
+  Earth's rate is left out of the attitude kinematics (0.25° per minute; a bias taken at standstill contains it
+  anyway); the Coriolis term is kept; the lever arm's part of `G` is neglected.
+
+**Hand-over.** The receiver's fixes reach the orchestration two seconds behind the IMU (the controller's
+buffer). The solution of the last epoch is therefore mechanized through the IMU samples already held, and the
+initial solution is stamped with the last IMU sample, so that the inertial continues without a gap. It carries
+the position (last fix plus the displacement since, lever arm taken out), the velocity of the IMU, the attitude
+with the full 3×3 tilt covariance, and both biases with their covariances as inertial errors.
+`AlignBase::summary()` gives the strategy one INFO line to log: time, window, heading, sigma, gyro bias.
+
+**Simulated drives** (`tests/test_alignment_in_motion.cpp`; an IMU with the VN-100's biases and noise, a receiver
+with 0.05 m/s of velocity noise delivering two seconds late): a standing start aligns within 20 s of moving off
+with the heading inside 3° and its sigma, the tilt inside 0.5°; switched on under way within 40 s; every heading
+and mounting tried; no alignment is claimed on a straight, steady road or at rest; position fixes alone suffice;
+4 % of lost IMU samples change nothing; over forty drives the heading error divided by its reported sigma has an
+RMS between 0.4 and 1.5. `InMotionAlignFilter.ComesUpWithoutAHeadingFromOutsideAndTracks` runs
+`configs/pos_ins_align_in_motion.json` through the push API on such a drive.
+
+**The recorded drive** (`tools/run_alignment_matrix.py`, `docs/ALIGNMENT_MATRIX.md`): the filter switched on at
+64 times through the drive, every 40 s, standing or under way (`InMotionAlignmentConfig::start_time` makes it
+ignore everything before). At the hand-over:
+
+| velocity from | aligned | time to align: median, 90 %, longest | heading error RMS (worst) | sigma | error / sigma RMS | tilt RMS |
+|---|---|---|---|---|---|---|
+| the receiver, 150 ms time bias | 64 / 64 | 19, 42, 136 s | 3.06° (7.45°) | 2.66° | 1.19 | 0.74° |
+| the receiver, 250 ms | 64 / 64 | 18, 42, 136 s | 1.61° (3.84°) | 2.55° | 0.63 | 0.32° |
+| the receiver, 350 ms | 64 / 64 | 19, 42, 137 s | 2.54° (8.48°) | 2.49° | 1.13 | 0.42° |
+| the receiver, 250 ms, declared at 2° | 64 / 64 | 23, 53, 137 s | 1.11° (3.97°) | 1.79° | 0.64 | 0.33° |
+| position differences | 64 / 64 | 30, 62, 139 s | 2.65° (5.22°) | 2.74° | 0.95 | 0.49° |
+| the receiver, 250 ms, lever arm left out | 64 / 64 | 18, 42, 136 s | 2.15° (4.89°) | 2.54° | 0.98 | 0.35° |
+
+The 136 s are the switch-on at the start of the recording: the car stands for 125 s, and nothing shows a heading
+until it moves.
+
+- *The receiver's velocity is older than its time stamp.* The example configurations give the velocity channel
+  the position's time bias, 150 ms; the alignment fits best at 250 ms, and its sigma is honest only there. This
+  is the receiver's velocity filter, not the transport. `configs/pos_vel_ins.json` is left as it is (its
+  acceptance rows are pinned); the two new configurations carry 250 ms on the velocity channel.
+- *After the hand-over* the plain filter (position fixes only) first loses heading when it was switched on under
+  way: the gyro bias about the vertical is not observable in a window of twenty seconds (the estimate stays near
+  zero, the truth is −2.7 mrad/s), so the heading drifts by 0.15 °/s until the filter has found the bias from
+  the fixes. RMS over the switch-on times: 1.6° at the hand-over, 2.4° after 10 s, 3.1° after 30 s (9.4° worst),
+  2.4° after 60 s, 1.0° after 120 s, against 0.7 to 0.9° for the run that was given its heading. The filter's
+  sigma grows with it. With the ground-vehicle constraints of §7.23 in the filter the heading is held: 1.2°,
+  1.3°, 1.2° and 0.6°. The horizontal position is within 0.2 m of the given run throughout. The receiver's
+  velocity as a filter measurement does not help (it makes the position worse, 2.1 m against 1.5 m).
+- The remaining worst cases with the constraints (4 to 6° half a minute to a minute after the hand-over, three
+  of the 64, with a filter sigma of 5 to 8° that says so) are switch-on times shortly before a stop: a standing
+  vehicle shows the constraints nothing. Zero-rate updates from a stationarity detector would settle the bias
+  there; they are the next item (§9.6).
+
+`configs/pos_ins_align_in_motion.json` is `pos_ins.json` with this alignment; `configs/pos_ins_ground_vehicle.json`
+adds the constraints from the IMU clock: a vehicle with a receiver and an IMU, no odometer and no heading from
+outside.
+
+| Key (`InMotionAlignmentConfig`) | Default | Meaning |
+|---|---|---|
+| `imu_model` | required | the priors of both biases (initial sigmas), the weight of a standstill (random walk, in-run sigma) |
+| `heading_sigma` | 0.0524 rad (3°) | aligned once the heading sigma is below it |
+| `max_window` | 30 s | data one solution uses |
+| `min_epochs` | 5 | velocity epochs after the first before a solution counts |
+| `lever_arm` | 0, 0, 0 | antenna relative to the IMU, platform frame, m |
+| `velocity_source` | `"auto"` | `"velocity"`, `"position"` |
+| `position_difference_sigma` | 0.15 m | horizontal, of the difference of two consecutive fixes; vertical twice |
+| `stationary_speed`, `stationary_rate`, `stationary_time` | 0.25 m/s, 0.02 rad/s, 3 s | when the vehicle counts as standing, and for how long before the gyro mean is the bias |
+| `start_time` | none | s; messages before it are ignored (a switch-on inside a recording) |
+
+Not in it: an estimate of the receiver's time offset (the largest error source left, see the table); the
+correlation between heading and gyro bias at the hand-over (the initial-solution interface carries the two
+covariance blocks separately); a heading for a vehicle that never accelerates horizontally.
 
 ## 8. Deviations from the Python original
 
@@ -914,6 +1038,8 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 20 | A non-positive or non-finite `expected_dt` / `inertial_buffer_length` is refused with an ERROR; interpolation next to a solution without a quaternion treats it as level | Both were undefined behaviour (§7.22). |
 | 21 | `StandardOrchestrationConfig::measurement_reorder_s` (measurements applied in time order behind a window); a measurement discarded as older than the filter is a WARN at the 1st, 10th, 100th, ... occurrence instead of a DEBUG line: C++ additions (§7.23) | — | off by default, key written only when set |
 | 22 | Tenth measurement processor `pinson_odometry` (body velocity with scale-factor and misalignment states); `SensorDegradationConfig::velocity_scale`, `velocity_forward_only` | — | C++ additions; the nine Python processors keep their indices |
+| 23 | Initialization `in_motion_align` (`InMotionAlignment`, `InMotionAlignInitializationPlugin`, `InMotionAlignmentConfig`); `AlignBase::accepts_velocity()` and `summary()`, by which the alignment strategy passes a `MeasurementVelocity` on and logs one INFO line (§7.24) | — | C++ additions; the static alignments answer as before (a velocity message is still "Could not convert message", no summary line) |
+| 24 | A `measurement_reorder_s` that is not longer than the controller's buffer is a WARN at start-up | — | such a window orders nothing that passed the buffer; v0.2.10 recommended one (§7.23) |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1020,10 +1146,10 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.23, in the order of what a vehicle installation misses first: alignment in motion (the heading
-comes from the config or a PVA message; a MEMS IMU cannot find north standing still, GNSS velocity can once the
-vehicle moves); zero-velocity and zero-rate updates from a stationarity detector; measurement weighting that
-adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
+Open after §7.24, in the order of what a vehicle installation misses first: zero-velocity and zero-rate
+updates from a stationarity detector (they would give the gyro bias about the vertical at every stop, which the
+alignment in motion cannot when it is switched on under way); an estimate of the receiver's time offset;
+measurement weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport
