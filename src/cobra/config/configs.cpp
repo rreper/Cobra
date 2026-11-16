@@ -904,6 +904,10 @@ void InMotionAlignmentConfig::to_registry(api::Mediator& m) const {
   w.scalar("stationary_rate", stationary_rate);
   w.scalar("stationary_time", stationary_time);
   w.optional("start_time", start_time);
+  if (time_offset_prior_sigma > 0) {
+    w.scalar("time_offset_prior_sigma", time_offset_prior_sigma);
+    w.scalar("time_offset_sigma", time_offset_sigma);
+  }
 }
 std::optional<InMotionAlignmentConfig> InMotionAlignmentConfig::from_registry(api::Mediator& m, const std::string& group) {
   ConfigReader r(m, group);
@@ -920,6 +924,8 @@ std::optional<InMotionAlignmentConfig> InMotionAlignmentConfig::from_registry(ap
   c.stationary_rate = r.optional<double>("stationary_rate").value_or(c.stationary_rate);
   c.stationary_time = r.optional<double>("stationary_time").value_or(c.stationary_time);
   c.start_time = r.optional<double>("start_time");
+  c.time_offset_prior_sigma = r.optional<double>("time_offset_prior_sigma").value_or(0.0);
+  c.time_offset_sigma = r.optional<double>("time_offset_sigma").value_or(c.time_offset_sigma);
   auto g = r.nested_group("imu_model");
   if (!g) {
     r.fail("imu_model");

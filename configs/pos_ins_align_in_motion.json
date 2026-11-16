@@ -95,7 +95,8 @@
           0.38,
           -0.05
         ],
-        "velocity_source": "velocity"
+        "velocity_source": "velocity",
+        "time_offset_prior_sigma": 0.3
       },
       "best_sol_channel": "/solution/pntos/pva",
       "group": "config/orchestration",

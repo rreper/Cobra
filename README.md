@@ -93,8 +93,11 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   `configs/pos_ins_odometry.json`, `configs/pos_ins_full.json`.
 - Alignment in motion: initialization `in_motion_align` finds the heading (and the gyro bias) from the receiver's
   velocity and the IMU once the vehicle drives, with no heading from outside and no assumption about the mounting.
-  Switched on at 64 points of the example drive it aligned every time, in 18 s (median), to 1.6° RMS:
+  Switched on at 64 points of the example drive it aligned every time, in 19 s (median), to 1.2° RMS:
   `docs/ALIGNMENT_MATRIX.md`, `configs/pos_ins_align_in_motion.json`, `configs/pos_ins_ground_vehicle.json`.
+  With `time_offset_prior_sigma` it also finds how much older than its time stamps the receiver's velocity is
+  (0.28 s for the example u-blox), so the heading no longer depends on that figure being configured right
+  (DESIGN.md §7.29).
 - Standing still: `zero_motion_generator` sees from the IMU that the vehicle stands and says so once a second;
   `pinson_zero_rate` and `pinson_velocity` turn that into the gyro bias and a bounded velocity. A standing
   vehicle's heading holds (0.15° in a minute instead of 8.9°) and a 120 s GNSS outage ends 34 m off instead of

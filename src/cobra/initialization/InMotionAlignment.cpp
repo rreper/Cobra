@@ -24,6 +24,10 @@ constexpr std::size_t kMaxPending = 600;
 constexpr std::size_t kDtRing = 31;
 constexpr double kMinVelocityVar = 1e-4;                   // (0.01 m/s)^2
 constexpr int kMinSolveEpochs = 4;
+constexpr std::int64_t kOffsetSpanNs = 250'000'000;       // half span of the specific force behind the time-offset column
+constexpr double kMaxOffset = 1.0;                         // s; the estimate of the time offset is kept inside +- this
+constexpr std::int64_t kMaxOffsetNs = 1'000'000'000;
+constexpr double kOffsetSettled = 0.05;                    // s; a solution that moved the offset by more is not handed over
 constexpr double kRadToDeg = 57.29577951308232;
 
 Vector3 v3(const Eigen::Matrix<double, Eigen::Dynamic, 1>& v) { return Vector3(v(0), v(1), v(2)); }
@@ -51,6 +55,9 @@ InMotionAlignment::InMotionAlignment(ImuModel model, InMotionAlignmentOptions op
       !(opt_.position_difference_sigma > 0) || !opt_.lever_arm.allFinite())
     throw std::invalid_argument("InMotionAlignment: heading_sigma, max_window, stationary_time and "
                                 "position_difference_sigma must be > 0, min_epochs >= 1, lever_arm finite");
+  if (!(opt_.time_offset_prior_sigma >= 0) || !(opt_.time_offset_prior_sigma <= 0.5) || !(opt_.time_offset_sigma > 0))
+    throw std::invalid_argument("InMotionAlignment: time_offset_prior_sigma must be between 0 (the offset is not estimated) "
+                                "and 0.5 s, time_offset_sigma > 0");
   if (opt_.start_time) start_ns_ = static_cast<std::int64_t>(*opt_.start_time * 1e9);
   bias_prior_var_ = model_.gyro_bias_initial_sigma.cwiseAbs2().cwiseMax(1e-20);
 }
@@ -158,6 +165,9 @@ void InMotionAlignment::on_velocity(std::int64_t t, const Vector3& v, const Vect
       epochs_.clear();
       pending_.clear();
       diag_.from_positions = false;
+      offset_ = 0.0;  // what was found so far was the offset of the fixes, not of the velocity
+      diag_.time_offset = 0.0;
+      diag_.time_offset_sigma = 0.0;
     }
   }
   Epoch e;
@@ -209,9 +219,13 @@ void InMotionAlignment::queue(const Epoch& e) {
 }
 
 void InMotionAlignment::advance() {
-  // An epoch is taken once the IMU has passed it by the span its lever-arm rate is averaged over.
+  // An epoch is taken once the IMU has passed it by the span its lever-arm rate is averaged over. With the time
+  // offset estimated the epoch is evaluated at its stamp less the offset, with a wider span around it.
+  const std::int64_t later =
+      offset_estimated() ? std::max<std::int64_t>(0, -static_cast<std::int64_t>(std::llround(offset_ * 1e9))) : 0;
+  const std::int64_t span = offset_estimated() ? kOffsetSpanNs : kRateSpanNs;
   while (status_ != AlignmentStatus::ALIGNED_GOOD && !pending_.empty() && !imu_.empty() &&
-         pending_.front().t + std::max(pending_.front().half_span, kRateSpanNs) <= imu_.back().t) {
+         pending_.front().t + std::max(pending_.front().half_span, span) + later <= imu_.back().t) {
     const Epoch e = pending_.front();
     pending_.pop_front();
     add_epoch(e);
@@ -227,7 +241,8 @@ void InMotionAlignment::add_epoch(Epoch e) {
     ++diag_.ignored;
     return;
   }
-  if (imu_.empty() || e.t < imu_.front().t - imu_.front().dt) return;  // older than the IMU data held
+  // older than the IMU data held (with the offset estimated: than what an offset of kMaxOffset would need)
+  if (imu_.empty() || e.t - (offset_estimated() ? kMaxOffsetNs + kOffsetSpanNs : 0) < imu_.front().t - imu_.front().dt) return;
 
   e.accel = gravity_ - 2.0 * wie_.cross(e.v);
   if (!epochs_.empty()) {
@@ -265,7 +280,18 @@ void InMotionAlignment::add_epoch(Epoch e) {
   diag_.chi2_per_dof = s->chi2_per_dof;
   diag_.gyro_bias = s->gyro_bias;
   diag_.accel_bias = s->accel_bias;
-  if (n >= opt_.min_epochs && diag_.heading_sigma < opt_.heading_sigma) finish(*s);
+  bool settled = true;
+  if (offset_estimated()) {
+    // Carried to the next solution like the gyro bias. One that has just moved it far was linearised too far from
+    // where it ended up: the next one, integrated at the new offset, is the one to hand over. And the offset has
+    // to be known as the heading has to be: while its sigma is still near the prior's, the estimate is the prior's
+    // zero as much as the data's value, and the heading is off by the difference.
+    offset_ = std::clamp(s->time_offset, -kMaxOffset, kMaxOffset);
+    diag_.time_offset = offset_;
+    diag_.time_offset_sigma = std::sqrt(std::max(s->time_offset_var, 0.0));
+    settled = std::abs(s->time_offset_step) <= kOffsetSettled && diag_.time_offset_sigma <= opt_.time_offset_sigma;
+  }
+  if (n >= opt_.min_epochs && diag_.heading_sigma < opt_.heading_sigma && settled) finish(*s);
 }
 
 bool InMotionAlignment::stationary(const Epoch& a, const Epoch& b, Vector3* dth_sum, Vector3* dv_sum, double* seconds) const {
@@ -325,6 +351,7 @@ void InMotionAlignment::trim() {
   } else {
     const Epoch& e = epochs_.front();
     keep_after = e.t - std::max(e.half_span, kRateSpanNs) - 1;
+    if (offset_estimated()) keep_after -= kMaxOffsetNs + kOffsetSpanNs;
   }
   while (!imu_.empty() && imu_.front().t <= keep_after) imu_.pop_front();
 }
@@ -349,11 +376,37 @@ Vector3 InMotionAlignment::mean_rate(std::int64_t from, std::int64_t to) const {
   return dt > 0 ? Vector3(dth / (dt * kNs)) : Vector3(Vector3::Zero());
 }
 
+Vector3 InMotionAlignment::mean_force(std::int64_t from, std::int64_t to) const {
+  Vector3 dv = Vector3::Zero();
+  std::int64_t dt = 0;
+  for (const auto& s : imu_) {
+    if (s.t <= from) continue;
+    if (s.t - s.dt >= to) break;
+    dv += s.dv;
+    dt += s.dt;
+  }
+  return dt > 0 ? Vector3(dv / (dt * kNs)) : Vector3(Vector3::Zero());
+}
+
 std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
+  return offset_estimated() ? solve_window<true>() : solve_window<false>();
+}
+
+/// kOffset: the receiver's time offset is one more unknown. Without it the code is, operation for operation, what it
+/// was before the offset existed.
+template <bool kOffset>
+std::optional<InMotionAlignment::Solution> InMotionAlignment::solve_window() {
+  constexpr int kExtra = kOffset ? 1 : 0;
+  constexpr int NL = 9 + kExtra;   // linear step: gyro bias, accelerometer bias, c (, offset)
+  constexpr int NC = 12 + kExtra;  // covariance: the rotation in front of them
   const std::size_t m = epochs_.size();  // epochs 0..n
   const std::size_t n = m - 1;
   const Epoch& e0 = epochs_.front();
   const Epoch& en = epochs_.back();
+  // The IMU time an epoch belongs to: its stamp less the offset found so far.
+  const std::int64_t shift = kOffset ? static_cast<std::int64_t>(std::llround(offset_ * 1e9)) : 0;
+  auto at = [&](std::size_t i) { return epochs_[i].t - shift; };
+  if (kOffset && (imu_.empty() || at(0) - std::max(e0.half_span, kOffsetSpanNs) < imu_.front().t - imu_.front().dt)) return std::nullopt;
 
   // 1. The window integrated with the current bias: x, X, G = dx/db and Theta = d(rotation)/db at every epoch.
   std::vector<Vector3> x(m, Vector3::Zero());
@@ -361,14 +414,14 @@ std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
   {
     Matrix3 Xc = Matrix3::Identity(), Gc = Matrix3::Zero(), Tc = Matrix3::Zero();
     Vector3 xc = Vector3::Zero();
-    std::int64_t t = e0.t;
+    std::int64_t t = at(0);
     std::size_t e = 1;
     for (const auto& s : imu_) {
       if (e >= m) break;
       if (s.t <= t) continue;
       std::int64_t a = std::max(t, s.t - s.dt);
       while (e < m) {
-        const std::int64_t b = std::min(s.t, epochs_[e].t);
+        const std::int64_t b = std::min(s.t, at(e));
         if (b > a) {
           const double fr = static_cast<double>(b - a) / static_cast<double>(s.dt);
           const double dt = fr * s.dt * kNs;
@@ -381,7 +434,7 @@ std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
           Xc = Xc * rotation(dth);
           a = b;
         }
-        while (e < m && epochs_[e].t <= a) {
+        while (e < m && at(e) <= a) {
           x[e] = xc;
           X[e] = Xc;
           G[e] = Gc;
@@ -400,9 +453,19 @@ std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
     for (std::size_t i = 0; i < m; ++i) {
       const Epoch& ep = epochs_[i];
       const std::int64_t h = std::max(ep.half_span, kRateSpanNs);
-      l[i] = X[i] * (mean_rate(ep.t - h, ep.t + h) - bias_).cross(opt_.lever_arm);
+      l[i] = X[i] * (mean_rate(at(i) - h, at(i) + h) - bias_).cross(opt_.lever_arm);
     }
     for (std::size_t i = 0; i < m; ++i) x[i] += l[i] - l[0];
+  }
+  // d x_i / d(time) = X_i f_i: what a later or earlier evaluation of the epoch changes. A velocity that is older by
+  // dtau than assumed belongs to x_i - dtau * acc_i.
+  std::vector<Vector3> acc;
+  if (kOffset) {
+    acc.resize(m);
+    for (std::size_t i = 0; i < m; ++i) {
+      const std::int64_t h = std::max(epochs_[i].half_span, kOffsetSpanNs);
+      acc[i] = X[i] * mean_force(at(i) - h, at(i) + h);
+    }
   }
 
   // 2. What the receiver saw of it.
@@ -420,75 +483,101 @@ std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
 
   // 3. Alternate: C0 from Wahba's problem (global in the heading), then (db, ba, c) by linear least squares.
   //    An accelerometer bias ba (measured = true + ba) takes -Theta_i ba out of x_i: dx_i/dba = integral of X.
+  using MatL = Eigen::Matrix<double, NL, NL>;
+  using VecL = Eigen::Matrix<double, NL, 1>;
+  using JacL = Eigen::Matrix<double, 3, NL>;
+  const double offset_info = kOffset ? 1.0 / (opt_.time_offset_prior_sigma * opt_.time_offset_prior_sigma) : 0.0;
   Vector3 db = Vector3::Zero(), ba = Vector3::Zero(), c = Vector3::Zero();
+  double dtau = 0.0;  // correction to offset_
+  std::vector<Vector3> shifted;  // x with the offset correction taken out; x itself without the offset
+  const std::vector<Vector3>& xs = kOffset ? shifted : x;
   Matrix3 C0 = Matrix3::Identity();
   for (int it = 0; it < 10; ++it) {
+    if (kOffset) {
+      shifted.resize(m);
+      for (std::size_t i = 0; i < m; ++i) shifted[i] = x[i] - dtau * acc[i];
+    }
     Vector3 xm = Vector3::Zero(), ym = Vector3::Zero();
     double wsum = 0.0;
     for (std::size_t i = 0; i < m; ++i) {
-      xm += ws[i] * (x[i] + G[i] * db + Th[i] * ba);
+      xm += ws[i] * (xs[i] + G[i] * db + Th[i] * ba);
       ym += ws[i] * y[i];
       wsum += ws[i];
     }
     xm /= wsum;
     ym /= wsum;
     Matrix3 B = Matrix3::Zero();
-    for (std::size_t i = 0; i < m; ++i) B += ws[i] * (y[i] - ym) * (x[i] + G[i] * db + Th[i] * ba - xm).transpose();
+    for (std::size_t i = 0; i < m; ++i) B += ws[i] * (y[i] - ym) * (xs[i] + G[i] * db + Th[i] * ba - xm).transpose();
     const Matrix3 C0n = nearest_rotation(B);
 
-    Eigen::Matrix<double, 9, 9> H = Eigen::Matrix<double, 9, 9>::Zero();
-    Eigen::Matrix<double, 9, 1> g = Eigen::Matrix<double, 9, 1>::Zero();
+    MatL H = MatL::Zero();
+    VecL g = VecL::Zero();
     for (int k = 0; k < 3; ++k) {
       H(k, k) += bias_info(k);
       g(k) += bias_info(k) * (bias_prior_(k) - bias_(k));
       H(3 + k, 3 + k) += accel_info(k);
     }
+    if (kOffset) {  // the prior is on the whole offset: zero, time_offset_prior_sigma
+      H(9, 9) += offset_info;
+      g(9) += offset_info * (0.0 - offset_);
+    }
     for (std::size_t i = 0; i < m; ++i) {
-      Eigen::Matrix<double, 3, 9> J;
-      J.leftCols<3>() = C0n * G[i];
-      J.block<3, 3>(0, 3) = C0n * Th[i];
-      J.rightCols<3>() = Matrix3::Identity();
+      JacL J;
+      J.template block<3, 3>(0, 0) = C0n * G[i];
+      J.template block<3, 3>(0, 3) = C0n * Th[i];
+      J.template block<3, 3>(0, 6) = Matrix3::Identity();
+      if (kOffset) J.col(9) = -(C0n * acc[i]);
       const Vector3 r = y[i] - C0n * x[i];
       H += J.transpose() * w[i].asDiagonal() * J;
       g += J.transpose() * w[i].cwiseProduct(r);
     }
-    Eigen::LDLT<Eigen::Matrix<double, 9, 9>> ldlt(H);
+    Eigen::LDLT<MatL> ldlt(H);
     if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) return std::nullopt;
-    const Eigen::Matrix<double, 9, 1> sol = ldlt.solve(g);
+    const VecL sol = ldlt.solve(g);
     if (!sol.allFinite()) return std::nullopt;
-    const bool done = it > 0 && (sol.head<3>() - db).norm() * tau[n] < 1e-5 && (sol.segment<3>(3) - ba).norm() * tau[n] < 1e-4;
-    db = sol.head<3>();
-    ba = sol.segment<3>(3);
-    c = sol.tail<3>();
+    bool done = it > 0 && (sol.template head<3>() - db).norm() * tau[n] < 1e-5 && (sol.template segment<3>(3) - ba).norm() * tau[n] < 1e-4;
+    if (kOffset) {
+      done = done && std::abs(sol(9) - dtau) < 1e-4;
+      dtau = sol(9);
+    }
+    db = sol.template head<3>();
+    ba = sol.template segment<3>(3);
+    c = sol.template segment<3>(6);
     C0 = C0n;
     if (done) break;
   }
+  if (kOffset) {
+    shifted.resize(m);
+    for (std::size_t i = 0; i < m; ++i) shifted[i] = x[i] - dtau * acc[i];
+  }
 
   // 4. Covariance over (rotation, db, ba, c), scaled by the misfit when the residuals exceed the stated noise.
-  Eigen::Matrix<double, 12, 12> H = Eigen::Matrix<double, 12, 12>::Zero();
+  using MatC = Eigen::Matrix<double, NC, NC>;
+  MatC H = MatC::Zero();
   const double no_heading = 1.0 / (nav::PI * nav::PI);  // a rotation the data does not show: sigma 180 degrees
   for (int k = 0; k < 3; ++k) {
     H(k, k) += no_heading;
     H(3 + k, 3 + k) += bias_info(k);
     H(6 + k, 6 + k) += accel_info(k);
   }
+  if (kOffset) H(12, 12) += offset_info;
   double chi2 = 0.0;
   for (std::size_t i = 0; i < m; ++i) {
-    const Vector3 mi = C0 * (x[i] + G[i] * db + Th[i] * ba);
-    Eigen::Matrix<double, 3, 12> J;
-    J.leftCols<3>() = -nav::skew(mi);
-    J.block<3, 3>(0, 3) = C0 * G[i];
-    J.block<3, 3>(0, 6) = C0 * Th[i];
-    J.rightCols<3>() = Matrix3::Identity();
+    const Vector3 mi = C0 * (xs[i] + G[i] * db + Th[i] * ba);
+    Eigen::Matrix<double, 3, NC> J;
+    J.template block<3, 3>(0, 0) = -nav::skew(mi);
+    J.template block<3, 3>(0, 3) = C0 * G[i];
+    J.template block<3, 3>(0, 6) = C0 * Th[i];
+    J.template block<3, 3>(0, 9) = Matrix3::Identity();
+    if (kOffset) J.col(12) = -(C0 * acc[i]);
     const Vector3 r = y[i] - mi - c;
     H += J.transpose() * w[i].asDiagonal() * J;
     chi2 += w[i].dot(r.cwiseAbs2());
   }
-  const double dof = std::max(3.0 * static_cast<double>(m) - 12.0, 1.0);
-  Eigen::LDLT<Eigen::Matrix<double, 12, 12>> ldlt(H);
+  const double dof = std::max(3.0 * static_cast<double>(m) - static_cast<double>(NC), 1.0);
+  Eigen::LDLT<MatC> ldlt(H);
   if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) return std::nullopt;
-  const Eigen::Matrix<double, 12, 12> P =
-      ldlt.solve(Eigen::Matrix<double, 12, 12>::Identity()) * std::max(1.0, chi2 / dof);
+  const MatC P = ldlt.solve(MatC::Identity()) * std::max(1.0, chi2 / dof);
   if (!P.allFinite()) return std::nullopt;
 
   Solution out;
@@ -496,17 +585,29 @@ std::optional<InMotionAlignment::Solution> InMotionAlignment::solve() {
   Eigen::Matrix<double, 3, 6> A;
   A.leftCols<3>() = Matrix3::Identity();
   A.rightCols<3>() = C0 * Th[n];
-  out.P_att = A * P.topLeftCorner<6, 6>() * A.transpose();
+  out.P_att = A * P.template topLeftCorner<6, 6>() * A.transpose();
   out.gyro_bias = bias_ + db;
-  out.P_bias = P.block<3, 3>(3, 3);
+  out.P_bias = P.template block<3, 3>(3, 3);
   out.accel_bias = ba;
-  out.P_accel = P.block<3, 3>(6, 6);
+  out.P_accel = P.template block<3, 3>(6, 6);
   out.chi2_per_dof = chi2 / dof;
+  // The velocity at the IMU time of the last epoch. c holds the first epoch's share of the offset correction; the
+  // last epoch's own share is the acceleration over dtau, of which the specific force is in x and gravity is not.
   out.v_antenna = e0.v + (en.corr - e0.corr) + C0 * (x[n] + G[n] * db + Th[n] * ba) + c;
+  if (kOffset) {
+    out.v_antenna += dtau * en.accel;
+    out.time_offset = offset_ + dtau;
+    out.time_offset_var = P(12, 12);
+    out.time_offset_step = dtau;
+  }
+  out.t = at(n);
   const std::int64_t h = std::max(en.half_span, kRateSpanNs);
-  out.rate = mean_rate(en.t - h, en.t + h) - out.gyro_bias;
+  out.rate = mean_rate(at(n) - h, at(n) + h) - out.gyro_bias;
   return out;
 }
+
+template std::optional<InMotionAlignment::Solution> InMotionAlignment::solve_window<false>();
+template std::optional<InMotionAlignment::Solution> InMotionAlignment::solve_window<true>();
 
 void InMotionAlignment::finish(const Solution& s) {
   // The solution belongs to the last velocity epoch, which is behind the IMU by the receiver's latency. Carry it
@@ -517,9 +618,12 @@ void InMotionAlignment::finish(const Solution& s) {
   Matrix3 C = s.C;
   Vector3 v = s.v_antenna - C * s.rate.cross(opt_.lever_arm);  // of the IMU
   Vector3 d = Vector3::Zero();                                 // displacement since the epoch, NED
-  std::int64_t t = ek.t;
+  std::int64_t t = s.t;  // the last epoch, less the time offset where that is estimated
   std::optional<Vector3> d_at_fix;
   Matrix3 C_at_fix = C;  // the fix is the antenna's position: the lever arm applies with the attitude of that moment
+  // The fix is taken at its stamp, also where an offset of the fixes was found (velocity from position differences):
+  // the filter that takes over reads the next fixes with the configured time bias, and a first position on another
+  // time base than theirs is a step it has to digest. The offset is reported; the configuration applies it.
   if (fix.t <= t) d_at_fix = Vector3(-v * ((t - fix.t) * kNs));  // the fix is older than the epoch: constant velocity
   for (const auto& smp : imu_) {
     if (smp.t <= t) continue;
@@ -543,7 +647,7 @@ void InMotionAlignment::finish(const Solution& s) {
     d_at_fix = d;
     C_at_fix = C;
   }
-  const double since_epoch = (t - ek.t) * kNs;
+  const double since_epoch = (t - s.t) * kNs;
   const double since_fix = std::abs((t - fix.t) * kNs);
 
   const Vector3 disp = d - *d_at_fix - C_at_fix * opt_.lever_arm;
@@ -592,6 +696,10 @@ std::string InMotionAlignment::summary() const {
      << " deg; gyro bias (" << std::setprecision(3) << diag_.gyro_bias(0) * 1e3 << ", " << diag_.gyro_bias(1) * 1e3 << ", "
      << diag_.gyro_bias(2) * 1e3 << ") mrad/s";
   if (diag_.stationary >= opt_.stationary_time) os << std::setprecision(1) << ", " << diag_.stationary << " s of standstill used";
+  if (offset_estimated())
+    os << std::setprecision(3) << "; " << (diag_.from_positions ? "the position fixes are " : "the receiver's velocity is ")
+       << std::abs(diag_.time_offset) << " s " << (diag_.time_offset >= 0 ? "older" : "newer") << " than "
+       << (diag_.from_positions ? "their" : "its") << " time stamps (sigma " << diag_.time_offset_sigma << " s)";
   if (diag_.held) os << "; " << diag_.held << " IMU sample(s) stood for lost ones";
   return os.str();
 }

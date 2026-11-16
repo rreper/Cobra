@@ -36,6 +36,8 @@ inertial::InMotionAlignmentOptions options_from(const InMotionAlignmentConfig& c
   o.stationary_rate = c.stationary_rate;
   o.stationary_time = c.stationary_time;
   o.start_time = c.start_time;
+  o.time_offset_prior_sigma = c.time_offset_prior_sigma;
+  o.time_offset_sigma = c.time_offset_sigma;
   return o;
 }
 }  // namespace

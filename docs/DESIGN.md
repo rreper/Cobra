@@ -977,7 +977,8 @@ until it moves.
 - *The receiver's velocity is older than its time stamp.* The example configurations give the velocity channel
   the position's time bias, 150 ms; the alignment fits best at 250 ms, and its sigma is honest only there. This
   is the receiver's velocity filter, not the transport. `configs/pos_vel_ins.json` is left as it is (its
-  acceptance rows are pinned); the two new configurations carry 250 ms on the velocity channel.
+  acceptance rows are pinned); the two new configurations carry 250 ms on the velocity channel. Since §7.29 the
+  alignment can find the figure itself (0.28 s), and the two configurations ask it to.
 - *After the hand-over* the plain filter (position fixes only) first loses heading when it was switched on under
   way: the gyro bias about the vertical is not observable in a window of twenty seconds (the estimate stays near
   zero, the truth is −2.7 mrad/s), so the heading drifts by 0.15 °/s until the filter has found the bias from
@@ -1006,8 +1007,9 @@ IMU, no odometer and no heading from outside.
 | `position_difference_sigma` | 0.15 m | horizontal, of the difference of two consecutive fixes; vertical twice |
 | `stationary_speed`, `stationary_rate`, `stationary_time` | 0.25 m/s, 0.02 rad/s, 3 s | when the vehicle counts as standing, and for how long before the gyro mean is the bias |
 | `start_time` | none | s; messages before it are ignored (a switch-on inside a recording) |
+| `time_offset_prior_sigma`, `time_offset_sigma` | 0 (off), 0.08 s | the receiver's time offset as one more unknown: §7.29 |
 
-Not in it: an estimate of the receiver's time offset (the largest error source left, see the table); the
+Not in it: the
 correlation between heading and gyro bias at the hand-over (the initial-solution interface carries the two
 covariance blocks separately); a heading for a vehicle that never accelerates horizontally.
 
@@ -1376,6 +1378,123 @@ Tests: `ZeroMotionTest.TheImuAloneCallsACreepingVehicleStanding` (v0.2.12, pinne
 `Filter.AReceiverThatShowsMotionSilencesTheZeroMotionUpdates` (one of each, from before the receiver was first
 heard); `JsonConfig.ZeroMotionConfirmationKeys`.
 
+### 7.29 The receiver's time offset, found by the alignment (`InMotionAlignmentConfig::time_offset_prior_sigma`)
+
+A receiver's velocity comes out of the receiver's own filter and is older than its time stamp. How much is a
+property of the receiver and its settings, and the table of §7.24 shows what a wrong figure costs: with the
+u-blox of the recording the heading at the hand-over is 1.6° RMS at a time bias of 250 ms, 3.1° at the 150 ms of
+the shipped configurations, 2.5° at 350 ms and 4.4° (16° in the worst case) with none, and at all but the first
+the sigma the filter starts with no longer covers the error. Somebody with another receiver does not have the
+figure. The alignment can find it: the same accelerations that show the heading show how late the receiver
+reports them.
+
+**Method.** With `time_offset_prior_sigma` above zero the offset τ (positive: the velocity is older than its
+stamp) is one more unknown of §7.24's least squares:
+
+```
+velocity stamped t_i  =  velocity of the vehicle at t_i − τ
+y_i = C0 (x(t_i − τ) + G_i δb + Θ_i b_a) + c,       x(t_i − τ − δτ) ≈ x(t_i − τ) − δτ · X_i f_i
+```
+
+- The window is integrated to the epochs' stamps less the offset found so far, exactly; only the correction δτ is
+  linearised, with the column `−C0 X_i f_i` (the specific force around the epoch, in the frame of the window
+  start; the integral of gravity covers the same length either way and drops out). The prior is on the whole
+  offset: zero, `time_offset_prior_sigma`. The offset is carried from one solution to the next as the gyro bias
+  is, so each new epoch starts from the last answer, and the IMU samples of one more second are kept in front
+  of the window (the estimate is held inside ±1 s).
+- *When it is handed over.* Two conditions join the heading sigma. The solution must not have moved the offset
+  by more than 0.05 s (one that did was linearised too far from where it ended; the next is integrated at the
+  new value). And the offset's own sigma has to be below `time_offset_sigma` (0.08 s). The second matters more
+  than it looks: while the data has said little, the estimate is half the prior's zero, and a heading computed
+  with an offset that is too small by a quarter is off accordingly
+  (`InMotionAlignment.TheOffsetHasToBeKnownBeforeTheHandOver`: 0.19 s found for 0.25 s and 3.6° of heading
+  error without the condition, 0.25 s and 1.7° with it, 1.6 s later).
+- *What is handed over.* The attitude and the velocity belong to the IMU time of the last epoch, its stamp less
+  the offset, and are carried from there to the last IMU sample as before. The initial position starts from
+  the last fix as it is stamped, also where the offset found is that of the fixes (velocity from position
+  differences). Taking that fix at its stamp less the offset was tried and taken out again: the filter that
+  takes over reads the next fixes with the configured time bias, a first position on another time base is a
+  step it digests through the receiver's bias states over minutes, and the position error a minute after the
+  hand-over was 1.79 m instead of 1.63 m on the recording.
+- *What can show it.* An acceleration that changes: pulling away, braking, entering and leaving a bend. On a
+  straight road at a steady speed nothing does, and nothing shows the heading either
+  (`WithoutAManoeuvreTheOffsetStaysWhereThePriorPutsIt`). In a steady bend an offset turns the velocity change
+  by the rate of turn times τ, which is a heading error to the equations; the two are told apart only by what
+  comes before and after, and the covariance of the heading contains the offset's share.
+- The offset is reported in the alignment's INFO line ("the receiver's velocity is 0.284 s older than its time
+  stamps (sigma 0.050 s)") and in `Diagnostics`. The filter that takes over does not use it: every channel keeps
+  the `TimeBiasConfig` it was given. The line is what to put there.
+
+**Simulated drives** (twelve per figure, six pulling away and six under way, 0.05 m/s of velocity noise):
+
+| the receiver's velocity is | offset | heading error RMS | error / sigma | offset found: mean, error RMS | time to align |
+|---|---|---|---|---|---|
+| as stamped | not estimated | 2.5° | 1.0 | | 12.8 s |
+| 0.25 s old | not estimated | 8.6° | 3.3 | | 13.5 s |
+| 0.25 s old | estimated | 1.7° | 0.8 | 0.248 s, 0.052 s | 17.1 s |
+| as stamped | estimated | 1.5° | 0.7 | 0.010 s, 0.056 s | 17.0 s |
+
+and −0.129, 0.104 and 0.388 s found for −0.15, 0.1 and 0.4 s. Position fixes 0.2 s old with no velocity
+channel: 0.207 s. The four seconds are the price: the heading sigma now contains what is not known about the
+offset, and the offset has to settle. The heading is better than without an offset at all because the solution
+that is handed over has seen more data.
+
+**The recorded drive** (`docs/ALIGNMENT_MATRIX.md`, 64 switch-on times), the offset estimated with a prior of
+0.3 s, by the time bias the configuration gives the velocity channel:
+
+| configured time bias | heading at the hand-over, as configured | with the offset estimated | error / sigma | offset found: mean (std) | age of the velocity |
+|---|---|---|---|---|---|
+| none | 4.41° (16.01°) | 1.31° (3.04°) | 0.54 | +0.275 (0.023) s | 0.275 s |
+| 150 ms | 3.06° (7.45°) | 1.22° (2.91°) | 0.50 | +0.131 (0.022) s | 0.281 s |
+| 250 ms | 1.61° (3.84°) | 1.21° (2.83°) | 0.48 | +0.034 (0.023) s | 0.284 s |
+| 350 ms | 2.54° (8.48°) | 1.20° (2.80°) | 0.50 | −0.062 (0.026) s | 0.288 s |
+| position differences (fixes at 150 ms) | 2.65° (5.22°) | 1.35° (2.65°) | 0.51 | −0.077 (0.035) s | 0.073 s |
+
+- The heading is 1.2 to 1.3° whatever was configured, better than at the best fixed figure, and the worst case
+  is 3° instead of 4 to 16°. The receiver's velocity is 0.28 s old; a single alignment finds that to 0.02 s and
+  says 0.05 s.
+- The time to align is what it was with the receiver's velocity (19, 42 to 44 and 137 s for the median, the
+  90 % mark and the longest, against 18 to 19, 42 and 136 to 137). From position differences it is longer, 37 and 98 s against 30
+  and 62: a velocity with 0.15 m/s of noise takes that long to show an offset to 0.08 s.
+- After the hand-over nothing changes that the filter does not undo within the minute: with the constraints and
+  the confirmed zero-motion updates the heading is 1.1°, 0.7°, 0.8° and 0.6° RMS after 10, 30, 60 and 120 s,
+  against 1.2°, 0.7°, 0.7° and 0.6° without the estimate. The gain is the first seconds and the worst case.
+- *A check that involves neither the IMU nor the reference.* The receiver's velocity against the differences
+  of its own fixes fits best when the velocity is taken 0.197 s older than the fixes
+  (`prototypes/align-in-motion/receiver_self_lag.py`). The two estimates above, one from the velocity channel
+  and one from the fixes, differ by 0.211 s.
+- *The fixes.* The alignment finds them 0.07 s old against the IMU where the configurations apply 0.15 s. The
+  configurations are left as they are: their acceptance rows are pinned, and the comparison those rows make is
+  with the reference solution, whose time base is not the IMU's. Against the reference the receiver's velocity
+  is 0.35 s old, 0.07 s more than against the IMU; if the fixes are off by the same 0.07 s, they are 0.14 s old
+  against the reference, which is the configured figure. I could not confirm that directly: an along-track
+  offset of 2.3 m between the reference point and the antenna looks like a lag at one speed, and my two ways of
+  separating them disagree.
+
+`configs/pos_ins_align_in_motion.json` and `configs/pos_ins_ground_vehicle.json` estimate the offset (prior
+0.3 s) on top of the 250 ms they configure.
+
+| Key (`InMotionAlignmentConfig`) | Default | Meaning |
+|---|---|---|
+| `time_offset_prior_sigma` | 0 | s; above zero the offset is estimated, with this sigma around zero as its prior, after whatever `TimeBiasConfig` the channel has. At most 0.5. Zero: the stamps are taken as they are, and neither key is written |
+| `time_offset_sigma` | 0.08 s | aligned only once the offset's sigma is below it, as `heading_sigma` for the heading |
+
+Limits. One alignment sees fifteen to forty seconds: 0.02 s on this drive, more on a gentler one, nothing on a
+motorway. The offset is taken as constant over the window. It is the velocity's (or, without a velocity
+channel, the fixes'); the other channel's is not estimated, and nothing is estimated once the filter runs: an
+offset as a filter state, observable at every bend for as long as the vehicle drives, is the next step
+(§9.6). An offset beyond ±1 s is not found.
+
+Tests: `InMotionAlignment.AnOldVelocityTurnsTheHeadingAndTheSigmaDoesNotSaySo` (the default, pinned),
+`TheTimeOffsetIsEstimatedAlong`, `TheOffsetHasToBeKnownBeforeTheHandOver`, `AnOffsetThatIsNotThereIsNotInvented`,
+`TheTimeOffsetIsReportedAndCarriedToTheHandOver` (also a velocity that arrives without the controller's buffer
+and is newer than its stamp), `TheOffsetOfPositionFixesIsFoundTheSameWay`,
+`WithoutAManoeuvreTheOffsetStaysWhereThePriorPutsIt`; `InMotionAlignPlugin.BuildsTheStrategyFromItsConfig` and
+`JsonRoundTripAndTheExampleConfigurations` (the keys); `InMotionAlignFilter.ComesUpWithoutAHeadingFromOutsideAndTracks`
+(the example configuration through the whole filter with a velocity 0.25 s old and no time bias: 0.235 s
+found). Without the keys the alignment is unchanged: the eleven rows and 704 runs of the alignment matrix of
+v0.2.15 come out identical to the last digit.
+
 ## 8. Deviations from the Python original
 
 Every deviation is deliberate and listed here; anything not listed is intended to be identical.
@@ -1410,6 +1529,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 26 | `StandardOrchestrationConfig::initialization_imu_replay_s`: IMU messages received before the initialization has a solution are kept and those after the solution's time given to the new inertial (§7.26) | they are dropped | off by default, key written only when set |
 | 27 | IMU preset `vn100_driving` (§7.27) | — | C++ addition; no shipped default configuration names it, the four vehicle examples do |
 | 28 | `ZeroMotionGeneratorConfig::confirmation_channels` and the five keys with it: a receiver's velocity confirms or contradicts each standstill of deviation 25 (§7.28) | — | C++ addition to a C++ addition; off unless channels are named, the keys are written only then. `configs/pos_ins_ground_vehicle.json` names them |
+| 29 | `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`: the time offset of the receiver's velocity (or of its fixes) is one more unknown of the alignment in motion and is reported in its log line (§7.29) | — | C++ addition; off at 0, the keys are written only then. The two alignment example configurations set 0.3 s |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1516,8 +1636,10 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.28, in the order of what a vehicle installation misses first: an estimate of the receiver's time
-offset (the largest error source of the alignment in motion); an accelerometer bias that is allowed to step
+Open after §7.29, in the order of what a vehicle installation misses first: the receiver's time offsets as
+filter states (§7.29 finds the velocity's once, in the alignment, and only reports it; the filter that takes
+over keeps the configured time biases, and the fixes' offset is not estimated at all when there is a velocity
+channel); an accelerometer bias that is allowed to step
 when the vehicle starts and stops (§7.28: 2 mm/s² on the vertical axis of the example unit, which is what
 keeps the vertical zero velocity at 0.2 m/s); creeping in an outage, where the IMU is alone (§7.28);
 measurement weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.

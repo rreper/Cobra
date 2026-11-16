@@ -766,10 +766,15 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
     c->stationary_rate = get_or(jc, "stationary_rate", c->stationary_rate);
     c->stationary_time = get_or(jc, "stationary_time", c->stationary_time);
     if (jc.contains("start_time") && !jc.at("start_time").is_null()) c->start_time = jc.at("start_time").get<double>();
+    c->time_offset_prior_sigma = get_or(jc, "time_offset_prior_sigma", 0.0);
+    c->time_offset_sigma = get_or(jc, "time_offset_sigma", c->time_offset_sigma);
     if (!(c->heading_sigma > 0) || !(c->max_window > 0) || c->min_epochs < 1 || !(c->position_difference_sigma > 0) ||
         !(c->stationary_time > 0))
       fail("InMotionAlignmentConfig: heading_sigma, max_window, position_difference_sigma and stationary_time must be > 0, "
            "min_epochs >= 1");
+    if (!(c->time_offset_prior_sigma >= 0) || !(c->time_offset_prior_sigma <= 0.5) || !(c->time_offset_sigma > 0))
+      fail("InMotionAlignmentConfig: time_offset_prior_sigma must be between 0 (the offset is not estimated) and 0.5 s, "
+           "time_offset_sigma > 0");
     return c;
   }
   if (type == "PvaMessageInitializationConfig") {
@@ -1090,6 +1095,10 @@ json config_to_json(const BaseConfig& c) {
            {"stationary_speed", p->stationary_speed}, {"stationary_rate", p->stationary_rate},
            {"stationary_time", p->stationary_time}};
     if (p->start_time) o["start_time"] = *p->start_time;
+    if (p->time_offset_prior_sigma > 0) {  // written only when the offset is estimated
+      o["time_offset_prior_sigma"] = p->time_offset_prior_sigma;
+      o["time_offset_sigma"] = p->time_offset_sigma;
+    }
     return o;
   }
   if (auto* p = dynamic_cast<const PvaMessageInitializationConfig*>(&c)) {

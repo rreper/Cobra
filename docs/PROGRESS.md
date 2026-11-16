@@ -2,6 +2,31 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — The receiver's time offset, found by the alignment (branch time-offset, not released)
+
+- Asked for: the receiver time-offset estimate. A receiver's velocity is older than its time stamp, and the
+  alignment in motion is only as good as the figure configured for that: 1.6° of heading at 250 ms, 3.1° at the
+  shipped 150 ms, 4.4° (16° worst) with none. `InMotionAlignmentConfig::time_offset_prior_sigma` makes the offset
+  one more unknown of the alignment (DESIGN.md §7.29): the window is integrated to the epochs' stamps less the
+  offset, the correction is one more column of the linear step, and the alignment is handed over only once the
+  offset's sigma is below `time_offset_sigma` (0.08 s). Off at 0, the default.
+- On the recording (64 switch-on times, prior 0.3 s): heading at the hand-over 1.2 to 1.3° RMS (worst 3.0°)
+  whatever time bias is configured, in the same time as before. The velocity of the example u-blox is 0.28 s old
+  (0.275 to 0.288 s from four configured biases, 0.02 s scatter within each); its fixes are 0.07 s old where
+  the configurations apply 0.15 s (left as they are, see §7.29). After the hand-over the filter's heading is as
+  before within the minute; the gain is the first seconds and the worst case.
+- Cross-check without the IMU or the reference: the receiver's velocity fits the differences of its own fixes
+  best at 0.197 s; the two alignment estimates differ by 0.211 s.
+- Simulated drives: a velocity 0.25 s old costs 8.6° of heading taken as stamped, 1.7° with the offset
+  estimated (0.248 s found); handing over before the offset is known gives 0.19 s and 3.6°, which is why the
+  second key exists. Four seconds longer to align there, none on the recording.
+- The alignment reports the offset in its log line; the filter that takes over keeps the configured time
+  biases. `configs/pos_ins_align_in_motion.json` and `configs/pos_ins_ground_vehicle.json` estimate it.
+- 24 suites / 295 tests (7 new). Without the keys the alignment is unchanged to the last digit (the 704 runs of
+  the v0.2.15 alignment matrix).
+- Left: the offsets as filter states, so that they are used and tracked after the hand-over; the fixes' offset
+  when there is a velocity channel.
+
 ## 2026-11-16 — v0.2.15: a standstill confirmed by the receiver
 
 - Asked for: the receiver-confirmed standstill. To the IMU a car that creeps at a steady speed is as quiet as one

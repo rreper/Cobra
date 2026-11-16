@@ -17,11 +17,13 @@ Rows: the receiver's velocity at the time bias the example configs give it (150 
 recording better, velocity from position differences, and the alignment followed by a filter that also has the
 ground-vehicle constraints of run_aiding_matrix.py ("no sideways, no vertical motion") and the zero-velocity /
 zero-rate updates while the vehicle stands, on the word of the IMU alone and with the receiver's velocity
-confirming each standstill.
+confirming each standstill. The rows ending in "offset" estimate the receiver's time offset along
+(InMotionAlignmentConfig.time_offset_prior_sigma), at several configured time biases.
 
 --write-configs also writes configs/pos_ins_align_in_motion.json (pos_ins without the heading from the
 configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints and the zero-velocity /
-zero-rate updates at standstill, confirmed by the receiver's velocity), no start time.
+zero-rate updates at standstill, confirmed by the receiver's velocity), no start time; both estimate the receiver's
+time offset.
 """
 import argparse, copy, json, math, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +40,9 @@ LEVER = [-0.5, 0.38, -0.05]  # antenna relative to the IMU, as in the example co
 AFTER = [10.0, 30.0, 60.0, 120.0]
 SUMMARY = re.compile(r'Aligned in motion after ([\d.]+) s \(window of (\d+) epochs, ([\d.]+) s, velocity from ([a-z ]+)\): heading (-?[\d.]+) deg, '
                      r'sigma ([\d.]+) deg; gyro bias \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\) mrad/s(?:, ([\d.]+) s of standstill used)?')
+
+
+OFFSET = re.compile(r'(?:velocity is|fixes are) ([\d.]+) s (older|newer) than (?:its|their) time stamps \(sigma ([\d.]+) s\)')
 
 
 def aligned(cfg, source='velocity', velocity_bias_ms=150, heading_sigma_deg=3.0, start_time=None, lever=LEVER, **extra):
@@ -66,9 +71,11 @@ def aligned(cfg, source='velocity', velocity_bias_ms=150, heading_sigma_deg=3.0,
 plain = lambda cfg: cfg  # noqa: E731
 ground_vehicle = lambda cfg: zero_motion(constraints(cfg))  # noqa: E731
 ground_vehicle_confirmed = lambda cfg: zero_motion(constraints(cfg), confirmed=True)  # noqa: E731
+OFFSET_PRIOR = 0.3  # s; sigma of the prior of the receiver's time offset where it is estimated (DESIGN.md 7.29)
 ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the receiver's velocity, 150 ms time bias as the example configs give it", plain),
         ('velocity_250ms', dict(source='velocity', velocity_bias_ms=250), "the receiver's velocity, 250 ms", plain),
         ('velocity_350ms', dict(source='velocity', velocity_bias_ms=350), "the receiver's velocity, 350 ms", plain),
+        ('velocity_0ms', dict(source='velocity', velocity_bias_ms=0), "the receiver's velocity as it is stamped, no time bias configured", plain),
         ('velocity_250ms_2deg', dict(source='velocity', velocity_bias_ms=250, heading_sigma_deg=2.0), '250 ms, declared at a heading sigma of 2 deg instead of 3', plain),
         ('position', dict(source='position'), 'differences of the position fixes, no velocity channel', plain),
         ('velocity_250ms_no_lever', dict(source='velocity', velocity_bias_ms=250, lever=[0.0, 0.0, 0.0]), '250 ms, antenna lever arm left out', plain),
@@ -80,7 +87,18 @@ ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the r
         ('velocity_250ms_constraints_zero_motion', dict(source='velocity', velocity_bias_ms=250),
          '250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates on the word of the IMU alone', ground_vehicle),
         ('velocity_250ms_constraints_zero_motion_confirmed', dict(source='velocity', velocity_bias_ms=250),
-         "the same with the receiver's velocity confirming each standstill: configs/pos_ins_ground_vehicle.json", ground_vehicle_confirmed)]
+         "the same with the receiver's velocity confirming each standstill", ground_vehicle_confirmed),
+        ('velocity_0ms_offset', dict(source='velocity', velocity_bias_ms=0, time_offset_prior_sigma=OFFSET_PRIOR),
+         "the receiver's velocity with no time bias configured at all, its time offset estimated along (prior sigma 0.3 s)", plain),
+        ('velocity_150ms_offset', dict(source='velocity', velocity_bias_ms=150, time_offset_prior_sigma=OFFSET_PRIOR), '150 ms and the offset estimated', plain),
+        ('velocity_250ms_offset', dict(source='velocity', velocity_bias_ms=250, time_offset_prior_sigma=OFFSET_PRIOR),
+         '250 ms and the offset estimated: configs/pos_ins_align_in_motion.json', plain),
+        ('velocity_350ms_offset', dict(source='velocity', velocity_bias_ms=350, time_offset_prior_sigma=OFFSET_PRIOR), '350 ms and the offset estimated', plain),
+        ('position_offset', dict(source='position', time_offset_prior_sigma=OFFSET_PRIOR),
+         'differences of the position fixes (150 ms time bias as configured), the offset of the fixes estimated', plain),
+        ('velocity_250ms_offset_ground_vehicle', dict(source='velocity', velocity_bias_ms=250, time_offset_prior_sigma=OFFSET_PRIOR),
+         '250 ms and the offset estimated; afterwards the constraints and the confirmed zero-motion updates: configs/pos_ins_ground_vehicle.json',
+         ground_vehicle_confirmed)]
 
 
 def dcm(q):
@@ -122,6 +140,9 @@ def run(runner, log, truth, cfg, name, workdir, t_on=None):
     if m:
         r.update(window_epochs=int(m.group(2)), window_s=float(m.group(3)), source=m.group(4), gyro_bias_mrad_s=[float(m.group(i)) for i in (7, 8, 9)],
                  standstill_s=float(m.group(10) or 0.0))
+    o = OFFSET.search(p.stdout + p.stderr)
+    if o:  # with time_offset_sigma: how much older than its stamps the alignment found the velocity to be
+        r.update(time_offset=(1.0 if o.group(2) == 'older' else -1.0) * float(o.group(1)), time_offset_sigma=float(o.group(3)))
     if t_on is not None:
         r.update(time_to_align=float(t[0] - t_on), heading_error=float(head[0]), heading_sigma=float(np.degrees(sig[0, 8])), tilt_error=float(tilt[0]),
                  position_error=float(h[0]))
@@ -147,7 +168,7 @@ def main():
     a = ap.parse_args()
     if a.write_configs:
         for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', ground_vehicle_confirmed)):
-            cfg = aligned(then(base()), **ROWS[1][1])
+            cfg = aligned(then(base()), time_offset_prior_sigma=OFFSET_PRIOR, **ROWS[1][1])
             cfg['app']['name'] = name
             json.dump(cfg, open(os.path.join(ROOT, 'configs', name + '.json'), 'w'), indent=2)
             print('wrote configs/%s.json' % name)
@@ -188,6 +209,11 @@ def main():
                        position_rms=float(np.sqrt(np.mean([r['position_error'] ** 2 for _, r in ok]))),
                        under_way=int(moving.sum()), heading_rms_under_way=float(np.sqrt(np.mean(he[moving] ** 2))) if moving.any() else None,
                        heading_rms_from_standstill=float(np.sqrt(np.mean(he[~moving] ** 2))) if (~moving).any() else None)
+            off = np.array([r['time_offset'] for _, r in ok if r.get('time_offset') is not None])
+            if len(off):  # how much older than its stamps (after the configured time bias) the alignment found the velocity
+                row.update(offset_n=int(len(off)), offset_mean=float(off.mean()), offset_std=float(off.std()), offset_min=float(off.min()),
+                           offset_max=float(off.max()),
+                           offset_sigma_mean=float(np.mean([r['time_offset_sigma'] for _, r in ok if r.get('time_offset') is not None])))
             for dt in AFTER:
                 hh, pp, rh, rp = [], [], [], []
                 for _, r in ok:
@@ -204,7 +230,7 @@ def main():
         for s, r in rs:
             d = dict(row=name, switch_on_s=s, exit=r.get('exit', 0), aligned=bool(r.get('aligned')))
             for key in ('time_to_align', 'heading_error', 'heading_sigma', 'tilt_error', 'position_error', 'window_epochs', 'window_s', 'standstill_s',
-                        'gyro_bias_mrad_s', 'error'):
+                        'gyro_bias_mrad_s', 'time_offset', 'time_offset_sigma', 'error'):
                 if key in r:
                     d[key] = r[key]
             detail.append(d)
@@ -231,6 +257,18 @@ def main():
                 '%.2f' % row['heading_rms_from_standstill'] if row['heading_rms_from_standstill'] is not None else '-'))
         f.write('\n' + '\n'.join('- `%s`: %s' % (name, note) for name, _, note, _ in rows) + '\n')
         f.write('\nThe longest times are switch-on times at which the car stands: nothing shows a heading until it moves.\n')
+        with_offset = [row for row in table if row.get('offset_n')]
+        if with_offset:
+            f.write('\n## The receiver\'s time offset\n\nWhere it is estimated (`time_offset_prior_sigma`): how much older than its time stamps the alignment found '
+                    'the velocity to be, after the time bias the configuration applies, over the switch-on times. The last column is the two added: the same '
+                    'receiver has to give the same age whatever was configured.\n\n')
+            f.write('| velocity from | configured time bias, s | offset found: mean (std), s | least, largest | sigma it reports, mean | age of the velocity, s |\n')
+            f.write('|---|---|---|---|---|---|\n')
+            for row in with_offset:
+                kw = next(k for name, k, _, _ in rows if name == row['row'])
+                bias = 0.15 if kw.get('source') == 'position' else kw.get('velocity_bias_ms', 150) / 1000.0
+                f.write('| %s | %.2f | %+.3f (%.3f) | %+.3f, %+.3f | %.3f | %.3f |\n' % (row['row'], bias, row['offset_mean'], row['offset_std'], row['offset_min'],
+                                                                                     row['offset_max'], row['offset_sigma_mean'], bias + row['offset_mean']))
         f.write('\n## Afterwards\n\nHeading error (deg) and horizontal position error (m), RMS over the switch-on times, a given time after the hand-over; '
                 '"given" is the standard run, whose heading comes from the configuration file at the start of the log, at the same moments.\n\n')
         f.write('| velocity from | ' + ' | '.join('+%g s: heading (worst), given / position (worst), given' % dt for dt in AFTER) + ' |\n')

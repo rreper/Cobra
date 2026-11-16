@@ -69,6 +69,8 @@ struct Drive {
   Vector3 lever = Vector3::Zero();  ///< antenna relative to the IMU, body frame
   double lat = 0.70, lon = -1.50, alt = 220.0;
   double latency = 2.0;         ///< s between a fix and its delivery
+  double velocity_age = 0.0;    ///< s; the velocity stamped t is the velocity of t - velocity_age (the receiver's filter)
+  double position_age = 0.0;    ///< s; the same for the position
   double imu_dt = 0.01;
   double drop_imu = 0.0;        ///< fraction of IMU samples lost
   bool send_velocity = true, send_position = true;
@@ -146,10 +148,12 @@ Track simulate(const Drive& d, double duration, const Sink& sink) {
 
     while (next_fix <= t1 + 1e-9) {  // the antenna's velocity and position at the fix time
       const double tf = next_fix;
-      const Matrix3 C = d.attitude(tf);
-      const Vector3 lever_rate = (d.attitude(tf + 1e-4) - d.attitude(tf - 1e-4)) * d.lever / 2e-4;
+      const double tv = tf - d.velocity_age, tp = tf - d.position_age;  // what the receiver shows is that old
+      const Matrix3 C = d.attitude(tp);
+      const Vector3 lever_rate = (d.attitude(tv + 1e-4) - d.attitude(tv - 1e-4)) * d.lever / 2e-4;
       Vector3 pf = track.back().second + d.velocity(tf) * (tf - t1);
-      fixes.push_back({tf, Vector3(d.velocity(tf) + lever_rate + noise(d.velocity_sigma)), Vector3(pf + C * d.lever + noise(d.position_sigma))});
+      if (d.position_age != 0.0) pf -= d.velocity(tf - 0.5 * d.position_age) * d.position_age;
+      fixes.push_back({tf, Vector3(d.velocity(tv) + lever_rate + noise(d.velocity_sigma)), Vector3(pf + C * d.lever + noise(d.position_sigma))});
       next_fix += 1.0;
     }
 
@@ -438,6 +442,207 @@ TEST(InMotionAlignment, TheReportedSigmaIsHonest) {
   EXPECT_LT(worst, 4.0);
 }
 
+// ----------------------------------------------------------------------------- the receiver's time offset
+// DESIGN.md §7.29. A receiver's velocity comes out of the receiver's own filter and is older than its time stamp:
+// 0.25 s for the u-blox of the example recording.
+
+namespace {
+struct Campaign {
+  int n = 0, aligned = 0;
+  double heading = 0, ratio = 0, time = 0;      ///< heading error RMS (rad), error over sigma RMS, mean time to align (s)
+  double offset_mean = 0, offset_rms = 0, offset_sigma = 0, offset_worst = 0;  ///< s; rms and worst of (estimate - truth)
+  double velocity = 0;                           ///< RMS of the velocity error at the hand-over, m/s
+};
+/// Twelve drives, six that pull away and six switched on under way, with the receiver's velocity `age` s old.
+Campaign campaign(double age, const InMotionAlignmentOptions& options) {
+  Campaign c;
+  for (unsigned seed = 1; seed <= 6; ++seed) {
+    for (int kind = 0; kind < 2; ++kind) {
+      Drive d = kind == 0 ? pull_away(0.5 * seed) : under_way(0.5 * seed);
+      d.seed = seed;
+      d.velocity_age = age;
+      const Outcome o = run(d, options, 120.0);
+      ++c.n;
+      if (!o.aligned) continue;
+      ++c.aligned;
+      c.heading += o.att_error(2) * o.att_error(2);
+      const double z = o.att_error(2) / o.heading_sigma();
+      c.ratio += z * z;
+      c.time += o.at;
+      c.velocity += o.vel_error.squaredNorm();
+      const double e = o.diag.time_offset - age;
+      c.offset_mean += o.diag.time_offset;
+      c.offset_rms += e * e;
+      c.offset_worst = std::max(c.offset_worst, std::abs(e));
+      c.offset_sigma += o.diag.time_offset_sigma;
+    }
+  }
+  if (c.aligned) {
+    c.heading = std::sqrt(c.heading / c.aligned);
+    c.ratio = std::sqrt(c.ratio / c.aligned);
+    c.time /= c.aligned;
+    c.velocity = std::sqrt(c.velocity / c.aligned);
+    c.offset_mean /= c.aligned;
+    c.offset_rms = std::sqrt(c.offset_rms / c.aligned);
+    c.offset_sigma /= c.aligned;
+  }
+  return c;
+}
+std::string describe(const Campaign& c) {
+  std::ostringstream os;
+  os << c.aligned << " of " << c.n << " aligned after " << c.time << " s (mean); heading rms " << c.heading / kDeg << " deg, error / sigma rms "
+     << c.ratio << "; velocity error rms " << c.velocity << " m/s; time offset mean " << c.offset_mean << " s, error rms " << c.offset_rms
+     << " s, worst " << c.offset_worst << " s, sigma " << c.offset_sigma << " s";
+  return os.str();
+}
+/// The offset estimated: nothing known about it beforehand but that it is a fraction of a second.
+InMotionAlignmentOptions with_offset(double prior_sigma = 0.3) {
+  InMotionAlignmentOptions o;
+  o.time_offset_prior_sigma = prior_sigma;
+  return o;
+}
+}  // namespace
+
+TEST(InMotionAlignment, AnOldVelocityTurnsTheHeadingAndTheSigmaDoesNotSaySo) {
+  // The default, pinned: the stamps are taken as they are. A quarter of a second of age more than doubles the
+  // heading error, and the sigma the filter is started with no longer covers it.
+  const Campaign fresh = campaign(0.0, {});
+  const Campaign old = campaign(0.25, {});
+  ASSERT_EQ(fresh.aligned, fresh.n) << describe(fresh);
+  ASSERT_EQ(old.aligned, old.n) << describe(old);
+  EXPECT_LT(fresh.heading, 3.0 * kDeg) << describe(fresh);
+  EXPECT_LT(fresh.ratio, 1.3) << describe(fresh);
+  EXPECT_GT(old.heading, 2.0 * fresh.heading) << describe(old);
+  EXPECT_GT(old.ratio, 1.5) << describe(old);
+  EXPECT_EQ(old.offset_mean, 0.0);  // nothing is estimated, nothing is reported
+  std::cout << "velocity as stamped: " << describe(fresh) << "\nvelocity 0.25 s old, taken as stamped: " << describe(old) << "\n";
+}
+
+TEST(InMotionAlignment, TheTimeOffsetIsEstimatedAlong) {
+  // The same drives with the offset as one more unknown (prior: zero, 0.3 s; handed over once it is known to 0.08 s).
+  const Campaign old = campaign(0.25, with_offset());
+  ASSERT_EQ(old.aligned, old.n) << describe(old);
+  EXPECT_NEAR(old.offset_mean, 0.25, 0.04) << describe(old);
+  EXPECT_LT(old.offset_rms, 0.08) << describe(old);
+  EXPECT_LT(old.offset_worst, 0.16) << describe(old);
+  EXPECT_LE(old.offset_sigma, 0.08) << describe(old);
+  EXPECT_LT(old.heading, 2.5 * kDeg) << describe(old);
+  EXPECT_LT(old.ratio, 1.2) << describe(old);
+  EXPECT_LT(old.velocity, 0.3) << describe(old);  // the hand-over is at the IMU's time, with the velocity of that time
+  // and it is found whatever it is: newer than stamped, or nearly half a second old
+  for (double age : {-0.15, 0.1, 0.4}) {
+    const Campaign c = campaign(age, with_offset());
+    ASSERT_EQ(c.aligned, c.n) << "age " << age << ": " << describe(c);
+    EXPECT_NEAR(c.offset_mean, age, 0.04) << "age " << age << ": " << describe(c);
+    EXPECT_LT(c.offset_rms, 0.08) << "age " << age << ": " << describe(c);
+    EXPECT_LT(c.heading, 2.5 * kDeg) << "age " << age << ": " << describe(c);
+    EXPECT_LT(c.ratio, 1.2) << "age " << age << ": " << describe(c);
+    std::cout << "velocity " << age << " s old, offset estimated: " << describe(c) << "\n";
+  }
+  std::cout << "velocity 0.25 s old, offset estimated: " << describe(old) << "\n";
+}
+
+TEST(InMotionAlignment, TheOffsetHasToBeKnownBeforeTheHandOver) {
+  // Why time_offset_sigma exists. Handed over as soon as the heading sigma allows (the limit on the offset's sigma
+  // out of the way), the offset is still half the prior's zero: too small by a quarter, and the heading with it.
+  InMotionAlignmentOptions early = with_offset();
+  early.time_offset_sigma = 1.0;
+  const Campaign e = campaign(0.25, early);
+  const Campaign c = campaign(0.25, with_offset());
+  ASSERT_EQ(e.aligned, e.n) << describe(e);
+  ASSERT_EQ(c.aligned, c.n) << describe(c);
+  EXPECT_LT(e.offset_mean, 0.22) << describe(e);
+  EXPECT_GT(e.heading, 1.5 * c.heading) << describe(e) << " against " << describe(c);
+  EXPECT_GT(e.ratio, 1.2) << describe(e);
+  EXPECT_LT(c.time, e.time + 4.0) << describe(c) << " against " << describe(e);  // what waiting costs
+  std::cout << "handed over without waiting for the offset: " << describe(e) << "\n";
+}
+
+TEST(InMotionAlignment, AnOffsetThatIsNotThereIsNotInvented) {
+  // What the extra unknown costs when the stamps were right: nothing in the heading, a few seconds.
+  const Campaign plain = campaign(0.0, {});
+  const Campaign est = campaign(0.0, with_offset());
+  ASSERT_EQ(est.aligned, est.n) << describe(est);
+  EXPECT_LT(std::abs(est.offset_mean), 0.03) << describe(est);
+  EXPECT_LT(est.offset_rms, 0.08) << describe(est);
+  EXPECT_LT(est.heading, 1.1 * plain.heading) << describe(est) << " against " << describe(plain);
+  EXPECT_LT(est.ratio, 1.2) << describe(est);
+  EXPECT_LT(est.time, plain.time + 6.0) << describe(est) << " against " << describe(plain);
+  std::cout << "velocity as stamped, offset estimated: " << describe(est) << "\n";
+}
+
+TEST(InMotionAlignment, TheTimeOffsetIsReportedAndCarriedToTheHandOver) {
+  Drive d = under_way(0.4);
+  d.velocity_age = 0.3;
+  const Outcome o = run(d, with_offset(), 120.0);
+  ASSERT_TRUE(o.aligned) << describe(o);
+  EXPECT_NEAR(o.diag.time_offset, 0.3, 0.12) << describe(o);
+  EXPECT_GT(o.diag.time_offset_sigma, 0.0);
+  EXPECT_LE(o.diag.time_offset_sigma, 0.08);
+  EXPECT_NE(o.summary.find("the receiver's velocity is 0."), std::string::npos) << o.summary;
+  EXPECT_NE(o.summary.find("s older than its time stamps (sigma 0.0"), std::string::npos) << o.summary;
+  // the solution is still at the last IMU sample, with that moment's velocity and position
+  EXPECT_NEAR(o.solution_time, o.at, 1e-6);
+  EXPECT_LT(o.vel_error.norm(), 0.3) << o.vel_error.transpose();
+  EXPECT_LT(o.pos_error.norm(), 1.5) << o.pos_error.transpose();
+  EXPECT_LT(std::abs(o.att_error(2)), 3.0 * o.heading_sigma()) << describe(o);
+  // Without the option the line says nothing about an offset.
+  const Outcome plain = run(d, {}, 120.0);
+  ASSERT_TRUE(plain.aligned);
+  EXPECT_EQ(plain.summary.find("time stamps"), std::string::npos) << plain.summary;
+  EXPECT_EQ(plain.diag.time_offset, 0.0);
+  // A velocity that arrives almost at once (no controller buffer) and is newer than its stamp: the IMU has to
+  // get past the epoch first, and does.
+  Drive quick = under_way(-0.8);
+  quick.latency = 0.05;
+  quick.velocity_age = -0.2;
+  const Outcome q = run(quick, with_offset(), 120.0);
+  ASSERT_TRUE(q.aligned) << describe(q);
+  EXPECT_NEAR(q.diag.time_offset, -0.2, 0.12) << describe(q);
+  EXPECT_NE(q.summary.find("s newer than its time stamps"), std::string::npos) << q.summary;
+  EXPECT_LT(std::abs(q.att_error(2)), 3.0 * q.heading_sigma()) << describe(q);
+}
+
+TEST(InMotionAlignment, TheOffsetOfPositionFixesIsFoundTheSameWay) {
+  // No velocity channel: the velocity is the difference of consecutive fixes, and the offset is that of the fixes.
+  double sum = 0, worst = 0;
+  int n = 0;
+  for (unsigned seed = 1; seed <= 6; ++seed) {
+    Drive d = under_way(0.7 * seed);
+    d.seed = seed;
+    d.send_velocity = false;
+    d.position_age = 0.2;
+    const Outcome o = run(d, with_offset(), 200.0);
+    ASSERT_TRUE(o.aligned) << "seed " << seed << ": " << describe(o);
+    EXPECT_TRUE(o.diag.from_positions);
+    EXPECT_NE(o.summary.find("the position fixes are 0."), std::string::npos) << o.summary;
+    EXPECT_LT(std::abs(o.att_error(2)), 3.5 * o.heading_sigma()) << "seed " << seed << ": " << describe(o);
+    // The position handed over starts from the last fix as it is stamped, 0.2 s and 2.4 m behind at this speed:
+    // where the filter that takes over will find the next fixes. The offset is reported, not applied to the fix.
+    EXPECT_GT(o.pos_error.norm(), 1.5) << "seed " << seed << ": " << o.pos_error.transpose();
+    EXPECT_LT(o.pos_error.norm(), 3.5) << "seed " << seed << ": " << o.pos_error.transpose();
+    sum += o.diag.time_offset;
+    worst = std::max(worst, std::abs(o.diag.time_offset - 0.2));
+    ++n;
+  }
+  EXPECT_NEAR(sum / n, 0.2, 0.06);
+  EXPECT_LT(worst, 0.2);
+  std::cout << "position fixes 0.2 s old: offset mean " << sum / n << " s, worst error " << worst << " s\n";
+}
+
+TEST(InMotionAlignment, WithoutAManoeuvreTheOffsetStaysWhereThePriorPutsIt) {
+  // Straight and steady: no acceleration, nothing shows how old the velocity is, and no heading is claimed either.
+  Drive steady;
+  steady.speed = [](double) { return 12.0; };
+  steady.course = [](double) { return 0.8; };
+  steady.velocity_age = 0.3;
+  const Outcome a = run(steady, with_offset(), 90.0);
+  EXPECT_FALSE(a.aligned) << describe(a);
+  EXPECT_GT(a.diag.solutions, 10u);
+  EXPECT_LT(std::abs(a.diag.time_offset), 0.15) << a.diag.time_offset;
+  EXPECT_GT(a.diag.time_offset_sigma, 0.2) << a.diag.time_offset_sigma;  // of the 0.3 s it started with
+}
+
 TEST(InMotionAlignment, LostImuSamplesAreHeldNotIntegratedAsFreeFall) {
   // 4 % of the samples lost, as a serial line under load loses them (the inertial's imu_gap_policy "hold").
   Drive d = pull_away(1.1);
@@ -501,6 +706,16 @@ TEST(InMotionAlignment, RejectsOptionsThatMakeNoSense) {
   o = {};
   o.max_window = -1;
   EXPECT_THROW(InMotionAlignment(cobra::inertial::stim300_model(), o), std::invalid_argument);
+  o = {};
+  o.time_offset_prior_sigma = -0.1;
+  EXPECT_THROW(InMotionAlignment(cobra::inertial::stim300_model(), o), std::invalid_argument);
+  o.time_offset_prior_sigma = 0.6;  // an offset that could be anything is not that of a receiver's filter
+  EXPECT_THROW(InMotionAlignment(cobra::inertial::stim300_model(), o), std::invalid_argument);
+  o.time_offset_prior_sigma = std::nan("");
+  EXPECT_THROW(InMotionAlignment(cobra::inertial::stim300_model(), o), std::invalid_argument);
+  o = {};
+  o.time_offset_sigma = 0.0;
+  EXPECT_THROW(InMotionAlignment(cobra::inertial::stim300_model(), o), std::invalid_argument);
 }
 
 // ----------------------------------------------------------------------------- plugin and configuration
@@ -539,6 +754,26 @@ TEST(InMotionAlignPlugin, BuildsTheStrategyFromItsConfig) {
   EXPECT_EQ(back->min_epochs, 5);
   ASSERT_TRUE(back->start_time);
   EXPECT_DOUBLE_EQ(*back->start_time, 12.5);
+  // the time offset is not estimated unless a prior is given, and then both of its keys travel
+  EXPECT_EQ(back->time_offset_prior_sigma, 0.0);
+  EXPECT_DOUBLE_EQ(back->time_offset_sigma, 0.08);
+  {
+    cobra::InMotionAlignmentConfig e = c;
+    e.group_ = "config/alignment_with_offset";
+    e.time_offset_prior_sigma = 0.25;
+    e.time_offset_sigma = 0.05;
+    e.to_registry(med);
+    const auto b = cobra::InMotionAlignmentConfig::from_registry(med, e.group_);
+    ASSERT_TRUE(b);
+    EXPECT_DOUBLE_EQ(b->time_offset_prior_sigma, 0.25);
+    EXPECT_DOUBLE_EQ(b->time_offset_sigma, 0.05);
+    EXPECT_TRUE(plugin.new_initialization_strategy(api::InitializationType::INERTIAL, e.group_));
+    e.time_offset_prior_sigma = 0.7;  // refused when the strategy is built
+    e.to_registry(med);
+    EXPECT_FALSE(plugin.new_initialization_strategy(api::InitializationType::INERTIAL, e.group_));
+    EXPECT_TRUE(med.has_error());
+    med.logs.clear();
+  }
 
   auto strategy = plugin.new_initialization_strategy(api::InitializationType::INERTIAL, c.group_);
   ASSERT_TRUE(strategy);
@@ -595,6 +830,9 @@ TEST(InMotionAlignPlugin, JsonRoundTripAndTheExampleConfigurations) {
     EXPECT_DOUBLE_EQ(align->heading_sigma, 3.0 * kDeg);
     EXPECT_EQ(align->lever_arm, (Vec3{-0.5, 0.38, -0.05}));
     EXPECT_FALSE(align->start_time.has_value());
+    // the receiver's time offset is estimated along: nothing assumed but that it is a fraction of a second
+    EXPECT_DOUBLE_EQ(align->time_offset_prior_sigma, 0.3);
+    EXPECT_DOUBLE_EQ(align->time_offset_sigma, 0.08);
     // the receiver's velocity is an alignment channel and carries its own time bias
     EXPECT_NE(std::find(orch->alignment_channels.begin(), orch->alignment_channels.end(), kVelocityChannel), orch->alignment_channels.end());
     // text -> config -> text -> config is stable
@@ -623,6 +861,20 @@ TEST(InMotionAlignPlugin, JsonRoundTripAndTheExampleConfigurations) {
   EXPECT_THROW(jsoncfg::app_config_from_json(with("velocity_source", "doppler")), std::runtime_error);
   EXPECT_THROW(jsoncfg::app_config_from_json(with("heading_sigma", 0.0)), std::runtime_error);
   EXPECT_THROW(jsoncfg::app_config_from_json(with("min_epochs", 0)), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(with("time_offset_prior_sigma", 0.6)), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(with("time_offset_prior_sigma", -0.1)), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(with("time_offset_sigma", 0.0)), std::runtime_error);
+  {  // not estimated: neither key is written back, and a configuration from before the keys reads as it did
+    const auto off = jsoncfg::app_config_from_json(with("time_offset_prior_sigma", 0.0));
+    EXPECT_EQ(jsoncfg::app_config_to_json(off).dump().find("time_offset"), std::string::npos);
+    jsoncfg::json older = j;
+    for (auto& c : older["configs"])
+      if (c["type"] == "StandardOrchestrationConfig") {
+        c["alignment_config"].erase("time_offset_prior_sigma");
+        c["alignment_config"].erase("time_offset_sigma");
+      }
+    EXPECT_EQ(jsoncfg::app_config_to_json(jsoncfg::app_config_from_json(older)).dump(), jsoncfg::app_config_to_json(off).dump());
+  }
   const auto timed = jsoncfg::app_config_from_json(with("start_time", 12.5));
   for (const auto& c : timed.configs)
     if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) {
@@ -657,6 +909,9 @@ TEST(InMotionAlignFilter, ComesUpWithoutAHeadingFromOutsideAndTracks) {
   d.speed = [](double t) { return 10.0 * smoothstep(t, 6.0, 14.0) + 2.0 * std::sin(0.3 * t) * smoothstep(t, 14.0, 18.0); };
   d.course = [](double t) { return 0.9 + 0.6 * smoothstep(t, 9.0, 16.0) + 0.4 * std::sin(0.2 * t) * smoothstep(t, 16.0, 20.0); };
   d.latency = 0.0;  // the controller's buffer does the waiting here
+  // The receiver's velocity is a quarter of a second old and no time bias is configured for it (the preprocessors
+  // are out): the alignment has to find that by itself, which the example configuration asks it to.
+  d.velocity_age = 0.25;
 
   int errors = 0;
   std::string summary;
@@ -695,6 +950,8 @@ TEST(InMotionAlignFilter, ComesUpWithoutAHeadingFromOutsideAndTracks) {
 
   EXPECT_EQ(errors, 0);
   EXPECT_FALSE(summary.empty()) << "the alignment says what it found";
+  EXPECT_NE(summary.find("the receiver's velocity is 0."), std::string::npos) << summary;
+  EXPECT_NE(summary.find("s older than its time stamps"), std::string::npos) << summary;
   ASSERT_GE(rows.size(), 30u);
   // the first solution: the alignment handed over within 20 s of moving off (6 s) and a 2 s buffer
   EXPECT_LT(rows.front().t, 28.0) << summary;
@@ -714,7 +971,8 @@ TEST(InMotionAlignFilter, ComesUpWithoutAHeadingFromOutsideAndTracks) {
   }
   ASSERT_GE(n, 20);
   std::cout << "first solution at " << rows.front().t << " s, heading error " << rows.front().att_error(2) / kDeg << " deg; from 20 s later, worst: heading "
-            << heading / kDeg << " deg, tilt " << tilt / kDeg << " deg, position " << pos << " m, velocity " << vel << " m/s\n";
+            << heading / kDeg << " deg, tilt " << tilt / kDeg << " deg, position " << pos << " m, velocity " << vel << " m/s\n"
+            << summary << "\n";
   EXPECT_LT(heading, 3.0 * kDeg) << "worst heading error from 20 s after the hand-over: " << heading / kDeg << " deg; " << summary;
   EXPECT_LT(tilt, 0.6 * kDeg) << tilt / kDeg;
   EXPECT_LT(pos, 2.0) << pos;

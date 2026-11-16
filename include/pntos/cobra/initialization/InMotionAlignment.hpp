@@ -17,6 +17,12 @@
 // Wahba's problem (SVD), which has no linearisation in the heading; the rest is linear least squares with the
 // IMU model's initial sigmas as priors; the two alternate. A level accelerometer bias is a tilt as long as the
 // vehicle does not turn; leaving it out lets a few milli-g pass for a gyro bias about the vertical.
+//
+// A receiver's velocity is older than its time stamp by the delay of the receiver's own filter (0.25 s for the
+// u-blox of the example recording), and a tenth of a second of that left unaccounted for costs the heading more
+// than anything else does (DESIGN.md section 7.29). With `time_offset_prior_sigma` the delay tau is one more unknown:
+// the epochs are evaluated at t_i - tau and the linear step has the column -C0 X_i f_i (the specific force at
+// the epoch) for its correction; tau is carried from one solution to the next like the gyro bias.
 #pragma once
 
 #include <pntos/cobra/initialization/Alignment.hpp>
@@ -47,6 +53,12 @@ struct InMotionAlignmentOptions {
   double stationary_rate = 0.02;          ///< rad/s; largest rate, and deviation from the mean, of a quiet gyro
   double stationary_time = 3.0;           ///< s of standstill before the gyro mean is taken as the bias
   std::optional<double> start_time;       ///< s; messages before it are ignored (a switch-on inside a recording)
+  /// s; above zero the time offset of the velocity (how much older it is than its time stamp) is estimated
+  /// along, with this sigma around zero as its prior. Zero: the stamps are taken as they are. At most 0.5.
+  double time_offset_prior_sigma = 0.0;
+  /// s; with the offset estimated, aligned only once its sigma is below this as well (as heading_sigma for the
+  /// heading). An offset that the data has not told yet is half the prior's zero.
+  double time_offset_sigma = 0.08;
 };
 
 class InMotionAlignment final : public AlignBase {
@@ -61,6 +73,8 @@ class InMotionAlignment final : public AlignBase {
     Vector3 accel_bias = Vector3::Zero(); ///< m/s^2, of the last solution
     double elapsed = 0;                   ///< s from the first message used to the alignment
     bool from_positions = false;          ///< the velocity came from position differences
+    double time_offset = 0;               ///< s; how much older than its stamps the velocity was found to be (0: not estimated)
+    double time_offset_sigma = 0;         ///< s, of the last solution
     std::uint64_t solutions = 0;          ///< windows solved
     std::uint64_t restarts = 0;           ///< windows abandoned (IMU gap, change of velocity source)
     std::uint64_t held = 0;               ///< IMU samples that stood for lost ones
@@ -106,6 +120,9 @@ class InMotionAlignment final : public AlignBase {
     Vector3 v_antenna = Vector3::Zero();      ///< fitted antenna velocity at the last epoch
     Vector3 rate = Vector3::Zero();           ///< body rate there, bias removed
     double chi2_per_dof = 0;
+    std::int64_t t = 0;                       ///< IMU time C, v_antenna and rate refer to: the last epoch less the offset
+    double time_offset = 0, time_offset_var = 0;  ///< s, s^2
+    double time_offset_step = 0;              ///< s; what this solution changed it by
   };
 
   void on_imu(const aspn23_eigen::MeasurementImu& imu);
@@ -119,7 +136,11 @@ class InMotionAlignment final : public AlignBase {
   void trim();
   void restart();
   Vector3 mean_rate(std::int64_t from, std::int64_t to) const;
+  Vector3 mean_force(std::int64_t from, std::int64_t to) const;
   std::optional<Solution> solve();
+  template <bool kOffset>
+  std::optional<Solution> solve_window();
+  bool offset_estimated() const { return opt_.time_offset_prior_sigma > 0; }
   void finish(const Solution& s);
 
   InMotionAlignmentOptions opt_;
@@ -138,6 +159,7 @@ class InMotionAlignment final : public AlignBase {
   Vector3 bias_prior_var_ = Vector3::Ones();
   Vector3 static_dth_ = Vector3::Zero(), static_dv_ = Vector3::Zero();
   double static_seconds_ = 0;
+  double offset_ = 0;  ///< s, current estimate of the time offset (0 unless estimated)
 
   api::Matrix covariance_ = api::Matrix::Zero(15, 15);
   ImuErrors errors_;

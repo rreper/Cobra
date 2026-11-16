@@ -563,6 +563,12 @@ struct InMotionAlignmentConfig final : BaseConfig {
   double stationary_rate = 0.02;               ///< rad/s
   double stationary_time = 3.0;                ///< s of standstill before the gyro mean is taken as the bias
   std::optional<double> start_time;            ///< s; messages before it are ignored
+  /// s; above zero the time offset of the receiver's velocity (how much older it is than its time stamp, after
+  /// any TimeBiasConfig) is estimated along with the attitude, with this sigma around zero as its prior, and
+  /// reported in the alignment's log line. Zero (the default): the stamps are taken as they are. At most 0.5.
+  double time_offset_prior_sigma = 0.0;
+  /// s; with the offset estimated, aligned only once the offset's sigma is below it as well.
+  double time_offset_sigma = 0.08;
   const std::string& group() const override { return group_; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<InMotionAlignmentConfig> from_registry(api::Mediator& m, const std::string& group);
