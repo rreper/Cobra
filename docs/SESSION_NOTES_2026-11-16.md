@@ -1,9 +1,10 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10, v0.2.11 (alignment in motion), v0.2.12 (standing still)
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.13
 
 Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
 layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
 5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
-released as v0.2.12 (section 5.8). The start-up gap of the `pva_message` initialization is next.
+released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
+5.9). The IMU error model is next.
 
 ## 1. What was asked
 
@@ -18,6 +19,7 @@ In order, after the v0.2.9 notes were committed:
 5. "copy the scripts somewhere durable, then continue the comparison run"
 6. "commit, merge, tag v0.2.11 and push, then do the zero-rate updates" (the notes were committed with it as `2044a47`)
 7. "commit, merge, tag v0.2.12 and push, then fix the pva_message gap"
+8. "commit, merge, tag v0.2.13 and push, then fix the IMU error model"
 
 ## 2. State at the end
 
@@ -26,7 +28,8 @@ In order, after the v0.2.9 notes were committed:
 | cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine |
 | Cobra (this repository) | v0.2.11: commit `67870dd` on `main`, tag `v0.2.11` (alignment in motion, correction to v0.2.10); before it v0.2.10 = `03f2947`, whose `ci` and `release` workflows were green |
 | Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree; `ci` (on `2044a47`) and the `release` workflow for the tag are both green |
-| Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree |
+| Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree; `ci` (on `c510049`) and the `release` workflow are green |
+| Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13; all gates passed on the released tree |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -296,6 +299,25 @@ Full account: `docs/DESIGN.md` §7.25. In short:
   byte-identical; acceptance 24 / 24; 61,772 messages identical.
 - `configs/pos_ins_ground_vehicle.json` now has alignment in motion, constraints and zero-motion updates;
   `docs/AIDING_MATRIX.md` has two new rows and a standing-outage column; `docs/ALIGNMENT_MATRIX.md` two new rows.
+
+### 5.9 The start-up hole of the `pva_message` initialization (released as v0.2.13)
+
+Full account: `docs/DESIGN.md` §7.26.
+
+- Cause: the orchestration drops IMU messages until the initialization has a solution; the PVA of `pva_message`
+  passes the controller's 2 s buffer, so the inertial is created two seconds in the past and mechanizes the
+  hole as free fall. Inherited from Cobra, kept as the default.
+- Measured: 60 s recording (standing) 15.8 m/s of fall and 59 m of altitude error within ten seconds; nine
+  starts while driving on the full recording 62 to 73 m in altitude, 5 to 13 m horizontally
+  (`prototypes/align-in-motion/pva_start.py`).
+- Fix, opt-in: `StandardOrchestrationConfig::initialization_imu_replay_s` keeps the IMU of that many seconds
+  and gives what is later than the initial solution to the new inertial, the straddling sample cut to its part.
+  With 2.5 s: 0.27 m/s and 0.75 m standing; 0.5 to 1.2 m in altitude and 0.6 to 1.5 m horizontally driving.
+- `imu_gap_policy: "hold"` lessens the fall to 5.8 m/s on the standing car; why not to zero is not established.
+- Tests: `Filter.AnInitialSolutionOlderThanTheImuLeavesAHoleByDefault` (pins the default),
+  `Filter.ImuKeptBeforeTheInitializationClosesTheHole` (failed before the fix), `JsonConfig.InitializationImuReplayKey`.
+- Gates on this tree: 24 suites / 275 tests, also under ASan + UBSan with no report; parity dump byte-identical;
+  acceptance 24 / 24; 61,772 messages identical.
 
 ## 6. Open decisions carried forward
 
