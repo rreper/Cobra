@@ -1,12 +1,12 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.15
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.16
 
 Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Three things are released: the integrity
 layer's v0.2, Cobra v0.2.10 (fusion core) and Cobra v0.2.11 (alignment in motion, section 5.7). Sections 5.1 to
 5.6 are the prototype stage of the alignment, kept as written. Zero-velocity and zero-rate updates are
 released as v0.2.12 (section 5.8), the start-up gap of the `pva_message` initialization as v0.2.13 (section
 5.9), the IMU model for a driving car as v0.2.14 (section 5.10). A standstill confirmed by the receiver's
-velocity is released as v0.2.15 (section 5.11). The estimate of the receiver's time offset is committed on
-branch `time-offset` and pushed, not merged and not tagged (section 5.12).
+velocity is released as v0.2.15 (section 5.11), the estimate of the receiver's time offset as v0.2.16 (section
+5.12).
 
 ## 1. What was asked
 
@@ -25,6 +25,7 @@ In order, after the v0.2.9 notes were committed:
 9. "commit, merge, tag v0.2.14 and push, then do the receiver-confirmed standstill"
 10. "commit, merge, tag v0.2.15 and push, then do the receiver time-offset estimate"
 11. "commit and push" (the time-offset work: committed on its branch and pushed; no merge and no tag were asked for)
+12. "please release it"
 
 ## 2. State at the end
 
@@ -37,7 +38,7 @@ In order, after the v0.2.9 notes were committed:
 | Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
 | Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
 | Branch `confirmed-standstill` | merged into `main` (fast-forward) as v0.2.15 = `cca2b41`: `ZeroMotionGeneratorConfig::confirmation_channels`, two new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the confirmation (section 5.11). All gates passed on the released tree |
-| Branch `time-offset` | commit `26eb184` on top of `b5741a5`, pushed to `origin/time-offset`; not merged into `main`, no tag, project version still 0.2.15: `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`, seven new alignment rows, both alignment example configurations with the estimate (section 5.12). All gates passed on the committed tree |
+| Branch `time-offset` | merged into `main` (fast-forward) as v0.2.16 = `34c9a6b` (the work is `26eb184`, the version commit on top): `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`, seven new alignment rows, both alignment example configurations with the estimate (section 5.12). All gates passed on the released tree. The branch also exists on `origin`, where it was pushed before the release |
 | Alignment prototype | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; section 7) |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
 
@@ -386,7 +387,7 @@ Full account: `docs/DESIGN.md` §7.28.
   acceptance 24 / 24; 61,772 messages identical. The aiding matrix re-run with the final binary reproduces
   `docs/aiding_matrix.json` exactly. v0.2.14's `ci` and `release` workflows are green.
 
-### 5.12 The receiver's time offset, found by the alignment (branch `time-offset`, committed and pushed)
+### 5.12 The receiver's time offset, found by the alignment (released as v0.2.16)
 
 Full account: `docs/DESIGN.md` §7.29.
 
@@ -418,8 +419,6 @@ Full account: `docs/DESIGN.md` §7.29.
 
 ## 6. Open decisions carried forward
 
-- Merge the `time-offset` branch into `main` and tag it (it would be v0.2.16: bump `meson.build`, retitle the
-  PROGRESS entry, gates on that tree).
 
 
 - `pos_vel_ins.json`: velocity time bias 150 ms where the alignment now measures 280 ms against the IMU (350 ms
