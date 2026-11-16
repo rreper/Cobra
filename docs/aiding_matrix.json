@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-16T08:39:17-0700",
+ "generated": "2026-11-16T10:09:47-0700",
  "outage_starts_s": [
   300.0,
   700.0,
@@ -414,6 +414,106 @@
    "end_v_mean": 1.3811609696828384
   },
   {
+   "row": "zero_motion_confirmed",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5342516530533765,
+   "v_rms": 1.6101056589849396
+  },
+  {
+   "row": "zero_motion_confirmed",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.557524201665151,
+   "v_rms": 1.6081247545191717,
+   "end_h": [
+    22.5,
+    10.6,
+    1.9,
+    2.1,
+    19.4,
+    5.1
+   ],
+   "end_h_mean": 10.270770041479429,
+   "end_h_max": 22.53234069209104,
+   "end_sigma_mean": 14.412641592218494,
+   "end_ratio_rms": 1.0137371420975134,
+   "end_v_mean": 1.799342383107799
+  },
+  {
+   "row": "zero_motion_confirmed",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.606449986237847,
+   "v_rms": 1.579617399071498,
+   "end_h": [
+    31.7,
+    22.1,
+    14.5,
+    60.1,
+    8.3,
+    66.1
+   ],
+   "end_h_mean": 33.776027417596794,
+   "end_h_max": 66.05106144738097,
+   "end_sigma_mean": 38.45009775841252,
+   "end_ratio_rms": 1.12636217230738,
+   "end_v_mean": 3.8953004310481467
+  },
+  {
+   "row": "constraints_zero_motion_confirmed",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5519907390203243,
+   "v_rms": 1.7136281943157936
+  },
+  {
+   "row": "constraints_zero_motion_confirmed",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5859688096253561,
+   "v_rms": 1.7000368363372917,
+   "end_h": [
+    12.3,
+    6.4,
+    1.7,
+    2.9,
+    7.6,
+    5.6
+   ],
+   "end_h_mean": 6.074616055702285,
+   "end_h_max": 12.274644639688027,
+   "end_sigma_mean": 6.390243009998397,
+   "end_ratio_rms": 1.0287297137657203,
+   "end_v_mean": 0.9590704055493925
+  },
+  {
+   "row": "constraints_zero_motion_confirmed",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6221737125593803,
+   "v_rms": 1.6886462565943565,
+   "end_h": [
+    16.5,
+    14.6,
+    4.9,
+    4.7,
+    5.0,
+    11.8
+   ],
+   "end_h_mean": 9.588161180187543,
+   "end_h_max": 16.490349678772112,
+   "end_sigma_mean": 12.909793112037827,
+   "end_ratio_rms": 0.9364018650748761,
+   "end_v_mean": 1.3721563852773595
+  },
+  {
    "row": "imu_only",
    "outage_s": "standing",
    "exit": 0,
@@ -540,6 +640,38 @@
    "end_sigma_mean": 2.671056432046441,
    "end_ratio_rms": 0.7553847445869329,
    "end_v_mean": 1.1624998135982594
+  },
+  {
+   "row": "zero_motion_confirmed",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.536353274529885,
+   "v_rms": 1.6244692386955515,
+   "end_h": [
+    1.8
+   ],
+   "end_h_mean": 1.8308033462287556,
+   "end_h_max": 1.8308033462287556,
+   "end_sigma_mean": 2.733452927424676,
+   "end_ratio_rms": 0.6697767969078026,
+   "end_v_mean": 0.8160526754733723
+  },
+  {
+   "row": "constraints_zero_motion_confirmed",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.551900122051213,
+   "v_rms": 1.7272178175800021,
+   "end_h": [
+    1.9
+   ],
+   "end_h_mean": 1.911655428987209,
+   "end_h_max": 1.911655428987209,
+   "end_sigma_mean": 2.5864047575515303,
+   "end_ratio_rms": 0.7391168854780928,
+   "end_v_mean": 1.164061507436628
   }
  ]
 }

@@ -3,6 +3,7 @@
 #include <pntos/cobra/presets/Presets.hpp>
 #include <pntos/cobra/transport/CsvTransportPlugin.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -687,6 +688,18 @@ std::shared_ptr<BaseConfig> config_from_json(const json& jc, const std::string& 
       fail("ZeroMotionGeneratorConfig: window must be >= 1 s and at least two sub_windows; thresholds and sigmas > 0");
     if (c->velocity_channel.empty() && c->rate_channel.empty())
       fail("ZeroMotionGeneratorConfig: name a velocity_channel, a rate_channel or both");
+    if (jc.contains("confirmation_channels")) c->confirmation_channels = jc.at("confirmation_channels").get<std::vector<std::string>>();
+    c->confirmation_speed = get_or(jc, "confirmation_speed", c->confirmation_speed);
+    c->confirmation_max_sigma = get_or(jc, "confirmation_max_sigma", c->confirmation_max_sigma);
+    c->confirmation_timeout = get_or(jc, "confirmation_timeout", c->confirmation_timeout);
+    c->confirmed_velocity_sigma = get_or(jc, "confirmed_velocity_sigma", c->confirmed_velocity_sigma);
+    c->confirmed_vertical_velocity_sigma = get_or(jc, "confirmed_vertical_velocity_sigma", c->confirmed_vertical_velocity_sigma);
+    if (!(c->confirmation_speed > 0) || !(c->confirmation_max_sigma > 0) || !(c->confirmation_timeout > 0) ||
+        !(c->confirmed_velocity_sigma > 0) || !(c->confirmed_vertical_velocity_sigma > 0))
+      fail("ZeroMotionGeneratorConfig: confirmation_speed, confirmation_max_sigma, confirmation_timeout and the confirmed sigmas must be > 0");
+    for (const auto& ch : c->confirmation_channels)
+      if (c->channels && !c->channels->empty() && std::find(c->channels->begin(), c->channels->end(), ch) == c->channels->end())
+        fail("ZeroMotionGeneratorConfig: confirmation channel \"" + ch + "\" has to be listed in channels as well, or the generator never sees it");
     return c;
   }
   if (type == "SensorDegradationConfig") {
@@ -1026,6 +1039,14 @@ json config_to_json(const BaseConfig& c) {
     o["velocity_sigma"] = p->velocity_sigma;
     if (!p->rate_channel.empty()) o["rate_channel"] = p->rate_channel;
     o["rate_sigma"] = p->rate_sigma;
+    if (!p->confirmation_channels.empty()) {  // written only when used: a v0.2.12 configuration reads back as it was
+      o["confirmation_channels"] = p->confirmation_channels;
+      o["confirmation_speed"] = p->confirmation_speed;
+      o["confirmation_max_sigma"] = p->confirmation_max_sigma;
+      o["confirmation_timeout"] = p->confirmation_timeout;
+      o["confirmed_velocity_sigma"] = p->confirmed_velocity_sigma;
+      o["confirmed_vertical_velocity_sigma"] = p->confirmed_vertical_velocity_sigma;
+    }
     return o;
   }
   if (auto* p = dynamic_cast<const SensorDegradationConfig*>(&c)) {

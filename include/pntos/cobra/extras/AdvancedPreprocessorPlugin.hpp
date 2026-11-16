@@ -5,8 +5,10 @@
 #include <pntos/cobra/config/configs.hpp>
 #include <pntos/cobra/inertial/Stationarity.hpp>
 
+#include <aspn23/eigen/MeasurementImu.hpp>
 #include <aspn23/eigen/MeasurementVelocity.hpp>
 
+#include <deque>
 #include <random>
 
 namespace pntos::cobra {
@@ -38,20 +40,61 @@ class ZeroVelocity2dGenerator final : public api::Preprocessor {
 /// of its channels goes through a StationarityDetector; while the last `window` seconds were quiet, a zero
 /// velocity (NED) and a zero angular rate (sensor frame) follow the IMU message every `trigger_dt_sec`, stamped
 /// at the middle of the quiet window, so that the second the filter averages the gyro over lies inside it.
+///
+/// With `confirmation_channels` a receiver's velocity is a second witness (§7.28): a car that creeps at a steady
+/// speed is as quiet to the IMU as one that stands. While such a velocity keeps arriving, the messages are made
+/// for the receiver's epochs instead: one that shows less than `confirmation_speed`, with half a window of quiet
+/// IMU on either side, gives a zero velocity with `confirmed_velocity_sigma` (north and east; down keeps its own
+/// `confirmed_vertical_velocity_sigma`) and a zero rate, stamped at that epoch; one that shows more gives nothing
+/// and is counted. The velocity may be seconds old when it arrives (the
+/// controller's buffer) or ahead of the IMU's verdict (no buffer); in the second case the epoch waits until the
+/// IMU has passed it by half a window. After `confirmation_timeout` without a usable velocity the IMU decides
+/// alone again.
 class ZeroMotionGenerator final : public api::Preprocessor {
  public:
+  struct Confirmation {
+    std::uint64_t confirmed = 0;     ///< messages for a receiver epoch that showed a standstill
+    std::uint64_t alone = 0;         ///< messages on the IMU's word alone
+    std::uint64_t contradicted = 0;  ///< receiver epochs that showed motion in the middle of a quiet stretch of the IMU
+    double fastest = 0;              ///< m/s, the fastest of those
+    std::uint64_t not_heard = 0;     ///< messages on a confirmation channel that could not be used
+  };
+
   ZeroMotionGenerator(const ZeroMotionGeneratorConfig& config, api::Mediator* mediator);
   std::optional<std::vector<api::Message>> process_pntos_message(const api::Message& message) override;
 
   const inertial::StationarityDetector& detector() const { return detector_; }
   std::uint64_t generated() const { return generated_; }
+  const Confirmation& confirmation() const { return confirmation_; }
 
  private:
+  struct Epoch {  ///< a velocity of the receiver
+    std::int64_t t;
+    double speed;
+    std::string channel;
+  };
+  struct Stretch {  ///< a time the detector called quiet without interruption
+    std::int64_t begin, end;
+  };
+  void on_imu(const aspn23_eigen::MeasurementImu& imu, std::vector<api::Message>& out);
+  void on_witness(const api::Message& message, std::vector<api::Message>& out);
+  void settle(std::vector<api::Message>& out);
+  void decide(const Epoch& epoch, std::vector<api::Message>& out);
+  bool quiet_around(std::int64_t t) const;
+  void say(std::int64_t stamp, double velocity_sigma, double vertical_sigma, std::vector<api::Message>& out);
+
   ZeroMotionGeneratorConfig cfg_;
   api::Mediator* mediator_;
   inertial::StationarityDetector detector_;
   std::optional<std::int64_t> last_imu_ns_, last_ns_;
   std::uint64_t generated_ = 0;
+
+  std::int64_t half_window_ns_ = 0;
+  std::deque<Stretch> quiet_;                  ///< oldest first, the last minute
+  std::deque<Epoch> waiting_;                  ///< epochs the IMU has not passed by half a window
+  std::optional<std::int64_t> heard_ns_;       ///< the IMU's time when the last usable velocity arrived
+  bool alone_ = true;                          ///< the IMU decides alone (no witness configured, or none heard lately)
+  Confirmation confirmation_;
 };
 
 /// Emulates a worse sensor set on the fly (SensorDegradationConfig): IMU noise and bias, GNSS position /

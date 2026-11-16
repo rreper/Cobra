@@ -292,21 +292,25 @@
           "output_channel": "/generated/constraints"
         },
         {
-          "type": "ZeroMotionGeneratorConfig",
-          "group": "config/zero_motion",
-          "channels": [
-            "/sensor/vn-100/imu"
-          ],
-          "velocity_channel": "/generated/zero_velocity",
-          "rate_channel": "/generated/zero_rate"
-        },
-        {
           "type": "TimeBiasConfig",
           "group": "config/time_bias_velocity",
           "channels": [
             "/sensor/ublox-ZED-F9T/velocity"
           ],
           "time_bias": 250000000
+        },
+        {
+          "type": "ZeroMotionGeneratorConfig",
+          "group": "config/zero_motion",
+          "channels": [
+            "/sensor/vn-100/imu",
+            "/sensor/ublox-ZED-F9T/velocity"
+          ],
+          "velocity_channel": "/generated/zero_velocity",
+          "rate_channel": "/generated/zero_rate",
+          "confirmation_channels": [
+            "/sensor/ublox-ZED-F9T/velocity"
+          ]
         }
       ],
       "publish_after_update": false,

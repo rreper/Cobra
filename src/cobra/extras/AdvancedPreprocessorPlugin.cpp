@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
+#include <stdexcept>
 
 namespace pntos::cobra {
 
@@ -74,40 +76,183 @@ inertial::StationarityOptions stationarity_options(const ZeroMotionGeneratorConf
 }
 }  // namespace
 
+namespace {
+constexpr std::int64_t kQuietHistoryNs = 60'000'000'000;  ///< how far back the quiet stretches are remembered
+constexpr std::size_t kMaxWaiting = 64;                    ///< receiver epochs held for the IMU to pass
+
+bool contains(const std::vector<std::string>& v, const std::string& s) { return std::find(v.begin(), v.end(), s) != v.end(); }
+
+/// Speed over ground of a receiver's velocity message, if it is one that can be a witness: all three axes, in a
+/// frame fixed to the Earth, finite, and not claiming a sigma above `max_sigma` on any axis.
+std::optional<double> witness_speed(const api::Message& message, double max_sigma) {
+  api::Vector3 v;
+  api::Vector3 var = api::Vector3::Zero();  // a message that says nothing about its accuracy is taken at its word
+  if (auto vel = message.as<aspn23_eigen::MeasurementVelocity>()) {
+    const auto frame = vel->get_reference_frame();
+    if (frame != ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED && frame != ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_ECEF)
+      return std::nullopt;
+    v = api::Vector3(vel->get_x(), vel->get_y(), vel->get_z());
+    const auto cov = vel->get_covariance();
+    if (cov.rows() == 3 && cov.cols() == 3) var = api::Vector3(cov(0, 0), cov(1, 1), cov(2, 2));
+  } else if (auto pva = message.as<utils::PVA>()) {
+    if (!utils::has_velocity(*pva)) return std::nullopt;
+    v = api::Vector3(pva->get_v1(), pva->get_v2(), pva->get_v3());
+    const auto cov = pva->get_covariance();
+    if (cov.rows() >= 6 && cov.cols() >= 6) var = api::Vector3(cov(3, 3), cov(4, 4), cov(5, 5));
+  } else {
+    return std::nullopt;
+  }
+  if (!v.allFinite() || !var.allFinite() || !(var.maxCoeff() <= max_sigma * max_sigma)) return std::nullopt;
+  return v.norm();
+}
+
+std::string metres_per_second(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.2f m/s", v);
+  return buf;
+}
+}  // namespace
+
 ZeroMotionGenerator::ZeroMotionGenerator(const ZeroMotionGeneratorConfig& config, api::Mediator* mediator)
-    : cfg_(config), mediator_(mediator), detector_(stationarity_options(config)) {}
+    : cfg_(config), mediator_(mediator), detector_(stationarity_options(config)), half_window_ns_(static_cast<std::int64_t>(config.window * 0.5e9)) {
+  if (cfg_.confirmation_channels.empty()) return;
+  if (!(cfg_.confirmation_speed > 0) || !(cfg_.confirmation_max_sigma > 0) || !(cfg_.confirmation_timeout > 0) ||
+      !(cfg_.confirmed_velocity_sigma > 0) || !(cfg_.confirmed_vertical_velocity_sigma > 0))
+    throw std::invalid_argument("confirmation_speed, confirmation_max_sigma, confirmation_timeout and the confirmed sigmas must be > 0");
+  if (cfg_.channels && !cfg_.channels->empty())
+    for (const auto& ch : cfg_.confirmation_channels)
+      if (!contains(*cfg_.channels, ch))
+        throw std::invalid_argument("confirmation channel \"" + ch + "\" has to be listed in channels as well, or the generator never sees it");
+}
 
 std::optional<std::vector<Message>> ZeroMotionGenerator::process_pntos_message(const Message& message) {
   std::vector<Message> out{message};
-  if (cfg_.channels && !cfg_.channels->empty() &&
-      std::find(cfg_.channels->begin(), cfg_.channels->end(), message.source_identifier) == cfg_.channels->end())
+  if (cfg_.channels && !cfg_.channels->empty() && !contains(*cfg_.channels, message.source_identifier)) return out;
+  if (contains(cfg_.confirmation_channels, message.source_identifier)) {
+    on_witness(message, out);
     return out;
-  auto imu = message.as<aspn23_eigen::MeasurementImu>();
-  if (!imu) return out;
-  const std::int64_t t = imu->get_time_of_validity().get_elapsed_nsec();
+  }
+  if (auto imu = message.as<aspn23_eigen::MeasurementImu>()) on_imu(*imu, out);
+  return out;
+}
+
+void ZeroMotionGenerator::on_imu(const aspn23_eigen::MeasurementImu& imu, std::vector<Message>& out) {
+  const std::int64_t t = imu.get_time_of_validity().get_elapsed_nsec();
   if (!last_imu_ns_ || t <= *last_imu_ns_) {  // the first sample sets the time base; a step back starts over
     last_imu_ns_ = t;
     detector_.reset();
-    return out;
+    quiet_.clear();
+    waiting_.clear();
+    heard_ns_.reset();
+    alone_ = true;
+    return;
   }
   const double dt = (t - *last_imu_ns_) * 1e-9;
   last_imu_ns_ = t;
-  api::Vector3 dv(imu->get_meas_accel()), dth(imu->get_meas_gyro());
-  if (imu->get_imu_type() != ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED) {
+  api::Vector3 dv(imu.get_meas_accel()), dth(imu.get_meas_gyro());
+  if (imu.get_imu_type() != ASPN23_MEASUREMENT_IMU_IMU_TYPE_INTEGRATED) {
     dv *= dt;
     dth *= dt;
   }
-  if (!detector_.add(t, dt, dv, dth)) return out;
+  const bool still = detector_.add(t, dt, dv, dth);
+
+  if (!cfg_.confirmation_channels.empty()) {
+    if (still) {  // consecutive quiet windows overlap: one stretch
+      const std::int64_t begin = detector_.window_begin_ns(), end = detector_.window_end_ns();
+      if (!quiet_.empty() && begin <= quiet_.back().end)
+        quiet_.back().end = std::max(quiet_.back().end, end);
+      else
+        quiet_.push_back({begin, end});
+    }
+    while (!quiet_.empty() && quiet_.front().end < t - kQuietHistoryNs) quiet_.pop_front();
+    settle(out);
+    if (!alone_ && (!heard_ns_ || t - *heard_ns_ > static_cast<std::int64_t>(cfg_.confirmation_timeout * 1e9))) {
+      alone_ = true;
+      if (mediator_)
+        mediator_->log_message(LoggingLevel::INFO, "ZeroMotionGenerator: no usable velocity on the confirmation channels for " +
+                                                       std::to_string(cfg_.confirmation_timeout) + " s; the IMU decides alone until one arrives.");
+    }
+    if (!alone_) return;  // the receiver's epochs make the messages
+  }
+  if (!still) return;
 
   // Stamped at the middle of the quiet window: the filter averages the gyro over the second around the stamp.
   const std::int64_t stamp = detector_.window_begin_ns() + (detector_.window_end_ns() - detector_.window_begin_ns()) / 2;
-  if (last_ns_ && stamp - *last_ns_ < static_cast<std::int64_t>(cfg_.trigger_dt_sec * 1e9)) return out;
+  if (last_ns_ && stamp - *last_ns_ < static_cast<std::int64_t>(cfg_.trigger_dt_sec * 1e9)) return;
+  ++confirmation_.alone;
+  say(stamp, cfg_.velocity_sigma, cfg_.velocity_sigma, out);
+}
+
+void ZeroMotionGenerator::on_witness(const Message& message, std::vector<Message>& out) {
+  const auto tov = message.wrapped_message ? utils::time_of_validity(*message.wrapped_message) : std::nullopt;
+  const auto speed = tov ? witness_speed(message, cfg_.confirmation_max_sigma) : std::nullopt;
+  if (!speed) {
+    ++confirmation_.not_heard;
+    return;
+  }
+  if (alone_ && heard_ns_ && mediator_)
+    mediator_->log_message(LoggingLevel::INFO, "ZeroMotionGenerator: \"" + message.source_identifier + "\" confirms again.");
+  heard_ns_ = last_imu_ns_.value_or(tov->elapsed_nsec);
+  alone_ = false;
+  if (waiting_.size() >= kMaxWaiting) waiting_.pop_front();
+  waiting_.push_back({tov->elapsed_nsec, *speed, message.source_identifier});
+  settle(out);
+}
+
+bool ZeroMotionGenerator::quiet_around(std::int64_t t) const {
+  for (const auto& s : quiet_)
+    if (s.begin <= t - half_window_ns_ && s.end >= t + half_window_ns_) return true;
+  return false;
+}
+
+void ZeroMotionGenerator::settle(std::vector<Message>& out) {
+  if (!last_imu_ns_) return;
+  // The detector speaks at the end of each sub-window: two of them after the half window, it has said what there
+  // is to say about an epoch. Each epoch is looked at for itself: one with a time stamp from the future waits (until
+  // newer ones push it out) without holding up the others.
+  const std::int64_t patience = half_window_ns_ + static_cast<std::int64_t>(2e9 * cfg_.sub_window);
+  for (auto it = waiting_.begin(); it != waiting_.end();) {
+    if (quiet_around(it->t)) {
+      const Epoch e = *it;
+      it = waiting_.erase(it);
+      decide(e, out);
+    } else if (it->t + patience <= *last_imu_ns_) {
+      it = waiting_.erase(it);  // the IMU has passed it and was not quiet
+    } else {
+      ++it;
+    }
+  }
+}
+
+void ZeroMotionGenerator::decide(const Epoch& e, std::vector<Message>& out) {
+  if (e.speed >= cfg_.confirmation_speed) {
+    // The IMU alone would have said "stands". Said at the first, tenth, hundredth ... time, with the speed: what an
+    // installation needs to know about its detector.
+    const std::uint64_t n = ++confirmation_.contradicted;
+    confirmation_.fastest = std::max(confirmation_.fastest, e.speed);
+    std::uint64_t p = 1;
+    while (p < n) p *= 10;
+    if (mediator_)
+      mediator_->log_message(p == n ? LoggingLevel::INFO : LoggingLevel::DEBUG,
+                             "ZeroMotionGenerator: the IMU was quiet where \"" + e.channel + "\" shows " + metres_per_second(e.speed) +
+                                 "; no zero-motion message (" + std::to_string(n) + " such epoch(s), the fastest " +
+                                 metres_per_second(confirmation_.fastest) + ").");
+    return;
+  }
+  // Not closer to the last message than trigger_dt_sec, less a tenth: a receiver's epochs are not exactly a second apart.
+  if (last_ns_ && e.t - *last_ns_ < static_cast<std::int64_t>(cfg_.trigger_dt_sec * 0.9e9)) return;
+  ++confirmation_.confirmed;
+  say(e.t, cfg_.confirmed_velocity_sigma, cfg_.confirmed_vertical_velocity_sigma, out);
+}
+
+void ZeroMotionGenerator::say(std::int64_t stamp, double velocity_sigma, double vertical_sigma, std::vector<Message>& out) {
   last_ns_ = stamp;
   ++generated_;
   using RowMajor = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
   const Eigen::Matrix<double, Eigen::Dynamic, 1> none(0);
   if (!cfg_.velocity_channel.empty()) {
-    const RowMajor cov = RowMajor::Identity(3, 3) * (cfg_.velocity_sigma * cfg_.velocity_sigma);
+    RowMajor cov = RowMajor::Identity(3, 3) * (velocity_sigma * velocity_sigma);
+    cov(2, 2) = vertical_sigma * vertical_sigma;
     out.emplace_back(std::make_shared<aspn23_eigen::MeasurementVelocity>(
                          aspn23_eigen::TypeHeader(ASPN_MEASUREMENT_VELOCITY, 0, 0, 0, 0), aspn23_eigen::TypeTimestamp(stamp),
                          ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED, 0.0, 0.0, 0.0, cov,
@@ -123,7 +268,6 @@ std::optional<std::vector<Message>> ZeroMotionGenerator::process_pntos_message(c
                          ASPN23_MEASUREMENT_ANGULAR_VELOCITY_ERROR_MODEL_NONE, none, std::vector<aspn23_eigen::TypeIntegrity>{}),
                      cfg_.rate_channel);
   }
-  return out;
 }
 
 // ----------------------------------------------------------------------------- SensorDegradation

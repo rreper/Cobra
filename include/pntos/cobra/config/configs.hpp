@@ -432,6 +432,22 @@ struct ZeroMotionGeneratorConfig final : PreprocessorConfig {
   double velocity_sigma = 0.2;
   std::string rate_channel;       ///< output; empty = no zero-rate messages
   double rate_sigma = 3.0e-4;     ///< rad/s per axis
+  /// A receiver's velocity as a second witness (DESIGN.md §7.28). Channels of MeasurementVelocity messages (NED
+  /// or ECEF, all three axes) or PVA messages; they have to be listed in `channels` as well, or the generator
+  /// never sees them. Empty: the IMU decides alone, as before. With them, and while such a velocity keeps
+  /// arriving, a message is generated only for a receiver epoch that shows less than `confirmation_speed` in the
+  /// middle of a quiet stretch of the IMU, stamped at that epoch, the zero velocity with
+  /// `confirmed_velocity_sigma`. Without one for `confirmation_timeout` seconds the IMU decides alone again,
+  /// with `velocity_sigma`.
+  std::vector<std::string> confirmation_channels;
+  double confirmation_speed = 0.05;        ///< m/s (norm of the three axes)
+  double confirmation_max_sigma = 0.5;     ///< m/s; a velocity that claims a larger sigma on any axis is not heard
+  double confirmation_timeout = 2.5;       ///< s of IMU time since the last velocity that was heard
+  double confirmed_velocity_sigma = 0.05;  ///< m/s, north and east: what the receiver vouches for
+  /// m/s, down. Not firmer than the IMU alone is trusted with: the receiver confirms that the car stands, not that
+  /// the vertical accelerometer reads at rest what it reads driving. On the example recording it does not (about
+  /// 2 mm/s2 apart), and a filter that learns the at-rest bias to a firm zero sinks 0.13 m once the car drives.
+  double confirmed_vertical_velocity_sigma = 0.2;
   ZeroMotionGeneratorConfig() { identifier = kIdentifier; }
   void to_registry(api::Mediator& m) const override;
   static std::optional<ZeroMotionGeneratorConfig> from_registry(api::Mediator& m, const std::string& group);

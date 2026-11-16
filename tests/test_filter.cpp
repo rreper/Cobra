@@ -564,16 +564,24 @@ struct Standing {
   double heading_drift_deg = 0;   ///< heading error at the end minus at the first solution, against the log's reference
   double speed_max = 0;           ///< largest horizontal speed of the solution from 10 s on, m/s (the car stands)
   int rate_updates = 0, velocity_updates = 0, errors = 0, discards = 0;
+  double velocity_sigma = 0;      ///< horizontal velocity sigma of the last solution, m/s
+};
+/// What the receiver's velocity is to the zero-motion generator.
+enum class Witness {
+  NONE,       ///< not looked at: the IMU decides alone (v0.2.12)
+  RECEIVER,   ///< the log's receiver velocity confirms
+  CREEPING,   ///< the receiver's velocity with 0.3 m/s added: a car that rolls, as quiet to the IMU as this one
 };
 /// The 60 s log (the car stands, engine running) with the filter started from the reference solution and no
 /// knowledge of the gyro bias: nothing in the position fixes of a standing vehicle shows the bias about the
 /// vertical, 0.16 deg/s on this IMU.
-Standing stand_for_a_minute(bool zero_motion) {
+Standing stand_for_a_minute(bool zero_motion, Witness witness = Witness::NONE) {
   std::ifstream in(src("configs/pos_ins.json"));
   cobra::jsoncfg::json j;
   in >> j;
   const char* kTruth = "/sensor/ins-d/pva";
   const char* kImu = "/sensor/vn-100/imu";
+  const char* kVelocity = "/sensor/ublox-ZED-F9T/velocity";
   // Started from the reference solution at the first IMU sample (the "manual" initialization, which leaves no
   // gap between the initial solution and the IMU), with the gyro bias unknown to 3 mrad/s.
   std::int64_t first_imu_ns = 0;
@@ -609,11 +617,16 @@ Standing stand_for_a_minute(bool zero_motion) {
                              {"initial_gyro_bias_var", {9e-6, 9e-6, 9e-6}}};
     if (!zero_motion) continue;
     c["measurement_reorder_s"] = 2.5;
-    c["preprocessor_configs"].push_back({{"type", "ZeroMotionGeneratorConfig"},
-                                         {"group", "config/zero_motion"},
-                                         {"channels", {kImu}},
-                                         {"velocity_channel", "/generated/zero_velocity"},
-                                         {"rate_channel", "/generated/zero_rate"}});
+    cobra::jsoncfg::json generator = {{"type", "ZeroMotionGeneratorConfig"},
+                                      {"group", "config/zero_motion"},
+                                      {"channels", {kImu}},
+                                      {"velocity_channel", "/generated/zero_velocity"},
+                                      {"rate_channel", "/generated/zero_rate"}};
+    if (witness != Witness::NONE) {
+      generator["channels"] = {kImu, kVelocity};
+      generator["confirmation_channels"] = {kVelocity};
+    }
+    c["preprocessor_configs"].push_back(generator);
     c["mp_configs"].push_back({{"type", "PinsonVelocityMPConfig"},
                                {"group", "config/zero_velocity_processor"},
                                {"label", "zupt"},
@@ -645,12 +658,17 @@ Standing stand_for_a_minute(bool zero_motion) {
         const std::int64_t t = p->get_time_of_validity().get_elapsed_nsec();
         heading.emplace_back(t, yaw(*p));
         if (t > first_imu_ns + 10'000'000'000) out.speed_max = std::max(out.speed_max, std::hypot(p->get_v1(), p->get_v2()));
+        const auto cov = p->get_covariance();
+        if (cov.rows() >= 5 && cov.cols() >= 5) out.velocity_sigma = std::sqrt(cov(3, 3) + cov(4, 4));
       }
     });
     cobra::lcm::LcmLogReader r(src("testdata/example_60s.log"));
     while (auto ev = r.next()) {
-      if (ev->channel != kImu && ev->channel != "/sensor/ublox-ZED-F9T/position" && ev->channel != kTruth) continue;
+      const bool velocity = witness != Witness::NONE && ev->channel == kVelocity;
+      if (ev->channel != kImu && ev->channel != "/sensor/ublox-ZED-F9T/position" && ev->channel != kTruth && !velocity) continue;
       auto msg = cobra::lcm::decode(ev->data);
+      if (velocity && witness == Witness::CREEPING)
+        if (auto v = std::dynamic_pointer_cast<aspn23_eigen::MeasurementVelocity>(msg)) v->set_x(v->get_x() + 0.3);
       if (ev->channel == kTruth)
         if (auto p = std::dynamic_pointer_cast<cobra::utils::PVA>(msg)) reference.emplace_back(p->get_time_of_validity().get_elapsed_nsec(), yaw(*p));
       f.push(msg, ev->channel);
@@ -802,4 +820,40 @@ TEST(Filter, ImuKeptBeforeTheInitializationClosesTheHole) {
   EXPECT_LT(s.altitude, 2.0) << s.altitude;
   EXPECT_LT(s.speed, 0.5) << s.speed;
   std::cout << "with the IMU replayed (" << s.replayed << " messages): " << s.fall << " m/s, altitude error up to " << s.altitude << " m, horizontal speed up to " << s.speed << " m/s\n";
+}
+
+TEST(Filter, AStandstillConfirmedByTheReceiverCarriesMoreWeight) {
+  // The receiver's velocity as a second witness (DESIGN.md 7.28). Its messages pass the controller's buffer and
+  // are 2 s old when the generator sees them; the zero-motion messages made for their epochs are that old too and
+  // still have to reach the filter in order: nothing may be discarded as older than the filter.
+  const Standing alone = stand_for_a_minute(true);
+  const Standing s = stand_for_a_minute(true, Witness::RECEIVER);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_EQ(s.errors, 0);
+  EXPECT_EQ(s.discards, 0);
+  EXPECT_GE(s.rate_updates, 40);
+  EXPECT_GE(s.velocity_updates, 40);
+  EXPECT_LT(std::abs(s.heading_drift_deg), 0.3) << s.heading_drift_deg;
+  EXPECT_LT(s.speed_max, 0.05);
+  // 0.05 m/s where the IMU alone is trusted with 0.2. The solution is 2.5 s ahead of the last update and its
+  // velocity sigma is mostly what the tilt uncertainty adds in that time; the tilt is what the firmer zero velocity
+  // pins down (0.13 against 0.19 m/s).
+  ASSERT_GT(alone.velocity_sigma, 0.0);
+  EXPECT_LT(s.velocity_sigma, 0.8 * alone.velocity_sigma) << s.velocity_sigma << " against " << alone.velocity_sigma;
+  std::cout << "standstill confirmed by the receiver: heading drift " << s.heading_drift_deg << " deg, speed up to " << s.speed_max << " m/s, "
+            << s.rate_updates << " rate and " << s.velocity_updates << " velocity updates, velocity sigma " << s.velocity_sigma
+            << " m/s (the IMU alone: " << alone.velocity_sigma << ")\n";
+}
+
+TEST(Filter, AReceiverThatShowsMotionSilencesTheZeroMotionUpdates) {
+  // The same minute with 0.3 m/s added to the receiver's velocity: to the IMU nothing has changed, and the IMU
+  // alone goes on saying "stands" (ZeroMotionTest.TheImuAloneCallsACreepingVehicleStanding). With the receiver as
+  // a witness the filter is told nothing: only what the IMU said alone before the receiver was first heard gets
+  // through.
+  const Standing s = stand_for_a_minute(true, Witness::CREEPING);
+  ASSERT_GE(s.solutions, 40);
+  EXPECT_EQ(s.errors, 0);
+  EXPECT_LE(s.velocity_updates, 3);
+  EXPECT_LE(s.rate_updates, 3);
+  std::cout << "receiver shows 0.3 m/s: " << s.velocity_updates << " velocity and " << s.rate_updates << " rate updates\n";
 }

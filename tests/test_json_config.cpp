@@ -589,6 +589,69 @@ TEST(JsonConfig, ZeroMotionGeneratorAndZeroRateProcessor) {
   EXPECT_THROW(jsoncfg::app_config_from_json(neither), std::runtime_error);  // nothing to generate
 }
 
+TEST(JsonConfig, ZeroMotionConfirmationKeys) {
+  using namespace cobra;
+  auto src = [](const char* rel) {
+    const char* s = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(s ? s : "..") + "/" + rel;
+  };
+  std::ifstream in(src("configs/pos_ins.json"));
+  jsoncfg::json j;
+  in >> j;
+  j["app"]["preprocessors"] = {"standard", "advanced"};
+  const char* kImu = "/sensor/vn-100/imu";
+  const char* kVel = "/sensor/ublox-ZED-F9T/velocity";
+  auto generator = [&](jsoncfg::json extra) {
+    jsoncfg::json k = j;
+    for (auto& c : k["configs"]) {
+      if (c["type"] != "StandardOrchestrationConfig") continue;
+      c["measurement_reorder_s"] = 2.5;
+      jsoncfg::json g = {{"type", "ZeroMotionGeneratorConfig"}, {"group", "config/zero_motion"}, {"channels", {kImu, kVel}},
+                         {"velocity_channel", "/generated/zero_velocity"}, {"rate_channel", "/generated/zero_rate"}};
+      g.update(extra);
+      c["preprocessor_configs"].push_back(g);
+    }
+    return k;
+  };
+  auto parsed = [](const AppConfig& app) {
+    const ZeroMotionGeneratorConfig* zm = nullptr;
+    for (const auto& c : app.configs)
+      if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get()))
+        for (const auto& p : *o->preprocessor_configs)
+          if (auto* z = dynamic_cast<const ZeroMotionGeneratorConfig*>(p.get())) zm = z;
+    return zm;
+  };
+
+  // Not named: the IMU decides alone, and nothing about a witness is written back.
+  const auto plain = jsoncfg::app_config_from_json(generator(jsoncfg::json::object()));
+  ASSERT_NE(parsed(plain), nullptr);
+  EXPECT_TRUE(parsed(plain)->confirmation_channels.empty());
+  EXPECT_EQ(jsoncfg::app_config_to_json(plain).dump().find("confirm"), std::string::npos);
+
+  const auto app = jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmed_velocity_sigma", 0.04}}));
+  const auto* zm = parsed(app);
+  ASSERT_NE(zm, nullptr);
+  EXPECT_EQ(zm->confirmation_channels, std::vector<std::string>{kVel});
+  EXPECT_DOUBLE_EQ(zm->confirmed_velocity_sigma, 0.04);
+  EXPECT_DOUBLE_EQ(zm->confirmation_speed, 0.05);  // defaults where the text is silent
+  EXPECT_DOUBLE_EQ(zm->confirmed_vertical_velocity_sigma, 0.2);
+  EXPECT_DOUBLE_EQ(zm->confirmation_max_sigma, 0.5);
+  EXPECT_DOUBLE_EQ(zm->confirmation_timeout, 2.5);
+  EXPECT_DOUBLE_EQ(zm->velocity_sigma, 0.2);       // what the IMU alone is trusted with stays
+  const auto text = jsoncfg::app_config_to_json(app);
+  EXPECT_EQ(jsoncfg::app_config_to_json(jsoncfg::app_config_from_json(text)).dump(), text.dump());
+  EXPECT_NE(text.dump().find("\"confirmation_channels\""), std::string::npos);
+  EXPECT_NE(text.dump().find("\"confirmed_velocity_sigma\":0.04"), std::string::npos);
+
+  // A witness the generator is never handed, and values that make no sense.
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {"/sensor/other/velocity"}}})), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmation_speed", 0.0}})), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmation_timeout", -1.0}})), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmed_velocity_sigma", 0.0}})), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmation_max_sigma", 0.0}})), std::runtime_error);
+  EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmed_vertical_velocity_sigma", 0.0}})), std::runtime_error);
+}
+
 TEST(JsonConfig, InitializationImuReplayKey) {
   using namespace cobra;
   auto src = [](const char* rel) {

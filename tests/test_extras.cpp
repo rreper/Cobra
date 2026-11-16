@@ -385,12 +385,86 @@ class ZeroMotionTest : public ::testing::Test {
     rate_only->group_ = "config/zero_rate_only";
     rate_only->velocity_channel.clear();
     rate_only->trigger_dt_sec = 0.5;
-    registry = std::make_shared<cobra::StandardRegistryPlugin>("registry", std::vector<std::shared_ptr<const cobra::BaseConfig>>{zm, rate_only});
+    auto confirmed = std::make_shared<cobra::ZeroMotionGeneratorConfig>(*zm);
+    confirmed->group_ = "config/zero_motion_confirmed";
+    confirmed->channels = std::vector<std::string>{"/imu", kReceiver};
+    confirmed->confirmation_channels = {kReceiver};
+    confirmed->velocity_sigma = 0.2;
+    confirmed->confirmed_velocity_sigma = 0.03;
+    confirmed->confirmed_vertical_velocity_sigma = 0.15;
+    auto unseen = std::make_shared<cobra::ZeroMotionGeneratorConfig>(*confirmed);
+    unseen->group_ = "config/zero_motion_unseen";
+    unseen->channels = std::vector<std::string>{"/imu"};
+    registry = std::make_shared<cobra::StandardRegistryPlugin>(
+        "registry", std::vector<std::shared_ptr<const cobra::BaseConfig>>{zm, rate_only, confirmed, unseen});
     registry->init_plugin(std::nullopt, &med);
     med.set_registry(registry->new_registry());
     plugin = std::make_unique<cobra::AdvancedPreprocessorPlugin>("extras");
     plugin->init_plugin(std::nullopt, &med);
   }
+
+  static constexpr const char* kReceiver = "/gnss/velocity";
+  /// A receiver's velocity (NED unless said otherwise), with the sigma it claims per axis.
+  static Message receiver(std::int64_t t, const Vector3& v, double sigma = 0.06, const char* channel = kReceiver,
+                          Aspn23MeasurementVelocityReferenceFrame frame = ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED) {
+    return Message(std::make_shared<aspn23_eigen::MeasurementVelocity>(
+                       header(ASPN_MEASUREMENT_VELOCITY), aspn23_eigen::TypeTimestamp(t), frame, v(0), v(1), v(2),
+                       rm(Matrix(Matrix::Identity(3, 3) * sigma * sigma)), ASPN23_MEASUREMENT_VELOCITY_ERROR_MODEL_NONE, DynVector(0),
+                       std::vector<aspn23_eigen::TypeIntegrity>{}),
+                   channel);
+  }
+
+  struct Said {  ///< one zero-velocity message of the generator
+    std::int64_t stamp, arrival;  ///< its time of validity; the IMU's time when it came out
+    double sigma;                 ///< of its velocity, north (and east), m/s
+    double vertical;              ///< down
+    bool with_receiver;           ///< it came out behind a receiver message (not behind an IMU message)
+  };
+  /// Feeds IMU samples up to `until_s` seconds after `t0`. `speed(s)` is what the receiver shows at s seconds
+  /// after t0, or negative for "no message"; its epochs are at 0.5, 1.5, ... s and each arrives `delay_s`
+  /// later, behind the IMU sample of that time (as it does out of the controller's buffer).
+  template <typename Speed, typename Motion>
+  void feed(api::Preprocessor& pp, ImuStream& imu, std::int64_t t0, double until_s, double delay_s, Speed speed, Motion motion,
+            std::vector<Said>* said) {
+    auto take = [&](const std::vector<Message>& out, bool with_receiver) {
+      for (std::size_t i = 1; i < out.size(); ++i)
+        if (auto v = out[i].as<aspn23_eigen::MeasurementVelocity>(); v && out[i].source_identifier == "/generated/zero_velocity") {
+          EXPECT_EQ(Vector3(v->get_x(), v->get_y(), v->get_z()), Vector3::Zero());
+          const Matrix cov(v->get_covariance());
+          EXPECT_EQ(cov(0, 0), cov(1, 1));
+          said->push_back({v->get_time_of_validity().get_elapsed_nsec(), imu.t, std::sqrt(cov(0, 0)), std::sqrt(cov(2, 2)), with_receiver});
+          // the zero rate comes with it, with the same stamp
+          ASSERT_LT(i + 1, out.size());
+          auto w = out[i + 1].as<aspn23_eigen::MeasurementAngularVelocity>();
+          ASSERT_TRUE(w);
+          EXPECT_EQ(w->get_time_of_validity().get_elapsed_nsec(), v->get_time_of_validity().get_elapsed_nsec());
+        }
+    };
+    while ((imu.t - t0) * 1e-9 < until_s - 1e-9) {
+      const double now = (imu.t + 10 * kMs - t0) * 1e-9;
+      const auto [rate, accel] = motion(now);
+      const Message in = imu.message(rate, accel);
+      auto out = pp.process_pntos_message(in);
+      ASSERT_TRUE(out);
+      ASSERT_GE(out->size(), 1u);
+      EXPECT_EQ((*out)[0].wrapped_message, in.wrapped_message);
+      take(*out, false);
+      while (0.5 + next_epoch_ + delay_s <= now + 1e-9) {
+        const double epoch = 0.5 + next_epoch_++;
+        const double v = speed(epoch);
+        if (v < 0) continue;
+        const Message r = receiver(t0 + static_cast<std::int64_t>(std::llround(epoch * 1e9)), Vector3(0.8 * v, -0.6 * v, 0.0));
+        auto o = pp.process_pntos_message(r);
+        ASSERT_TRUE(o);
+        ASSERT_GE(o->size(), 1u);
+        EXPECT_EQ((*o)[0].wrapped_message, r.wrapped_message);  // the receiver's message passes untouched, first
+        take(*o, true);
+      }
+    }
+  }
+  static std::pair<Vector3, Vector3> standing(double) { return {Vector3::Zero(), Vector3::Zero()}; }
+  int next_epoch_ = 0;
+
   TestMediator med;
   std::shared_ptr<cobra::StandardRegistryPlugin> registry;
   std::unique_ptr<cobra::AdvancedPreprocessorPlugin> plugin;
@@ -415,6 +489,19 @@ TEST_F(ZeroMotionTest, ConfigRoundTrip) {
   auto r = cobra::ZeroMotionGeneratorConfig::from_registry(med, "config/zero_rate_only");
   ASSERT_TRUE(r);
   EXPECT_TRUE(r->velocity_channel.empty());
+  // the receiver as a witness: off unless channels are named
+  EXPECT_TRUE(c->confirmation_channels.empty());
+  EXPECT_DOUBLE_EQ(c->confirmation_speed, 0.05);
+  EXPECT_DOUBLE_EQ(c->confirmation_max_sigma, 0.5);
+  EXPECT_DOUBLE_EQ(c->confirmation_timeout, 2.5);
+  EXPECT_DOUBLE_EQ(c->confirmed_velocity_sigma, 0.05);
+  EXPECT_DOUBLE_EQ(c->confirmed_vertical_velocity_sigma, 0.2);
+  auto w = cobra::ZeroMotionGeneratorConfig::from_registry(med, "config/zero_motion_confirmed");
+  ASSERT_TRUE(w);
+  EXPECT_EQ(w->confirmation_channels, std::vector<std::string>{kReceiver});
+  EXPECT_DOUBLE_EQ(w->confirmed_velocity_sigma, 0.03);
+  EXPECT_DOUBLE_EQ(w->confirmed_vertical_velocity_sigma, 0.15);
+  EXPECT_DOUBLE_EQ(w->velocity_sigma, 0.2);
 }
 
 TEST_F(ZeroMotionTest, SaysOnceASecondThatTheVehicleStands) {
@@ -488,4 +575,273 @@ TEST_F(ZeroMotionTest, RateOnlyAndItsOwnInterval) {
   // 0.5 s is not a multiple of the 0.2 s sub-window the detector advances by: every 0.6 s from 2 s on
   EXPECT_GE(generated, 5);
   EXPECT_LE(generated, 6);
+}
+
+// --------------------------------------------------------------------------- the receiver as a second witness
+// DESIGN.md §7.28. A car that creeps at a steady 0.3 m/s is as quiet to the IMU as one that stands: on the
+// example recording 21 of the detector's 420 messages come while the car moves.
+
+TEST_F(ZeroMotionTest, TheImuAloneCallsACreepingVehicleStanding) {
+  // v0.2.12, pinned: without a witness the generator says "stands" once a second whatever the receiver shows.
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion"));
+  ASSERT_TRUE(pp);
+  ImuStream imu;
+  std::vector<Said> said;
+  feed(*pp, imu, imu.t, 12.0, 2.0, [](double) { return 0.3; }, standing, &said);
+  EXPECT_GE(said.size(), 10u);
+}
+
+TEST_F(ZeroMotionTest, TheReceiverContradictsACreepingVehicle) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  auto* zm = dynamic_cast<cobra::ZeroMotionGenerator*>(pp.get());
+  ASSERT_NE(zm, nullptr);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  feed(*pp, imu, t0, 14.0, 2.0, [](double) { return 0.3; }, standing, &said);
+  // One message on the IMU's word before the receiver was first heard (its first velocity is 2 s old when it
+  // arrives), none after that.
+  ASSERT_LE(said.size(), 1u);
+  for (const auto& m : said) {
+    EXPECT_LT((m.arrival - t0) * 1e-9, 2.6);
+    EXPECT_NEAR(m.sigma, 0.2, 1e-12);
+  }
+  EXPECT_TRUE(zm->detector().stationary());  // the IMU still says "stands"
+  const auto& c = zm->confirmation();
+  EXPECT_EQ(c.confirmed, 0u);
+  EXPECT_GE(c.contradicted, 9u);  // the epochs at 1.5 .. 10.5 s, each in the middle of 2 s the IMU called quiet
+  EXPECT_NEAR(c.fastest, 0.3, 1e-9);
+  // Said with the speed: the first and the tenth time for everybody, each time for whoever asks (DEBUG). It is
+  // what an installation needs to know about its detector.
+  std::size_t info = 0, debug = 0;
+  for (const auto& l : med.logs)
+    if (l.message.find("0.30 m/s") != std::string::npos) {
+      if (l.level == api::LoggingLevel::INFO) {
+        ++info;
+      } else {
+        EXPECT_EQ(l.level, api::LoggingLevel::DEBUG);
+        ++debug;
+      }
+    }
+  EXPECT_GE(info, 1u);
+  EXPECT_LE(info, 2u);
+  EXPECT_EQ(info + debug, c.contradicted);
+  EXPECT_EQ(med.count(api::LoggingLevel::ERROR), 0u);
+}
+
+TEST_F(ZeroMotionTest, TheReceiverConfirmsAStandstillAtItsEpochs) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  auto* zm = dynamic_cast<cobra::ZeroMotionGenerator*>(pp.get());
+  ASSERT_NE(zm, nullptr);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  feed(*pp, imu, t0, 14.0, 2.0, [](double) { return 0.012; }, standing, &said);  // a receiver at rest: 6 mm/s median on the recording
+  ASSERT_GE(said.size(), 9u);
+  std::size_t alone = 0, confirmed = 0;
+  for (std::size_t i = 0; i < said.size(); ++i) {
+    const auto& m = said[i];
+    if (!m.with_receiver) {  // only before the receiver was heard
+      ++alone;
+      EXPECT_LT((m.arrival - t0) * 1e-9, 2.6) << i;
+      EXPECT_NEAR(m.sigma, 0.2, 1e-12) << i;
+      EXPECT_NEAR(m.vertical, 0.2, 1e-12) << i;
+      continue;
+    }
+    ++confirmed;
+    EXPECT_NEAR(m.sigma, 0.03, 1e-12) << i;                 // the weight of a confirmed standstill, north and east
+    EXPECT_NEAR(m.vertical, 0.15, 1e-12) << i;              // down has its own: the receiver says nothing about the accelerometer
+    const double epoch = (m.stamp - t0) * 1e-9 - 0.5;        // stamped at the receiver's epoch ...
+    EXPECT_NEAR(epoch, std::round(epoch), 1e-9) << i;
+    EXPECT_NEAR((m.arrival - m.stamp) * 1e-9, 2.0, 0.011) << i;  // ... and out as soon as that velocity arrives
+    if (i) {
+      EXPECT_GE(m.stamp - said[i - 1].stamp, 900 * kMs) << i;
+    }
+    if (i && said[i - 1].with_receiver) {
+      EXPECT_EQ(m.stamp - said[i - 1].stamp, 1000 * kMs) << i;  // none left out
+    }
+  }
+  EXPECT_LE(alone, 1u);
+  EXPECT_GE(confirmed, 9u);  // the epochs from 2.5 s (1.5 s is too close to the one the IMU said alone) to 11.5 s
+  EXPECT_EQ(zm->confirmation().confirmed, confirmed);
+  EXPECT_EQ(zm->confirmation().alone, alone);
+  EXPECT_EQ(zm->confirmation().contradicted, 0u);
+  EXPECT_EQ(zm->generated(), said.size());
+}
+
+TEST_F(ZeroMotionTest, ASlowEpochAtTheEdgeOfAStopIsNotEnough) {
+  // The car winds and brakes until 6 s, then stands. The receiver shows a standstill from 5.5 s on, but the
+  // epochs at 5.5 and 6.5 s do not have a second of quiet IMU on both sides.
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  feed(*pp, imu, t0, 14.0, 2.0, [](double s) { return s < 5.0 ? 3.0 : 0.01; },
+       [](double now) -> std::pair<Vector3, Vector3> {
+         if (now < 6.0) return {Vector3(0, 0, 0.05 * std::sin(2.0 * now)), Vector3(-0.8, 0, 0)};
+         return {Vector3::Zero(), Vector3::Zero()};
+       },
+       &said);
+  ASSERT_GE(said.size(), 3u);
+  EXPECT_GE((said.front().stamp - t0) * 1e-9, 7.0 - 1e-9);  // 7.5 s is the first epoch with 6.5 to 8.5 s quiet
+  EXPECT_LE((said.front().stamp - t0) * 1e-9, 7.5 + 1e-9);
+  for (const auto& m : said) EXPECT_NEAR(m.sigma, 0.03, 1e-12);
+}
+
+TEST_F(ZeroMotionTest, WithoutTheReceiverTheImuDecidesAlone) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  auto* zm = dynamic_cast<cobra::ZeroMotionGenerator*>(pp.get());
+  ASSERT_NE(zm, nullptr);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  // the receiver is there until its epoch at 7.5 s, gone until 18.5 s, and back
+  feed(*pp, imu, t0, 28.0, 2.0, [](double s) { return (s > 8.0 && s < 18.0) ? -1.0 : 0.01; }, standing, &said);
+  std::vector<double> alone_arrivals, confirmed_stamps;
+  for (std::size_t i = 0; i < said.size(); ++i) {
+    const auto& m = said[i];
+    if (i) {
+      EXPECT_GE(m.stamp - said[i - 1].stamp, 900 * kMs) << i;  // in order and never two for one second
+    }
+    if (std::abs(m.sigma - 0.2) < 1e-12) {
+      if ((m.arrival - t0) * 1e-9 > 3.0) alone_arrivals.push_back((m.arrival - t0) * 1e-9);
+      EXPECT_EQ((m.arrival - m.stamp), 1000 * kMs) << i;  // as before: the middle of the detector's window
+    } else {
+      EXPECT_NEAR(m.sigma, 0.03, 1e-12) << i;
+      confirmed_stamps.push_back((m.stamp - t0) * 1e-9);
+    }
+  }
+  // The last velocity (7.5 s) arrives at 9.5 s; 2.5 s later the IMU decides alone again, until the first velocity
+  // after the gap (18.5 s) arrives at 20.5 s.
+  ASSERT_GE(alone_arrivals.size(), 7u);
+  EXPECT_NEAR(alone_arrivals.front(), 12.0, 0.25);
+  EXPECT_LE(alone_arrivals.back(), 20.5 + 1e-9);
+  ASSERT_FALSE(confirmed_stamps.empty());
+  EXPECT_NEAR(confirmed_stamps.back(), 25.5, 1e-6);
+  std::size_t before = 0, after = 0;
+  for (double t : confirmed_stamps) (t < 8.0 ? before : after) += 1;
+  EXPECT_GE(before, 5u);
+  EXPECT_GE(after, 4u);  // 21.5 s (the first that is clear of the last one the IMU said alone) to 25.5 s
+  for (double t : confirmed_stamps) EXPECT_FALSE(t > 8.0 && t < 18.0) << t;
+  // both changes are said
+  std::size_t lost = 0, back = 0;
+  for (const auto& l : med.logs) {
+    if (l.message.find("decides alone") != std::string::npos) ++lost;
+    if (l.message.find("confirms again") != std::string::npos) ++back;
+  }
+  EXPECT_EQ(lost, 1u);
+  EXPECT_EQ(back, 1u);
+}
+
+TEST_F(ZeroMotionTest, AVelocityThatArrivesAtOnceWaitsForTheImu) {
+  // Without the controller's buffer the receiver's velocity is there 0.1 s after its epoch; whether the IMU
+  // stays quiet for the second after it is not known yet. The message comes when it is, behind an IMU sample.
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  feed(*pp, imu, t0, 12.0, 0.1, [](double) { return 0.01; }, standing, &said);
+  ASSERT_GE(said.size(), 8u);
+  for (std::size_t i = 0; i < said.size(); ++i) {
+    const auto& m = said[i];
+    EXPECT_FALSE(m.with_receiver) << i;
+    EXPECT_NEAR(m.sigma, 0.03, 1e-12) << i;  // the receiver was heard before the detector's first window was full
+    const double epoch = (m.stamp - t0) * 1e-9 - 0.5;
+    EXPECT_NEAR(epoch, std::round(epoch), 1e-9) << i;
+    EXPECT_GE((m.arrival - m.stamp) * 1e-9, 1.0) << i;  // half a window, and the detector's next 0.2 s verdict
+    EXPECT_LE((m.arrival - m.stamp) * 1e-9, 1.21) << i;
+  }
+  // and when the car pulls away half a second after an epoch that showed a standstill, that epoch is dropped
+  std::vector<Said> more;
+  const double base = (imu.t - t0) * 1e-9;  // 12 s: the epoch at 11.5 s is waiting
+  feed(*pp, imu, t0, 16.0, 0.1, [](double s) { return s < 12.0 ? 0.01 : 2.0; },
+       [base](double now) -> std::pair<Vector3, Vector3> { return {Vector3::Zero(), now > base ? Vector3(0.8, 0, 0) : Vector3::Zero()}; }, &more);
+  for (const auto& m : more) EXPECT_LT((m.stamp - t0) * 1e-9, 11.0) << (m.stamp - t0) * 1e-9;
+}
+
+TEST_F(ZeroMotionTest, ADoubtfulVelocityIsNotHeard) {
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  auto* zm = dynamic_cast<cobra::ZeroMotionGenerator*>(pp.get());
+  ASSERT_NE(zm, nullptr);
+  ImuStream imu;
+  const Vector3 still(0.004, -0.003, 0.002);
+  int alone = 0;
+  std::uint64_t sent = 0;
+  for (int k = 0; k < 1000; ++k) {
+    auto out = pp->process_pntos_message(imu.message());
+    ASSERT_TRUE(out);
+    if (out->size() > 1) ++alone;
+    if (k % 100 != 99) continue;
+    const std::int64_t t = imu.t - 2000 * kMs;
+    std::vector<Message> doubtful{
+        receiver(t, still, 1.0),                                                                // claims 1 m/s: says nothing about 0.05
+        receiver(t, Vector3(0.004, std::nan(""), 0.002)),                                       // not finite
+        receiver(t, still, 0.06, kReceiver, ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_ECI),    // not a velocity over ground
+        receiver(t, Vector3(std::nan(""), 0.0, 0.0), 0.06, kReceiver, ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR),
+        Message(make_position(t, 1, 2, 3, Matrix::Identity(3, 3)), kReceiver),                 // not a velocity at all
+        receiver(t, still, 0.06, "/other/velocity")};                                           // not a confirmation channel
+    for (const auto& m : doubtful) {
+      auto o = pp->process_pntos_message(m);
+      ASSERT_TRUE(o);
+      EXPECT_EQ(o->size(), 1u);
+      ++sent;
+    }
+  }
+  EXPECT_GE(alone, 8);  // the IMU went on deciding alone, every second from 2 s on
+  EXPECT_EQ(zm->confirmation().confirmed, 0u);
+  EXPECT_EQ(zm->confirmation().alone, static_cast<std::uint64_t>(alone));
+  EXPECT_EQ(zm->confirmation().not_heard, sent - 10u);  // all but the ones on the other channel, which is not looked at
+  // An ECEF velocity and the velocity of a PVA message are heard.
+  std::uint64_t confirmed_before = zm->confirmation().confirmed;
+  for (int k = 0; k < 600; ++k) {
+    auto out = pp->process_pntos_message(imu.message());
+    ASSERT_TRUE(out);
+    if (k % 100 != 99) continue;
+    const std::int64_t t = imu.t - 2000 * kMs;
+    const Message m = (k / 100) % 2 == 0 ? receiver(t, still, 0.06, kReceiver, ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_ECEF)
+                                         : Message(make_pva(t, 0.7, -1.4, 250.0, 0.004, -0.003, 0.002, vec({1, 0, 0, 0})), kReceiver);
+    auto o = pp->process_pntos_message(m);
+    ASSERT_TRUE(o);
+    // The first is for a time a second before the last message the IMU made alone: nothing is said twice, or
+    // out of order.
+    EXPECT_EQ(o->size(), k == 99 ? 1u : 3u) << k;
+  }
+  EXPECT_EQ(zm->confirmation().confirmed, confirmed_before + 5u);
+}
+
+TEST_F(ZeroMotionTest, AVelocityStampedInTheFutureDoesNotHoldUpTheOthers) {
+  // One message of the receiver with a time stamp a quarter of an hour ahead (a corrupt stamp): it cannot be
+  // judged until the IMU gets there. The epochs behind it are judged as they come.
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_confirmed"));
+  ASSERT_TRUE(pp);
+  auto* zm = dynamic_cast<cobra::ZeroMotionGenerator*>(pp.get());
+  ASSERT_NE(zm, nullptr);
+  ImuStream imu;
+  const std::int64_t t0 = imu.t;
+  std::vector<Said> said;
+  feed(*pp, imu, t0, 6.0, 2.0, [](double) { return 0.01; }, standing, &said);
+  auto o = pp->process_pntos_message(receiver(imu.t + 900'000 * kMs, Vector3(0.004, -0.003, 0.002)));
+  ASSERT_TRUE(o);
+  EXPECT_EQ(o->size(), 1u);
+  const std::uint64_t before = zm->confirmation().confirmed;
+  feed(*pp, imu, t0, 14.0, 2.0, [](double) { return 0.01; }, standing, &said);
+  EXPECT_GE(zm->confirmation().confirmed, before + 7u);  // the epochs at 4.5 .. 11.5 s, one a second as before
+  for (std::size_t i = 1; i < said.size(); ++i) {
+    EXPECT_LE(said[i].stamp - said[i - 1].stamp, 1500 * kMs) << i;
+  }
+}
+
+TEST_F(ZeroMotionTest, AConfirmationChannelTheGeneratorNeverSeesIsAnError) {
+  // "channels" is what the orchestration hands to the preprocessor; a witness that is not in it would never speak
+  // and the generator would decide alone for ever, silently.
+  auto pp = plugin->new_preprocessor(2, std::string("config/zero_motion_unseen"));
+  EXPECT_EQ(pp, nullptr);
+  EXPECT_TRUE(med.has_error());
+  EXPECT_NE(med.last_message().find("/gnss/velocity"), std::string::npos) << med.last_message();
 }

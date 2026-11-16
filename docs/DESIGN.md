@@ -1027,8 +1027,14 @@ own motion remains. The detector keeps the 0.2 s means of a 2 s window and calls
 from the window's mean by more than 0.003 rad/s and 0.15 m/s² (per axis) and the mean rate is below 0.02 rad/s
 (a bias fits under it, a steady turn does not). In non-overlapping windows of the recording that holds for 95 %
 of the standing windows and none of the 1030 windows above 0.5 m/s. As the generator runs it (sliding, one
-message a second): 420 messages in the 2602 s of the drive, of which the car stands for 502 s; 396 of them at a
-true standstill, 24 while it creeps (up to 0.49 m/s within the second around the stamp), none faster.
+message a second): 480 messages in the 2602 s of the drive, of which the car stands for 502 s; 451 of them at a
+true standstill, 29 while it creeps above 0.03 m/s (up to 0.52 m/s within the second around the stamp), none
+faster.
+
+*Correction to v0.2.12 to v0.2.14:* those releases gave 420, 396 and 24 here. They were counted with a Python
+replica of the detector that worked on the IMU's time stamps as recorded, on which five sub-windows fall just
+short of a second, so that it spaced most of its messages 1.2 s apart. The generator sees the stamps after the
+`TimeAdjuster` and makes one message a second; the figures above are its own.
 
 **Saying so (`ZeroMotionGenerator`, preprocessor `zero_motion_generator` of the advanced plugin).** While the
 window is quiet, a zero velocity (`MeasurementVelocity`, NED) and a zero angular rate
@@ -1054,7 +1060,7 @@ A known rate other than zero would be taken the same way; only zero is generated
 version said so (0.05 m/s). With the receiver present that made the solution worse, 1.55 / 1.58 m (horizontal
 / vertical RMS over the drive) became 1.85 / 2.51 m, although it more than halved the outage errors. Two
 reasons, sorted out in §7.27 (the account given here in v0.2.12, accelerometer biases that wander, was half
-wrong). Horizontally: the detector also fires while the car creeps, 17 times above 0.1 m/s, and a creeping car
+wrong). Horizontally: the detector also fires while the car creeps, 19 times above 0.1 m/s, and a creeping car
 that is told it stands falls behind. Vertically: the accelerometer noise in the IMU model was the noise at
 rest, a sixth of what it is in a driving car, so the filter trusted its dead reckoning too far once the zero
 velocity had pinned the bias. With the model of that release the weight was the remedy:
@@ -1086,7 +1092,8 @@ the IMU.
   zero-motion updates, against 0.7° for the run that was given its heading. The three bad cases of §7.24, stops
   right after the hand-over, are gone.
 
-`configs/pos_ins_ground_vehicle.json` now has all three: alignment in motion, constraints, zero-motion updates.
+`configs/pos_ins_ground_vehicle.json` now has all three: alignment in motion, constraints, zero-motion updates
+(since §7.28 with the receiver's velocity confirming each standstill).
 
 | Key (`ZeroMotionGeneratorConfig`) | Default | Meaning |
 |---|---|---|
@@ -1096,12 +1103,14 @@ the IMU.
 | `window`, `sub_window` | 2 s, 0.2 s | how long the IMU has to stay quiet, and the averaging inside it; `window` at least 1 s |
 | `gyro_deviation`, `accel_deviation`, `max_rate` | 0.003 rad/s, 0.15 m/s², 0.02 rad/s | the thresholds |
 | `trigger_dt_sec` | 1 s | between messages; in effect a multiple of `sub_window` |
+| `confirmation_channels` and four more | empty | the receiver's velocity as a second witness: §7.28 |
 
 Limits. The detector knows the vehicle only by its vibration and its manoeuvres: something that glides at a
 constant velocity (a train, a ship, an aircraft in cruise) looks like a standing car, and a zero velocity
 believed during an outage would be a large error. This is for road vehicles; both processors should carry an
 innovation gate (the examples use 0.999), which catches a wrong "zero" as long as the filter knows its velocity.
-Creeping below 0.5 m/s is not told from standing. The thresholds are those of one car and one IMU.
+Creeping below 0.5 m/s is not told from standing by the IMU alone (§7.28 adds the receiver's velocity as a
+second witness). The thresholds are those of one car and one IMU.
 
 Found on the way: with the `pva_message` initialization the PVA reaches the orchestration through the
 controller's buffer, two seconds behind the IMU, and the first IMU sample after it is mechanized across that
@@ -1195,7 +1204,7 @@ the outage error of the row with constraints and zero-motion updates (2.8 m agai
 too large) while it made the rows without constraints worse; not followed up.
 
 **3. The horizontal cost of a tight zero velocity is the detector, not the IMU.** With the default detector
-(0.003 rad/s, 0.15 m/s², 2 s) 21 of the 420 messages come while the car creeps above 0.05 m/s. Weighted at
+(0.003 rad/s, 0.15 m/s², 2 s) 23 of the 480 messages come while the car creeps above 0.05 m/s. Weighted at
 0.05 m/s each of them tells the filter that a car rolling forward in a queue stands, and the position falls
 behind by the distance rolled. With `vn100_driving`, by detector setting:
 
@@ -1207,6 +1216,8 @@ behind by the distance rolled. With `vn100_driving`, by detector setting:
 | 0.001, 0.06, 3 s | 286 | 0 | 1.55 / 1.70, 9.5 (19.8) | 1.55 / 1.60, 10.6 (24.0) |
 | 0.0008, 0.05, 4 s | 176 | 0 | 1.54 / 1.67, 9.6 (19.7) | 1.55 / 1.59, 10.9 (22.9) |
 
+The two count columns are those of the Python replica of §7.25's correction, about one message in eight short
+of what the generator makes (480 and 23 in the default row); the filter columns are runs of the filter itself.
 Once no creeping is taken for standing, the tight weight costs nothing horizontally and takes another metre off
 the outage (four off the worst case). So 0.2 m/s is not a concession to the IMU model: it is what the default
 detector can vouch for, and a detector that is sure may say 0.05 to 0.1. The defaults stay as they are, because
@@ -1214,8 +1225,156 @@ the strict thresholds are those of one car's idle and a detector that never fire
 is the recipe for an installation whose standstill has been looked at. With the constraints in the filter the
 two settings are level (6.3 (11.8) m against 6.0 (12.5) m).
 
-What is left: with the strict detector a zero velocity at 0.05 m/s still costs 0.13 m of vertical RMS (0.08 at
-0.1, 0.03 at 0.2), which neither the accelerometer noise nor a bias model removes. I have not found its cause.
+What was left in v0.2.14: with the strict detector a zero velocity at 0.05 m/s still costs 0.13 m of vertical
+RMS (0.08 at 0.1, 0.03 at 0.2), which neither the accelerometer noise nor a bias model removes. §7.28 has the
+cause: the vertical accelerometer reads about 2 mm/s² differently in the driving car than in the standing one.
+
+### 7.28 A standstill confirmed by the receiver (`ZeroMotionGeneratorConfig::confirmation_channels`)
+
+To the IMU a car that rolls forward at a steady 0.3 m/s is as quiet as one that stands. On the recording 23 of
+the generator's 480 messages come while the reference shows more than 0.05 m/s within the second around the
+stamp, 8 of them more than 0.2 m/s, the fastest 0.52 m/s (§7.25, §7.27). That is why the zero velocity is
+weighted at 0.2 m/s. While there is a receiver, its velocity can say which of the two it is.
+
+**What the receiver's velocity shows.** The F9T's velocity against the reference, its stamps taken 250 ms
+earlier (§7.24), by how fast the reference says the car is:
+
+| reference speed | epochs | receiver speed: median | 95 % | least, largest |
+|---|---|---|---|---|
+| below 0.01 m/s | 467 | 0.006 m/s | 0.013 | 0.000, 0.026 |
+| 0.05 to 0.1 | 13 | 0.091 | 0.131 | 0.008, 0.146 |
+| 0.1 to 0.2 | 24 | 0.179 | 0.215 | 0.115, 0.248 |
+| 0.2 to 0.5 | 48 | 0.347 | 0.499 | 0.157, 0.563 |
+
+At rest it never shows more than 0.026 m/s, although it claims a sigma of 0.06 m/s per horizontal axis. A
+threshold of 0.05 m/s (`confirmation_speed`) lies between standing and all but the slowest creeping.
+
+**The rule.** With `confirmation_channels` named, and while a usable velocity keeps arriving on them, the
+generator no longer speaks on the IMU's word. For each receiver epoch it asks whether the detector called the
+IMU quiet for half a window before and after it (a second each side). If so and the receiver shows less than
+`confirmation_speed`, a zero velocity and a zero rate go out, stamped at that epoch, the zero velocity with
+`confirmed_velocity_sigma` (0.05 m/s) north and east. If the receiver shows more, nothing goes out and the
+epoch is counted as a contradiction. An epoch without that much quiet around it gives nothing either way.
+
+- *Usable* means a `MeasurementVelocity` in NED or ECEF with all three axes, or the velocity of a PVA message,
+  finite, and claiming no sigma above `confirmation_max_sigma` (0.5 m/s) on any axis. Anything else on those
+  channels is counted and not heard: a receiver in trouble neither confirms nor contradicts. Each epoch is
+  judged for itself, so that a message with a time stamp from the future waits without holding up the others.
+- *Timing.* The receiver's messages pass the controller's buffer and are two seconds old when the generator
+  sees them; by then the detector's verdict on the second after the epoch is long known, and the message goes
+  out at once, behind the receiver's own. It is as old as that velocity, which the reorder window already has
+  to cover (`measurement_reorder_s` longer than the buffer plus the largest time bias, 2.5 s in the examples;
+  §7.23). `Filter.AStandstillConfirmedByTheReceiverCarriesMoreWeight` runs this through the controller and
+  checks that nothing is discarded as older than the filter. Without a buffer the velocity is there before the
+  IMU has passed the epoch by half a window; the epoch then waits, at most that half window and two
+  sub-windows.
+- *Spacing.* A confirmed message follows the previous message by at least nine tenths of `trigger_dt_sec`.
+  The receiver's epochs are not exactly a second apart (on the recording half of the intervals are shorter,
+  the shortest 0.952 s); with the full interval every epoch after a short one would be left out.
+- *Without the receiver.* After `confirmation_timeout` (2.5 s of IMU time) without a usable velocity the IMU
+  decides alone again, with `velocity_sigma`, until one arrives. Both changes are logged at INFO. With the 2 s
+  buffer the first message on the IMU's word is stamped about 3.8 s after the receiver's last epoch: that much
+  of a standstill at the start of an outage passes without a message. It is the price of not knowing in
+  advance that the receiver has gone.
+- *The time bias.* The generator takes the stamps as they reach it. In the examples the `TimeBiasConfig` for
+  the velocity channel stands before the generator, so that the messages carry the time of the motion; without
+  it they would be 250 ms late, inside the second of quiet that the rule demands anyway.
+- A confirmation channel that is not among the generator's `channels` would never be seen, and the generator
+  would decide alone for ever: the configuration is refused (JSON) or the preprocessor is not created (ERROR).
+
+**How fast is the vehicle when the detector says it stands.** Each contradiction is logged with the speed the
+receiver shows, the first, tenth, hundredth at INFO and every one at DEBUG, with the count and the fastest so
+far. That is what an installation needs to set its detector, and it replaces the separate tool §9.6 had in
+mind. On the recording: 18 epochs, 0.06 to 0.38 m/s.
+
+**What the generator makes on the recording** (its own output; the reference speed is the largest within the
+second around the stamp):
+
+| | messages | reference above 0.05 m/s | above 0.1 | above 0.2 | fastest |
+|---|---|---|---|---|---|
+| the IMU alone | 480 | 23 | 19 | 8 | 0.52 m/s |
+| with the receiver as witness | 448 (447 confirmed, 1 before the receiver was first heard) | 3 | 0 | 0 | 0.08 m/s |
+
+The filter takes 439 zero-velocity and 439 zero-rate updates of the second kind and gates none out; of the
+first kind it takes 470 and 466 and gates out four zero rates.
+
+**What the filter makes of it** (`vn100_driving`; horizontal / vertical RMS with the receiver present, error at
+the end of an outage, mean (worst) of six, and of the 40 s outage at the long stop):
+
+| zero-motion updates | no outage, h / v | 60 s outages | 120 s outages | standing, 40 s |
+|---|---|---|---|---|
+| none | 1.55 / 1.57 m | 24.9 (53.6) m | 128.2 (278.8) m | 11.7 m |
+| the IMU alone, 0.2 m/s (§7.25) | 1.57 / 1.61 | 10.7 (23.8) | 33.8 (65.4) | 2.1 |
+| the IMU alone, 0.05 m/s | 1.78 / 1.72 | 10.3 (20.6) | 32.4 (84.3) | 1.9 |
+| confirmed, 0.2 m/s on all axes | 1.55 / 1.61 | 10.5 (23.2) | 33.8 (66.2) | 2.1 |
+| confirmed, 0.05 m/s on all axes | 1.53 / 1.73 | 10.3 (22.5) | 33.8 (66.0) | 1.8 |
+| **confirmed, 0.05 m/s north and east, 0.2 down** (the defaults) | 1.53 / 1.61 | 10.3 (22.5) | 33.8 (66.1) | 1.8 |
+| confirmed, 0.02 m/s north and east, 0.2 down | 1.53 / 1.61 | 10.1 (22.2) | 33.7 (65.9) | 1.8 |
+| constraints and the IMU alone, 0.2 m/s | 1.57 / 1.71 | 6.0 (12.5) | 9.3 (16.5) | 2.0 |
+| constraints and confirmed (the defaults) | 1.55 / 1.71 | 6.1 (12.3) | 9.6 (16.5) | 1.9 |
+
+The gain is small and I do not want it read as more. The firm weight no longer costs anything with the
+receiver present (1.53 m where the IMU alone at 0.05 m/s gave 1.78 m and at 0.2 m/s 1.57 m); the outages while
+driving end 0.4 m nearer on average and 1.3 m in the worst case, the outage at the stop 0.3 m nearer; after two
+minutes the mean is the same. With the constraints in the filter nothing changes beyond what one recording
+can resolve, and the same holds after an alignment in motion (`docs/ALIGNMENT_MATRIX.md`: heading 0.74° against
+0.72° thirty seconds after the hand-over, positions equal). What the confirmation buys is not on this
+recording, which holds 23 such seconds: a car in a queue that rolls for minutes is no longer told that it
+stands. `configs/pos_ins_ground_vehicle.json` uses it for that reason, and the weight in an outage is
+unchanged because there the IMU is alone as before.
+
+**The vertical axis, and the item §7.27 left open.** A zero velocity at 0.05 m/s on all three axes costs
+0.12 m of vertical RMS (1.73 against 1.61 m) wherever it comes from. Three measurements explain it.
+
+1. The vertical RMS of every table here is mostly not the filter's. The receiver's own height differs from the
+   reference by −0.89 m on average with a standard deviation of 1.38 m, 1.64 m RMS; the filter follows the
+   receiver. What the firm zero velocity changes is where the filter sits against the receiver: 0.05 m below it
+   on average with 0.2 m/s, 0.18 m below it with 0.05 m/s.
+2. The vertical accelerometer does not read the same standing and driving. Its mean error against the
+   reference (specific force turned with the reference attitude, plus gravity, less the reference's change of
+   velocity) over every stretch of eight seconds or more: −55.8 mm/s² over the 15 standing stretches (453 s),
+   −54.7 mm/s² over the 24 driving ones (2064 s). For the eight driving stretches that have a standing stretch
+   on either side, the difference to the mean of those two is +0.7 to +3.7 mm/s², +2.2 on average, positive
+   every time. The reading is a few milli-g off in any case, which the filter's bias state takes up; what the
+   bias state cannot follow is a change of 2 mm/s² each time the car pulls away, more than three times the
+   0.6 mm/s² it is modelled with. A firm vertical zero velocity fixes the bias at its standstill value at every stop; in
+   the drive that follows the inertial solution falls at 2 mm/s² until the fixes pull it back. The sign fits:
+   the filter ends up below the receiver. I have not worked the size out from the filter's gains.
+3. With the vertical component left at 0.2 m/s and only north and east at 0.05 m/s, the vertical RMS is 1.61 m,
+   that of the IMU alone, and every other figure of the firm weight is kept (the table above).
+
+Hence `confirmed_vertical_velocity_sigma`, 0.2 m/s by default: the receiver confirms that the car stands, not
+that the accelerometer reads at rest what it reads driving. What makes the reading change I have not
+established; vibration is the obvious candidate and nothing here tests it. It also explains why a larger
+accelerometer bias sigma did not help in §7.27: a bias that wanders more at all times is not a bias that steps
+when the car starts to drive.
+
+| Key (`ZeroMotionGeneratorConfig`) | Default | Meaning |
+|---|---|---|
+| `confirmation_channels` | empty | channels of the receiver's velocity; they have to be listed in `channels` too. Empty: the IMU decides alone (§7.25), and none of the keys below is written |
+| `confirmation_speed` | 0.05 m/s | below it (norm of the three axes) the receiver agrees that the vehicle stands |
+| `confirmed_velocity_sigma` | 0.05 m/s | north and east, of a confirmed zero velocity |
+| `confirmed_vertical_velocity_sigma` | 0.2 m/s | down |
+| `confirmation_max_sigma` | 0.5 m/s | a velocity that claims more on any axis is not heard |
+| `confirmation_timeout` | 2.5 s | of IMU time since the last velocity that was heard; then the IMU decides alone. Longer than the receiver's interval |
+
+Limits. The threshold is one receiver's: 0.05 m/s is twice the largest speed the F9T shows at rest on this
+recording, and a receiver with a noisier velocity needs a higher one and then a larger sigma to go with it. A
+receiver that shows a standstill while the car creeps is not caught by the IMU, which was the problem to begin
+with; the two witnesses fail together only if the receiver's velocity is wrong by the car's speed. In an
+outage nothing is gained: the IMU is alone, creeping is taken for standing as before, at 0.2 m/s. A receiver
+slower than one epoch in `confirmation_timeout` makes the generator change between the two modes with every
+message.
+
+Tests: `ZeroMotionTest.TheImuAloneCallsACreepingVehicleStanding` (v0.2.12, pinned),
+`TheReceiverContradictsACreepingVehicle`, `TheReceiverConfirmsAStandstillAtItsEpochs`,
+`ASlowEpochAtTheEdgeOfAStopIsNotEnough`, `WithoutTheReceiverTheImuDecidesAlone`,
+`AVelocityThatArrivesAtOnceWaitsForTheImu`, `ADoubtfulVelocityIsNotHeard`,
+`AVelocityStampedInTheFutureDoesNotHoldUpTheOthers`, `AConfirmationChannelTheGeneratorNeverSeesIsAnError`;
+`Filter.AStandstillConfirmedByTheReceiverCarriesMoreWeight`
+(56 updates of each kind in the minute, none discarded, velocity sigma 0.13 m/s against 0.19),
+`Filter.AReceiverThatShowsMotionSilencesTheZeroMotionUpdates` (one of each, from before the receiver was first
+heard); `JsonConfig.ZeroMotionConfirmationKeys`.
 
 ## 8. Deviations from the Python original
 
@@ -1250,6 +1409,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 25 | `inertial::StationarityDetector`; third preprocessor of the advanced plugin, `zero_motion_generator` (`ZeroMotionGeneratorConfig`); eleventh measurement processor `pinson_zero_rate` (`PinsonZeroRateMPConfig`); aux channel `INERTIAL_SENSOR_ERRORS`, by which the orchestration hands a processor the biases the inertial is applying (§7.25) | — | C++ additions; nothing is generated, created or handed over unless a configuration names them |
 | 26 | `StandardOrchestrationConfig::initialization_imu_replay_s`: IMU messages received before the initialization has a solution are kept and those after the solution's time given to the new inertial (§7.26) | they are dropped | off by default, key written only when set |
 | 27 | IMU preset `vn100_driving` (§7.27) | — | C++ addition; no shipped default configuration names it, the four vehicle examples do |
+| 28 | `ZeroMotionGeneratorConfig::confirmation_channels` and the five keys with it: a receiver's velocity confirms or contradicts each standstill of deviation 25 (§7.28) | — | C++ addition to a C++ addition; off unless channels are named, the keys are written only then. `configs/pos_ins_ground_vehicle.json` names them |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1356,11 +1516,14 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.27, in the order of what a vehicle installation misses first: an estimate of the receiver's time
-offset (the largest error source of the alignment in motion); a standstill confirmed by the receiver's velocity
-while there is one, so that creeping is not taken for standing (§7.27) and a tool that shows an installation
-how fast its vehicle is when the detector says it stands; measurement weighting that adapts to a receiver whose
-reported covariance is optimistic; tightly coupled GNSS.
+Open after §7.28, in the order of what a vehicle installation misses first: an estimate of the receiver's time
+offset (the largest error source of the alignment in motion); an accelerometer bias that is allowed to step
+when the vehicle starts and stops (§7.28: 2 mm/s² on the vertical axis of the example unit, which is what
+keeps the vertical zero velocity at 0.2 m/s); creeping in an outage, where the IMU is alone (§7.28);
+measurement weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
+Two leads not followed: a gyro bias sigma four times larger halves the outage error with constraints and
+zero-motion updates and worsens the rows without constraints (§7.27); `imu_gap_policy` "hold" does not close
+the start-up hole of §7.26 completely.
 
 See `docs/ROADMAP.md`. Phases 1–3 (config files, presets, corrected default, CI; gating, degraded matrix,
 geoid; push API, C ABI, network LCM and CSV transports, packaging) are done. Still out of scope: ROS transport

@@ -1,6 +1,6 @@
 # Alignment matrix: the filter switched on anywhere in the drive
 
-Generated 2026-11-16 08:42 by `tools/run_alignment_matrix.py` in 155 s. `configs/pos_ins.json` with the `vn100_driving` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
+Generated 2026-11-16 10:14 by `tools/run_alignment_matrix.py` in 177 s. `configs/pos_ins.json` with the `vn100_driving` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
 
 ## At the hand-over
 
@@ -16,6 +16,7 @@ Generated 2026-11-16 08:42 by `tools/run_alignment_matrix.py` in 155 s. `configs
 | position_constraints | 64 / 64 | 30, 62, 139 | 2.65 (5.22) | 2.74 | 0.95 (1.95) | 0.49 (1.95) | 46, 2.09 | 3.71 |
 | velocity_250ms_zero_motion | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
 | velocity_250ms_constraints_zero_motion | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
+| velocity_250ms_constraints_zero_motion_confirmed | 64 / 64 | 18, 42, 136 | 1.61 (3.84) | 2.55 | 0.63 (1.44) | 0.32 (1.08) | 48, 1.63 | 1.53 |
 
 - `velocity_150ms`: the receiver's velocity, 150 ms time bias as the example configs give it
 - `velocity_250ms`: the receiver's velocity, 250 ms
@@ -26,7 +27,8 @@ Generated 2026-11-16 08:42 by `tools/run_alignment_matrix.py` in 155 s. `configs
 - `velocity_250ms_constraints`: 250 ms; afterwards the filter also has the ground-vehicle constraints (same alignment, the difference is in the second table)
 - `position_constraints`: position differences; afterwards with the constraints: a vehicle with a position-only receiver
 - `velocity_250ms_zero_motion`: 250 ms; afterwards with zero-velocity and zero-rate updates while the vehicle stands, no constraints
-- `velocity_250ms_constraints_zero_motion`: 250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates: configs/pos_ins_ground_vehicle.json
+- `velocity_250ms_constraints_zero_motion`: 250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates on the word of the IMU alone
+- `velocity_250ms_constraints_zero_motion_confirmed`: the same with the receiver's velocity confirming each standstill: configs/pos_ins_ground_vehicle.json
 
 The longest times are switch-on times at which the car stands: nothing shows a heading until it moves.
 
@@ -46,3 +48,4 @@ Heading error (deg) and horizontal position error (m), RMS over the switch-on ti
 | position_constraints | 1.86 (5.57), 0.96 / 1.74 (3.36), 1.53 | 1.98 (10.36), 0.75 / 1.76 (2.94), 1.60 | 0.92 (3.08), 0.93 / 1.67 (2.76), 1.53 | 0.52 (1.34), 0.69 / 1.67 (3.07), 1.58 |
 | velocity_250ms_zero_motion | 2.30 (5.17), 0.94 / 1.57 (2.87), 1.55 | 2.90 (9.40), 0.75 / 1.69 (3.35), 1.57 | 2.18 (10.73), 0.91 / 1.74 (3.36), 1.56 | 0.69 (1.62), 0.71 / 1.62 (2.63), 1.55 |
 | velocity_250ms_constraints_zero_motion | 1.14 (2.39), 0.94 / 1.59 (2.71), 1.55 | 0.72 (1.69), 0.75 / 1.65 (3.28), 1.57 | 0.70 (2.27), 0.91 / 1.59 (2.78), 1.56 | 0.55 (1.30), 0.71 / 1.57 (2.76), 1.55 |
+| velocity_250ms_constraints_zero_motion_confirmed | 1.16 (2.39), 0.94 / 1.59 (2.71), 1.55 | 0.74 (1.69), 0.75 / 1.65 (3.28), 1.57 | 0.72 (2.36), 0.91 / 1.58 (2.81), 1.56 | 0.56 (1.30), 0.71 / 1.56 (2.77), 1.55 |

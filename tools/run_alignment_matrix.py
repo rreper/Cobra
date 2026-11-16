@@ -16,11 +16,12 @@ channel:
 Rows: the receiver's velocity at the time bias the example configs give it (150 ms), at the lags that fit the
 recording better, velocity from position differences, and the alignment followed by a filter that also has the
 ground-vehicle constraints of run_aiding_matrix.py ("no sideways, no vertical motion") and the zero-velocity /
-zero-rate updates while the vehicle stands.
+zero-rate updates while the vehicle stands, on the word of the IMU alone and with the receiver's velocity
+confirming each standstill.
 
 --write-configs also writes configs/pos_ins_align_in_motion.json (pos_ins without the heading from the
 configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints and the zero-velocity /
-zero-rate updates at standstill), no start time.
+zero-rate updates at standstill, confirmed by the receiver's velocity), no start time.
 """
 import argparse, copy, json, math, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -54,13 +55,17 @@ def aligned(cfg, source='velocity', velocity_bias_ms=150, heading_sigma_deg=3.0,
     o['alignment_channels'] = [GNSS_P, IMU] + ([GNSS_V] if source != 'position' else [])
     if source != 'position':
         listen(c, GNSS_V)
-        o['preprocessor_configs'].append(dict(type='TimeBiasConfig', group='config/time_bias_velocity', channels=[GNSS_V],
-                                              time_bias=int(velocity_bias_ms * 1e6)))
+        bias = next((p for p in o['preprocessor_configs'] if p['type'] == 'TimeBiasConfig' and GNSS_V in p['channels']), None)
+        if bias is None:  # a confirmed zero-motion generator has put one in front of itself already
+            bias = dict(type='TimeBiasConfig', group='config/time_bias_velocity', channels=[GNSS_V])
+            o['preprocessor_configs'].append(bias)
+        bias['time_bias'] = int(velocity_bias_ms * 1e6)
     return c
 
 
 plain = lambda cfg: cfg  # noqa: E731
 ground_vehicle = lambda cfg: zero_motion(constraints(cfg))  # noqa: E731
+ground_vehicle_confirmed = lambda cfg: zero_motion(constraints(cfg), confirmed=True)  # noqa: E731
 ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the receiver's velocity, 150 ms time bias as the example configs give it", plain),
         ('velocity_250ms', dict(source='velocity', velocity_bias_ms=250), "the receiver's velocity, 250 ms", plain),
         ('velocity_350ms', dict(source='velocity', velocity_bias_ms=350), "the receiver's velocity, 350 ms", plain),
@@ -73,7 +78,9 @@ ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the r
         ('velocity_250ms_zero_motion', dict(source='velocity', velocity_bias_ms=250),
          '250 ms; afterwards with zero-velocity and zero-rate updates while the vehicle stands, no constraints', zero_motion),
         ('velocity_250ms_constraints_zero_motion', dict(source='velocity', velocity_bias_ms=250),
-         '250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates: configs/pos_ins_ground_vehicle.json', ground_vehicle)]
+         '250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates on the word of the IMU alone', ground_vehicle),
+        ('velocity_250ms_constraints_zero_motion_confirmed', dict(source='velocity', velocity_bias_ms=250),
+         "the same with the receiver's velocity confirming each standstill: configs/pos_ins_ground_vehicle.json", ground_vehicle_confirmed)]
 
 
 def dcm(q):
@@ -139,7 +146,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=min(12, os.cpu_count() or 2))
     a = ap.parse_args()
     if a.write_configs:
-        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', ground_vehicle)):
+        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', ground_vehicle_confirmed)):
             cfg = aligned(then(base()), **ROWS[1][1])
             cfg['app']['name'] = name
             json.dump(cfg, open(os.path.join(ROOT, 'configs', name + '.json'), 'w'), indent=2)

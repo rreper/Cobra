@@ -99,6 +99,9 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   `pinson_zero_rate` and `pinson_velocity` turn that into the gyro bias and a bounded velocity. A standing
   vehicle's heading holds (0.15° in a minute instead of 8.9°) and a 120 s GNSS outage ends 34 m off instead of
   128 m with no extra sensor, 9 m with the motion constraints: `docs/AIDING_MATRIX.md`, DESIGN.md §7.25.
+  With `confirmation_channels` the receiver's velocity is a second witness: a car that creeps is as quiet to
+  the IMU as one that stands, and while the receiver is there the updates are made only where it agrees
+  (DESIGN.md §7.28).
 - Live IMU data: `inertial_config` keys `imu_gap_policy`, `max_imu_gap`, `reject_non_finite`, `sampled_imu`,
   `dt_window` and `attitude_interpolation` make the inertial hold its rate across lost samples, refuse corrupt time
   stamps and NaN, and accept rate (SAMPLED) messages. All off by default, where it behaves exactly as NavToolkit

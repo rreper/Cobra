@@ -2,6 +2,34 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.15: a standstill confirmed by the receiver
+
+- Asked for: the receiver-confirmed standstill. To the IMU a car that creeps at a steady speed is as quiet as one
+  that stands; 23 of the generator's 480 messages on the recording come while the car moves at more than
+  0.05 m/s (up to 0.52 m/s). `ZeroMotionGeneratorConfig::confirmation_channels` makes the receiver's velocity a
+  second witness (DESIGN.md §7.28): while it keeps arriving, zero-motion messages are made only for receiver
+  epochs that show less than 0.05 m/s in the middle of two quiet seconds of the IMU, stamped at that epoch, the
+  horizontal zero velocity at 0.05 m/s. An epoch that shows more is counted and logged with its speed. Without
+  the receiver for 2.5 s the IMU decides alone as before, at 0.2 m/s. Off unless channels are named.
+- On the recording: 448 messages, 3 of them with the reference above 0.05 m/s (fastest 0.08); 18 epochs
+  contradicted (0.06 to 0.38 m/s). Through the filter (`docs/AIDING_MATRIX.md`, two new rows): horizontal RMS
+  with the receiver present 1.53 m (1.57 m with the IMU alone at 0.2 m/s, 1.78 m at 0.05 m/s); 60 s outages
+  10.3 (22.5) m against 10.7 (23.8) m; the outage at the stop 1.8 against 2.1 m; 120 s outages unchanged. With
+  the constraints, and after an alignment in motion, no difference that one recording resolves. The gain is
+  small; what it buys is that a car rolling in a queue is not told that it stands.
+- The item v0.2.14 left open is explained: the vertical accelerometer reads about 2 mm/s² differently driving
+  than standing (+0.7 to +3.7 mm/s² in each of the eight driving stretches that have a stop on either side). A
+  firm vertical zero velocity fixes the bias at its standstill value and the solution sinks 0.13 m against the
+  receiver once the car drives. The confirmed zero velocity therefore keeps 0.2 m/s on the vertical axis
+  (`confirmed_vertical_velocity_sigma`): vertical RMS 1.61 m as with the IMU alone, instead of 1.73 m.
+- Correction to v0.2.12 to v0.2.14: the message counts quoted for the detector (420, of them 24 or 21 while
+  creeping) came from a Python replica that spaced its messages 1.2 s apart on the raw IMU time stamps. The
+  generator makes 480, 29 of them above 0.03 m/s and 23 above 0.05 m/s. DESIGN.md §7.25 and §7.27 are corrected;
+  no result of the filter was affected.
+- `configs/pos_ins_ground_vehicle.json` uses the confirmation; `docs/ALIGNMENT_MATRIX.md` has a row for it.
+- 24 suites / 288 tests (12 new: nine on the generator, two through the filter, one on the JSON keys).
+- Left: an accelerometer bias that may step when the vehicle starts and stops; creeping in an outage.
+
 ## 2026-11-16 — v0.2.14: the IMU model in a driving car (preset vn100_driving)
 
 - Asked for: the IMU error model, so that the zero velocity could carry its real weight. I had blamed the cost of

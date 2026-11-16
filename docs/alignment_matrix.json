@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-16T08:42:20-0700",
+ "generated": "2026-11-16T10:14:19-0700",
  "switch_on_every_s": 40.0,
  "rows": [
   {
@@ -517,7 +517,7 @@
   },
   {
    "row": "velocity_250ms_constraints_zero_motion",
-   "note": "250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates: configs/pos_ins_ground_vehicle.json",
+   "note": "250 ms; afterwards with the constraints and the zero-velocity / zero-rate updates on the word of the IMU alone",
    "starts": 64,
    "failed": 0,
    "aligned": 64,
@@ -568,6 +568,63 @@
     "heading_max": 1.2994586996495514,
     "position_rms": 1.5684550204418388,
     "position_max": 2.75856668829127,
+    "reference_heading_rms": 0.7133129179903499,
+    "reference_position_rms": 1.5547589859024975
+   }
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "note": "the same with the receiver's velocity confirming each standstill: configs/pos_ins_ground_vehicle.json",
+   "starts": 64,
+   "failed": 0,
+   "aligned": 64,
+   "time_median": 18.268755435943604,
+   "time_p90": 42.030543589591986,
+   "time_max": 136.07703685760498,
+   "heading_rms": 1.6060063466457775,
+   "heading_max": 3.8365277524874015,
+   "sigma_mean": 2.548665306658499,
+   "ratio_rms": 0.6287331774718742,
+   "ratio_max": 1.4419247668413113,
+   "tilt_rms": 0.3214662748912118,
+   "tilt_max": 1.08262895837102,
+   "position_rms": 1.500215562314903,
+   "under_way": 48,
+   "heading_rms_under_way": 1.6295283219372338,
+   "heading_rms_from_standstill": 1.5332768458042203,
+   "after_10": {
+    "n": 64,
+    "heading_rms": 1.162715956735772,
+    "heading_max": 2.387625119533216,
+    "position_rms": 1.5942558357346837,
+    "position_max": 2.7071698043648387,
+    "reference_heading_rms": 0.9423636145665093,
+    "reference_position_rms": 1.547017427936386
+   },
+   "after_30": {
+    "n": 64,
+    "heading_rms": 0.744314139487834,
+    "heading_max": 1.6892693345083025,
+    "position_rms": 1.6482060080395577,
+    "position_max": 3.279611456782836,
+    "reference_heading_rms": 0.7506911558290654,
+    "reference_position_rms": 1.5739532420512838
+   },
+   "after_60": {
+    "n": 64,
+    "heading_rms": 0.7194543399720975,
+    "heading_max": 2.3609968984874192,
+    "position_rms": 1.5794566194346393,
+    "position_max": 2.8069783291565016,
+    "reference_heading_rms": 0.9127567958463426,
+    "reference_position_rms": 1.5633044665447133
+   },
+   "after_120": {
+    "n": 62,
+    "heading_rms": 0.5619640257298616,
+    "heading_max": 1.2994586996495514,
+    "position_rms": 1.5589118734148024,
+    "position_max": 2.769949015384918,
     "reference_heading_rms": 0.7133129179903499,
     "reference_position_rms": 1.5547589859024975
    }
@@ -12717,6 +12774,1222 @@
   },
   {
    "row": "velocity_250ms_constraints_zero_motion",
+   "switch_on_s": 2520.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 20.204733848571777,
+   "heading_error": -1.3852862638121317,
+   "heading_sigma": 2.8059874257310446,
+   "tilt_error": 0.14865480027705447,
+   "position_error": 1.6990712447075467,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.591,
+    -1.88,
+    -0.228
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 0.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 136.07703685760498,
+   "heading_error": 2.2762042195757273,
+   "heading_sigma": 2.9512827729945323,
+   "tilt_error": 0.20579164939823133,
+   "position_error": 0.6029093127932169,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 125.0,
+   "gyro_bias_mrad_s": [
+    -1.596,
+    -1.982,
+    -2.713
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 40.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 96.07703685760498,
+   "heading_error": 2.264126596537228,
+   "heading_sigma": 2.950917204232029,
+   "tilt_error": 0.20780545824833033,
+   "position_error": 0.6028506254421115,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 87.0,
+   "gyro_bias_mrad_s": [
+    -1.588,
+    -1.976,
+    -2.728
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 80.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 56.07703685760498,
+   "heading_error": 2.2374266263637255,
+   "heading_sigma": 2.9501257677720334,
+   "tilt_error": 0.2117315754820247,
+   "position_error": 0.6026666441739111,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 47.0,
+   "gyro_bias_mrad_s": [
+    -1.573,
+    -1.966,
+    -2.745
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 120.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 16.07703685760498,
+   "heading_error": 1.9189945817760519,
+   "heading_sigma": 2.946712928669039,
+   "tilt_error": 0.2458517384120156,
+   "position_error": 0.6089429954509025,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 7.0,
+   "gyro_bias_mrad_s": [
+    -1.462,
+    -1.841,
+    -2.711
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 160.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 40.59743285179138,
+   "heading_error": -3.6396951639798214,
+   "heading_sigma": 2.8972833961089313,
+   "tilt_error": 0.12779979146018494,
+   "position_error": 0.9757574709405861,
+   "window_epochs": 30,
+   "window_s": 30.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.891,
+    -1.811,
+    -0.39
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 200.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.717505931854248,
+   "heading_error": -0.4529746770636432,
+   "heading_sigma": 2.083013920788317,
+   "tilt_error": 0.28521981476502584,
+   "position_error": 1.9314854404882198,
+   "window_epochs": 12,
+   "window_s": 12.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.937,
+    -2.247,
+    -0.806
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 240.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 10.997703790664673,
+   "heading_error": -0.5788144396345328,
+   "heading_sigma": 1.6960425938688508,
+   "tilt_error": 0.7826644964866462,
+   "position_error": 1.1829104825043075,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -0.97,
+    -2.874,
+    0.104
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 280.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 13.337997436523438,
+   "heading_error": -1.4677009620841637,
+   "heading_sigma": 2.7105418131822736,
+   "tilt_error": 0.1326902956107088,
+   "position_error": 0.9804822657174976,
+   "window_epochs": 10,
+   "window_s": 10.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.568,
+    -1.581,
+    -0.276
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 320.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 14.6681809425354,
+   "heading_error": -1.6833195084384918,
+   "heading_sigma": 1.1674114677466711,
+   "tilt_error": 0.22965977012430636,
+   "position_error": 1.307369233531627,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 6.0,
+   "gyro_bias_mrad_s": [
+    -1.726,
+    -1.894,
+    -2.865
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 360.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 21.018542528152466,
+   "heading_error": -3.117998452057102,
+   "heading_sigma": 2.6287680489368763,
+   "tilt_error": 0.07561166657496417,
+   "position_error": 1.495239198965098,
+   "window_epochs": 18,
+   "window_s": 18.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.463,
+    -2.005,
+    0.822
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 400.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 54.58894491195679,
+   "heading_error": -1.5351458507605693,
+   "heading_sigma": 2.732603907958825,
+   "tilt_error": 0.10052888136501738,
+   "position_error": 0.46434153803811284,
+   "window_epochs": 10,
+   "window_s": 10.0,
+   "standstill_s": 32.0,
+   "gyro_bias_mrad_s": [
+    -1.733,
+    -1.896,
+    -2.926
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 440.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.598944902420044,
+   "heading_error": -2.08377307690342,
+   "heading_sigma": 2.9920933253013526,
+   "tilt_error": 0.08753527975691283,
+   "position_error": 0.44064949045026636,
+   "window_epochs": 11,
+   "window_s": 11.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.938,
+    -1.619,
+    -0.529
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 480.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 23.979215383529663,
+   "heading_error": -2.6164589912627347,
+   "heading_sigma": 3.0022125244023106,
+   "tilt_error": 0.08590338848382445,
+   "position_error": 0.8520677829668539,
+   "window_epochs": 21,
+   "window_s": 21.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.751,
+    -1.853,
+    -0.007
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 520.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 8.159383296966553,
+   "heading_error": -1.7379206448007587,
+   "heading_sigma": 2.0253103462498947,
+   "tilt_error": 0.3631729045775867,
+   "position_error": 0.3076052096368069,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -0.559,
+    -0.475,
+    -0.179
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 560.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 17.549737215042114,
+   "heading_error": -0.42690847369768453,
+   "heading_sigma": 2.9127371179854546,
+   "tilt_error": 0.0881960064698801,
+   "position_error": 1.618766909092297,
+   "window_epochs": 14,
+   "window_s": 14.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -2.054,
+    -1.77,
+    0.111
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 600.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.839926958084106,
+   "heading_error": 0.6872316684114762,
+   "heading_sigma": 2.6064332712626648,
+   "tilt_error": 0.23633697276108137,
+   "position_error": 1.4640553848706928,
+   "window_epochs": 13,
+   "window_s": 13.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.944,
+    -1.501,
+    0.165
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 640.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 11.10012435913086,
+   "heading_error": -0.9699074953805578,
+   "heading_sigma": 2.2945066389636666,
+   "tilt_error": 0.6690278436879752,
+   "position_error": 0.5552858242118206,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.559,
+    -2.449,
+    -0.148
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 680.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.450390577316284,
+   "heading_error": -2.8628363290746854,
+   "heading_sigma": 2.130003272182888,
+   "tilt_error": 0.1083496582178245,
+   "position_error": 2.318951517849381,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 6.0,
+   "gyro_bias_mrad_s": [
+    -1.701,
+    -1.888,
+    -2.725
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 720.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 19.781070709228516,
+   "heading_error": -3.8365277524874015,
+   "heading_sigma": 2.9046130825971495,
+   "tilt_error": 0.01237621988291517,
+   "position_error": 2.1429573709349845,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.345,
+    -1.948,
+    0.757
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 760.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 17.090966939926147,
+   "heading_error": -2.002092111107532,
+   "heading_sigma": 2.593627974228595,
+   "tilt_error": 0.13562212351317515,
+   "position_error": 0.9712265724222594,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.773,
+    -1.325,
+    -0.097
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 800.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 29.521300792694092,
+   "heading_error": -0.7587990717066633,
+   "heading_sigma": 2.8199395240377547,
+   "tilt_error": 0.09960262211711685,
+   "position_error": 1.2340744549209566,
+   "window_epochs": 26,
+   "window_s": 26.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.843,
+    -1.805,
+    -0.766
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 840.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.751492261886597,
+   "heading_error": -1.5748179517798027,
+   "heading_sigma": 2.9383604952203743,
+   "tilt_error": 0.1744357343083525,
+   "position_error": 0.46181630142835645,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 5.0,
+   "gyro_bias_mrad_s": [
+    -1.832,
+    -1.687,
+    -2.626
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 880.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 7.981662034988403,
+   "heading_error": -1.3959729217544639,
+   "heading_sigma": 2.601628462676994,
+   "tilt_error": 1.08262895837102,
+   "position_error": 1.2657787236859142,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.068,
+    2.345,
+    -1.057
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 920.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 8.302232503890991,
+   "heading_error": -1.34148867133109,
+   "heading_sigma": 2.4844350369073998,
+   "tilt_error": 0.5539652032279655,
+   "position_error": 0.6331092654161766,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -0.964,
+    -0.4,
+    0.084
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 960.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 21.722181797027588,
+   "heading_error": 0.07591372196267455,
+   "heading_sigma": 2.242787322757737,
+   "tilt_error": 0.1625997110352429,
+   "position_error": 1.2042866414298552,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 13.0,
+   "gyro_bias_mrad_s": [
+    -1.713,
+    -1.911,
+    -2.628
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1000.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.992386817932129,
+   "heading_error": -2.6524878774193534,
+   "heading_sigma": 2.4882217727916114,
+   "tilt_error": 0.2534642706912191,
+   "position_error": 1.784299396391414,
+   "window_epochs": 13,
+   "window_s": 13.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.048,
+    -1.874,
+    -0.534
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1040.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.30277729034424,
+   "heading_error": -1.1184649179989592,
+   "heading_sigma": 2.4293901616523828,
+   "tilt_error": 0.07031395374514367,
+   "position_error": 1.7211960298292868,
+   "window_epochs": 15,
+   "window_s": 15.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.736,
+    -1.752,
+    0.187
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1080.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 20.64304208755493,
+   "heading_error": -3.513818941116314,
+   "heading_sigma": 2.7617860600084736,
+   "tilt_error": 0.17985099606314672,
+   "position_error": 1.2341644292439296,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.46,
+    -1.765,
+    -0.398
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1120.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 45.12348175048828,
+   "heading_error": 0.9325098947001257,
+   "heading_sigma": 1.3562870352408314,
+   "tilt_error": 0.27216846870643124,
+   "position_error": 0.7191956347133989,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 37.0,
+   "gyro_bias_mrad_s": [
+    -1.718,
+    -1.884,
+    -2.669
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1160.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 8.143526077270508,
+   "heading_error": -2.320404494328033,
+   "heading_sigma": 2.384052344336776,
+   "tilt_error": 0.8306790604959076,
+   "position_error": 1.503674696813891,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    2.18,
+    -1.258,
+    0.328
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1200.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 21.57381820678711,
+   "heading_error": -1.108010053102686,
+   "heading_sigma": 2.7946139663312732,
+   "tilt_error": 0.05629909525057361,
+   "position_error": 1.0067308667041421,
+   "window_epochs": 18,
+   "window_s": 18.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.74,
+    -1.766,
+    0.343
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1240.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 54.15426015853882,
+   "heading_error": 0.629935053265286,
+   "heading_sigma": 2.361769091004894,
+   "tilt_error": 0.09307468689251272,
+   "position_error": 1.4193922695617875,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 41.0,
+   "gyro_bias_mrad_s": [
+    -1.823,
+    -1.756,
+    -2.56
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1280.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 14.154260158538818,
+   "heading_error": 0.6099177896013122,
+   "heading_sigma": 2.372537633906771,
+   "tilt_error": 0.0797134107294262,
+   "position_error": 1.4056920152718557,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 6.0,
+   "gyro_bias_mrad_s": [
+    -1.723,
+    -1.521,
+    -2.67
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1320.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 17.514538526535034,
+   "heading_error": -0.038170269313085745,
+   "heading_sigma": 2.0983437001442855,
+   "tilt_error": 0.38388805981577917,
+   "position_error": 2.0092682099871735,
+   "window_epochs": 14,
+   "window_s": 14.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.4,
+    -2.031,
+    0.702
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1360.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.834733724594116,
+   "heading_error": -0.3189461282537596,
+   "heading_sigma": 2.5650322298587267,
+   "tilt_error": 0.19733616728213488,
+   "position_error": 1.8185419311307465,
+   "window_epochs": 16,
+   "window_s": 16.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.78,
+    -1.815,
+    -1.547
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1400.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 11.154733657836914,
+   "heading_error": -2.0542520090228873,
+   "heading_sigma": 2.619432371105014,
+   "tilt_error": 0.29622305334182936,
+   "position_error": 2.0419320088093573,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.472,
+    -1.214,
+    0.286
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1440.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 13.57473373413086,
+   "heading_error": -1.4825938052999703,
+   "heading_sigma": 2.470408299628775,
+   "tilt_error": 0.013065800424499379,
+   "position_error": 0.9214571696957738,
+   "window_epochs": 10,
+   "window_s": 10.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.647,
+    -1.718,
+    0.251
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1480.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 39.214733600616455,
+   "heading_error": 0.2847308134034462,
+   "heading_sigma": 2.960149997632556,
+   "tilt_error": 0.024339490428634543,
+   "position_error": 1.1616376209386534,
+   "window_epochs": 29,
+   "window_s": 29.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.808,
+    -1.764,
+    -0.99
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1520.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 42.644733905792236,
+   "heading_error": 0.3924503480038875,
+   "heading_sigma": 2.241069725961553,
+   "tilt_error": 0.07490183466776895,
+   "position_error": 1.8390935908830235,
+   "window_epochs": 7,
+   "window_s": 7.0,
+   "standstill_s": 23.0,
+   "gyro_bias_mrad_s": [
+    -1.749,
+    -1.654,
+    -2.498
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1560.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.784733772277832,
+   "heading_error": -1.298495650749494,
+   "heading_sigma": 2.5879154934484663,
+   "tilt_error": 0.05365556932288387,
+   "position_error": 2.723354308895422,
+   "window_epochs": 16,
+   "window_s": 16.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.652,
+    -1.775,
+    0.084
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1600.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 15.144733905792236,
+   "heading_error": 2.1120713342205844,
+   "heading_sigma": 2.906824431139519,
+   "tilt_error": 0.34365155683489645,
+   "position_error": 1.9873933541862132,
+   "window_epochs": 12,
+   "window_s": 12.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -2.456,
+    -1.682,
+    0.347
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1640.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 20.594733715057373,
+   "heading_error": -0.6108097628262645,
+   "heading_sigma": 2.753687929204374,
+   "tilt_error": 0.1497847023894844,
+   "position_error": 1.3490586523665526,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.71,
+    -1.982,
+    -2.21
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1680.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 10.874733686447144,
+   "heading_error": -0.46474008129965144,
+   "heading_sigma": 2.731169443667225,
+   "tilt_error": 0.3727693880003442,
+   "position_error": 1.9111136460612164,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.293,
+    -2.457,
+    0.244
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1720.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 22.38473391532898,
+   "heading_error": 0.9561354591081495,
+   "heading_sigma": 2.6763624763906244,
+   "tilt_error": 0.06125933144607979,
+   "position_error": 1.3667935128121744,
+   "window_epochs": 19,
+   "window_s": 19.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.749,
+    -1.879,
+    -0.304
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1760.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 14.704733848571777,
+   "heading_error": -1.6125106848207342,
+   "heading_sigma": 2.238034460941296,
+   "tilt_error": 0.4223850722401179,
+   "position_error": 1.7872174754365047,
+   "window_epochs": 11,
+   "window_s": 11.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -0.958,
+    -2.113,
+    -0.372
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1800.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 19.144733905792236,
+   "heading_error": -0.213547531186066,
+   "heading_sigma": 3.0024249330300643,
+   "tilt_error": 0.2355354432481822,
+   "position_error": 1.387186110979338,
+   "window_epochs": 16,
+   "window_s": 16.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.854,
+    -1.945,
+    -0.272
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1840.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 13.484733819961548,
+   "heading_error": 0.4427515341665521,
+   "heading_sigma": 2.840856495285267,
+   "tilt_error": 0.2586130918320939,
+   "position_error": 2.3799750780621522,
+   "window_epochs": 10,
+   "window_s": 10.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.735,
+    -1.999,
+    -0.042
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1880.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 7.8147337436676025,
+   "heading_error": 0.08575587627061707,
+   "heading_sigma": 1.9698162279640168,
+   "tilt_error": 0.5583164166550959,
+   "position_error": 1.4461363179711306,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    0.188,
+    -0.197,
+    -0.338
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1920.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 17.304733753204346,
+   "heading_error": -0.8508481361777537,
+   "heading_sigma": 2.2082705684595396,
+   "tilt_error": 0.5432645389908852,
+   "position_error": 0.3059249057649052,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -0.514,
+    -0.374,
+    -0.021
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 1960.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 11.644733905792236,
+   "heading_error": 0.5759360115072006,
+   "heading_sigma": 2.687100415339328,
+   "tilt_error": 0.6731260242278445,
+   "position_error": 1.1682664038276827,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.516,
+    -0.677,
+    1.155
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2000.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 21.124733686447144,
+   "heading_error": -0.8733360378989318,
+   "heading_sigma": 2.787298560333948,
+   "tilt_error": 0.2870228634241768,
+   "position_error": 1.0979434285638991,
+   "window_epochs": 8,
+   "window_s": 8.0,
+   "standstill_s": 5.0,
+   "gyro_bias_mrad_s": [
+    -1.872,
+    -1.299,
+    -2.425
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2040.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 38.69473361968994,
+   "heading_error": 0.2147003544250408,
+   "heading_sigma": 1.825600821627543,
+   "tilt_error": 0.358846030171575,
+   "position_error": 1.6466818268399819,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 18.0,
+   "gyro_bias_mrad_s": [
+    -1.808,
+    -1.774,
+    -2.642
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2080.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 16.85473370552063,
+   "heading_error": -1.761797908160048,
+   "heading_sigma": 2.378022851329949,
+   "tilt_error": 0.14094646567034588,
+   "position_error": 0.9555408098781466,
+   "window_epochs": 14,
+   "window_s": 14.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -2.006,
+    -2.044,
+    -0.655
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2120.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 24.32473373413086,
+   "heading_error": 0.8841868533168165,
+   "heading_sigma": 2.6276980741144706,
+   "tilt_error": 0.09501865156561178,
+   "position_error": 1.978345155807998,
+   "window_epochs": 21,
+   "window_s": 21.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.896,
+    -1.834,
+    -1.121
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2160.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 20.684733867645264,
+   "heading_error": -2.5472726617108346,
+   "heading_sigma": 2.9882896859663632,
+   "tilt_error": 0.09800897241679664,
+   "position_error": 1.8512306615645604,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.857,
+    -1.939,
+    -0.027
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2200.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.04473376274109,
+   "heading_error": -1.1742248835652656,
+   "heading_sigma": 3.004026790573252,
+   "tilt_error": 0.13632675813039002,
+   "position_error": 2.2327131922498586,
+   "window_epochs": 15,
+   "window_s": 15.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.661,
+    -2.113,
+    0.406
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2240.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 22.484733819961548,
+   "heading_error": -0.4413707448061831,
+   "heading_sigma": 2.7410425282024704,
+   "tilt_error": 0.011329572934893716,
+   "position_error": 2.1955003388697674,
+   "window_epochs": 19,
+   "window_s": 19.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.694,
+    -1.945,
+    -0.344
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2280.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 10.754733562469482,
+   "heading_error": 0.4477705949610704,
+   "heading_sigma": 2.999597250245239,
+   "tilt_error": 0.42136577060752983,
+   "position_error": 2.3297085139634652,
+   "window_epochs": 6,
+   "window_s": 6.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.25,
+    -0.677,
+    0.032
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2320.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.23473358154297,
+   "heading_error": -1.700198252245821,
+   "heading_sigma": 2.6451393532618486,
+   "tilt_error": 0.14076262195171155,
+   "position_error": 0.752278584918444,
+   "window_epochs": 15,
+   "window_s": 15.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -2.085,
+    -1.737,
+    -0.676
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2360.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 18.6347336769104,
+   "heading_error": -0.5995760151818871,
+   "heading_sigma": 3.0237565369659394,
+   "tilt_error": 0.16972683862257523,
+   "position_error": 0.9903833306958228,
+   "window_epochs": 15,
+   "window_s": 15.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.897,
+    -1.987,
+    -0.11
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2400.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 19.01473355293274,
+   "heading_error": 0.061635894916662236,
+   "heading_sigma": 2.3114775921906743,
+   "tilt_error": 0.19214186120494253,
+   "position_error": 2.351002376007961,
+   "window_epochs": 16,
+   "window_s": 16.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -2.125,
+    -1.771,
+    -0.875
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2440.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 20.424733877182007,
+   "heading_error": -0.4630988212606621,
+   "heading_sigma": 2.7987091206433172,
+   "tilt_error": 0.10944845788426397,
+   "position_error": 1.4245227824813187,
+   "window_epochs": 17,
+   "window_s": 17.0,
+   "standstill_s": 0.0,
+   "gyro_bias_mrad_s": [
+    -1.911,
+    -1.977,
+    0.337
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
+   "switch_on_s": 2480.0,
+   "exit": 0,
+   "aligned": true,
+   "time_to_align": 17.784733772277832,
+   "heading_error": 0.38197847624426906,
+   "heading_sigma": 1.4089835534516557,
+   "tilt_error": 0.12543932072736008,
+   "position_error": 2.0511891871816235,
+   "window_epochs": 5,
+   "window_s": 5.0,
+   "standstill_s": 4.0,
+   "gyro_bias_mrad_s": [
+    -1.862,
+    -1.591,
+    -2.645
+   ]
+  },
+  {
+   "row": "velocity_250ms_constraints_zero_motion_confirmed",
    "switch_on_s": 2520.0,
    "exit": 0,
    "aligned": true,

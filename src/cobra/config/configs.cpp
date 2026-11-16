@@ -737,6 +737,14 @@ PNTOS_PP_IMPL(
       w.scalar("velocity_sigma", velocity_sigma);
       w.scalar("rate_channel", rate_channel);
       w.scalar("rate_sigma", rate_sigma);
+      if (!confirmation_channels.empty()) {
+        w.strings("confirmation_channels", confirmation_channels);
+        w.scalar("confirmation_speed", confirmation_speed);
+        w.scalar("confirmation_max_sigma", confirmation_max_sigma);
+        w.scalar("confirmation_timeout", confirmation_timeout);
+        w.scalar("confirmed_velocity_sigma", confirmed_velocity_sigma);
+        w.scalar("confirmed_vertical_velocity_sigma", confirmed_vertical_velocity_sigma);
+      }
     },
     {
       c.window = r.optional<double>("window").value_or(c.window);
@@ -749,6 +757,13 @@ PNTOS_PP_IMPL(
       c.velocity_sigma = r.optional<double>("velocity_sigma").value_or(c.velocity_sigma);
       c.rate_channel = r.optional<std::string>("rate_channel").value_or("");
       c.rate_sigma = r.optional<double>("rate_sigma").value_or(c.rate_sigma);
+      c.confirmation_channels = r.optional<api::StringArray>("confirmation_channels").value_or(api::StringArray{});
+      c.confirmation_speed = r.optional<double>("confirmation_speed").value_or(c.confirmation_speed);
+      c.confirmation_max_sigma = r.optional<double>("confirmation_max_sigma").value_or(c.confirmation_max_sigma);
+      c.confirmation_timeout = r.optional<double>("confirmation_timeout").value_or(c.confirmation_timeout);
+      c.confirmed_velocity_sigma = r.optional<double>("confirmed_velocity_sigma").value_or(c.confirmed_velocity_sigma);
+      c.confirmed_vertical_velocity_sigma =
+          r.optional<double>("confirmed_vertical_velocity_sigma").value_or(c.confirmed_vertical_velocity_sigma);
     })
 PNTOS_PP_IMPL(
     SensorDegradationConfig,

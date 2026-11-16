@@ -16,7 +16,12 @@ compared with the truth channel, for:
   full                     wheel plus a second, independent receiver (emulated from truth, 3 m) and the barometer;
                            the outage takes the first receiver only
   zero_motion              zero-velocity and zero-rate updates while the IMU says that the car stands
-  constraints_zero_motion  the constraints and those updates: configs/pos_ins_ground_vehicle.json without the alignment
+  constraints_zero_motion  the constraints and those updates
+  zero_motion_confirmed    those updates only where the receiver's velocity agrees that the car stands, the
+                           horizontal zero velocity at 0.05 m/s then; in an outage the IMU decides alone as above
+  constraints_zero_motion_confirmed
+                           the constraints and the confirmed updates: configs/pos_ins_ground_vehicle.json without
+                           the alignment
 
 A last column takes the receiver away for 40 s while the car stands (at 1111 s of the drive, the one stop that is
 long enough).
@@ -44,6 +49,7 @@ AUX = ['INERTIAL_PVA', 'INERTIAL_FORCES_AND_RATES']
 # Weights found on this log (docs/DESIGN.md 7.23): the constraints hold to 0.2 m/s once the misalignment is
 # estimated; a wheel speed is not better than 0.1 m/s; the calibration states wander with a 10 minute time constant.
 NHC_SIGMA, SPEED_COVARIANCE_SCALE, CAL_SIGMA, CAL_TAU = 0.2, 4.0, [0.03, 0.02, 0.02], 600.0
+VELOCITY_BIAS_NS = 250000000  # the receiver's velocity is this much older than its stamp says (docs/DESIGN.md 7.24)
 
 
 def orch(cfg):
@@ -100,14 +106,24 @@ def constraints(cfg):
     return c
 
 
-def zero_motion(cfg):
+def zero_motion(cfg, confirmed=False, **keys):
     """Zero-velocity and zero-rate updates while the IMU says that the vehicle stands (DESIGN.md 7.25). The messages are
-    made from the IMU clock, a second behind it: the reorder window is needed as for the constraints."""
+    made from the IMU clock, a second behind it: the reorder window is needed as for the constraints.
+
+    confirmed: the receiver's velocity is a second witness (DESIGN.md 7.28). Its messages get the time bias measured
+    for this receiver before the generator sees them, so that the zero-motion messages carry the time of the motion."""
     c = advanced(copy.deepcopy(cfg))
     o = orch(c)
     o['measurement_reorder_s'] = 2.5
-    o['preprocessor_configs'].append(dict(type='ZeroMotionGeneratorConfig', group='config/zero_motion', channels=[IMU],
-                                          velocity_channel=ZERO_V, rate_channel=ZERO_W))
+    generator = dict(type='ZeroMotionGeneratorConfig', group='config/zero_motion', channels=[IMU], velocity_channel=ZERO_V, rate_channel=ZERO_W)
+    if confirmed:
+        listen(c, GNSS_V)
+        if not any(p['type'] == 'TimeBiasConfig' and GNSS_V in p['channels'] for p in o['preprocessor_configs']):
+            o['preprocessor_configs'].append(dict(type='TimeBiasConfig', group='config/time_bias_velocity', channels=[GNSS_V],
+                                                  time_bias=VELOCITY_BIAS_NS))
+        generator.update(channels=[IMU, GNSS_V], confirmation_channels=[GNSS_V])
+    generator.update(keys)
+    o['preprocessor_configs'].append(generator)
     o['mp_configs'].append(dict(type='PinsonVelocityMPConfig', group='config/zero_velocity_processor', label='zero_velocity', channel=ZERO_V,
                                 state_block_labels=['pinson15'], aux_channels=['INERTIAL_PVA'], innovation_gate_probability=0.999))
     o['mp_configs'].append(dict(type='PinsonZeroRateMPConfig', group='config/zero_rate_processor', label='zero_rate', channel=ZERO_W,
@@ -171,15 +187,21 @@ ROWS = [('imu_only', lambda b: b, 'the IMU alone'),
         ('velocity3', velocity3, 'three-axis body velocity (0.05 m/s); scale and misalignment estimated'),
         ('full', full, 'wheel, a second receiver (3 m) and the barometer; the outage takes the first receiver only'),
         ('zero_motion', zero_motion, 'zero velocity (0.2 m/s) and zero rate once a second while the IMU is quiet'),
-        ('constraints_zero_motion', lambda b: zero_motion(constraints(b)), 'the constraints and the zero-motion updates')]
+        ('constraints_zero_motion', lambda b: zero_motion(constraints(b)), 'the constraints and the zero-motion updates'),
+        ('zero_motion_confirmed', lambda b: zero_motion(b, confirmed=True),
+         "zero velocity and zero rate where the receiver's velocity confirms the standstill (0.05 m/s north and east, 0.2 m/s down); the IMU alone (0.2 m/s) in an outage"),
+        ('constraints_zero_motion_confirmed', lambda b: zero_motion(constraints(b), confirmed=True), 'the constraints and the confirmed zero-motion updates')]
 
 
 def with_outages(cfg, duration, starts=None):
     c = copy.deepcopy(cfg)
     o = orch(c)
     channels = [GNSS_P, GNSS_V]
+    # A generator that asks the receiver must not see what the outage takes away: the outages go in front of it.
+    pp = o['preprocessor_configs']
+    at = next((i for i, p in enumerate(pp) if p['type'] == 'ZeroMotionGeneratorConfig' and p.get('confirmation_channels')), len(pp))
     for i, t0 in enumerate((OUTAGE_STARTS if starts is None else starts) if duration else []):
-        o['preprocessor_configs'].append(dict(type='OutageConfig', group='config/outage%d' % i, channels=channels, start_time=t0, end_time=t0 + duration))
+        pp.insert(at + i, dict(type='OutageConfig', group='config/outage%d' % i, channels=channels, start_time=t0, end_time=t0 + duration))
     return c
 
 
