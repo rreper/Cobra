@@ -106,6 +106,29 @@
               600.0
             ]
           }
+        },
+        {
+          "type": "FogmStateBlockConfig",
+          "group": "config/vel_time_offset_block",
+          "label": "vel_time_offset",
+          "estimate_with_covariance": {
+            "type": "EWC_GENERIC",
+            "estimate": [
+              0.0
+            ],
+            "covariance_diag": [
+              0.09
+            ]
+          },
+          "fogm_model": {
+            "group": "config/vel_time_offset",
+            "sigma": [
+              0.3
+            ],
+            "tau": [
+              1000000.0
+            ]
+          }
         }
       ],
       "alignment_channels": [
@@ -227,6 +250,16 @@
             "pinson15"
           ],
           "innovation_gate_probability": 0.999
+        },
+        {
+          "type": "PinsonVelocityTimeOffsetMPConfig",
+          "group": "config/vel_measurement_processor",
+          "label": "vel",
+          "channel": "/sensor/ublox-ZED-F9T/velocity",
+          "state_block_labels": [
+            "pinson15",
+            "vel_time_offset"
+          ]
         }
       ],
       "pinson_sb_config": {

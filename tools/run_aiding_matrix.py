@@ -20,8 +20,15 @@ compared with the truth channel, for:
   zero_motion_confirmed    those updates only where the receiver's velocity agrees that the car stands, the
                            horizontal zero velocity at 0.05 m/s then; in an outage the IMU decides alone as above
   constraints_zero_motion_confirmed
-                           the constraints and the confirmed updates: configs/pos_ins_ground_vehicle.json without
-                           the alignment
+                           the constraints and the confirmed updates
+  receiver_velocity        the receiver's velocity as a filter measurement at the 150 ms of configs/pos_vel_ins.json,
+  receiver_velocity_250ms  at 250 ms, and
+  receiver_velocity_offset at 150 ms with its time offset as a filter state (pinson_velocity_time_offset)
+  position_offset          the time offset of the fixes as a filter state (pinson_position_time_offset)
+  ground_vehicle           constraints, confirmed zero-motion updates and the velocity with its offset state:
+                           configs/pos_ins_ground_vehicle.json without the alignment
+
+The time-offset processors report what they find; a second table lists it.
 
 A last column takes the receiver away for 40 s while the car stands (at 1111 s of the drive, the one stop that is
 long enough).
@@ -29,7 +36,7 @@ long enough).
 --write-configs also writes configs/pos_ins_odometry.json (wheel) and configs/pos_ins_full.json (full), without
 the outages.
 """
-import argparse, copy, json, os, subprocess, sys, time
+import argparse, copy, json, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -50,6 +57,8 @@ AUX = ['INERTIAL_PVA', 'INERTIAL_FORCES_AND_RATES']
 # estimated; a wheel speed is not better than 0.1 m/s; the calibration states wander with a 10 minute time constant.
 NHC_SIGMA, SPEED_COVARIANCE_SCALE, CAL_SIGMA, CAL_TAU = 0.2, 4.0, [0.03, 0.02, 0.02], 600.0
 VELOCITY_BIAS_NS = 250000000  # the receiver's velocity is this much older than its stamp says (docs/DESIGN.md 7.24)
+OFFSET_SIGMA = 0.3  # s; initial sigma of a time-offset state
+OFFSET_REPORT = re.compile(r'"(\w+)": the measurements are ([\d.]+) s (older|newer) than their time stamps \(sigma ([\d.]+) s\)')
 
 
 def orch(cfg):
@@ -131,6 +140,51 @@ def zero_motion(cfg, confirmed=False, **keys):
     return c
 
 
+def offset_block(o, label):
+    """A state block of one state, a time offset in seconds: nothing known but that it is a fraction of a second, and
+    all but constant (DESIGN.md 7.30)."""
+    if not any(b.get('label') == label for b in o['additional_sb_configs']):
+        o['additional_sb_configs'].append(dict(
+            type='FogmStateBlockConfig', group='config/%s_block' % label, label=label,
+            estimate_with_covariance=dict(type='EWC_GENERIC', estimate=[0.0], covariance_diag=[OFFSET_SIGMA ** 2]),
+            fogm_model=dict(group='config/%s' % label, sigma=[OFFSET_SIGMA], tau=[1.0e6])))
+
+
+def position_offset(cfg):
+    """The time offset of the fixes as a filter state: the position processor becomes pinson_position_time_offset."""
+    c = copy.deepcopy(cfg)
+    c['app']['logging_level'] = 'INFO'  # the processors report what they find at INFO
+    o = orch(c)
+    for m in o['mp_configs']:
+        if m['label'] == 'pos':
+            m['type'] = 'PinsonPositionTimeOffsetMPConfig'
+            m['state_block_labels'] = ['pinson15', 'pos_sensor_error', 'pos_time_offset']
+    offset_block(o, 'pos_time_offset')
+    return c
+
+
+def velocity(cfg, bias_ms=150, offset=False):
+    """The receiver's velocity as a filter measurement, with the time bias given; offset: its time offset is a state."""
+    c = copy.deepcopy(cfg)
+    c['app']['logging_level'] = 'INFO'
+    listen(c, GNSS_V)
+    o = orch(c)
+    o['measurement_reorder_s'] = 2.5
+    bias = next((p for p in o['preprocessor_configs'] if p['type'] == 'TimeBiasConfig' and GNSS_V in p['channels']), None)
+    if bias is None:
+        bias = dict(type='TimeBiasConfig', group='config/time_bias_velocity', channels=[GNSS_V])
+        o['preprocessor_configs'].append(bias)
+    bias['time_bias'] = int(bias_ms * 1e6)
+    m = dict(type='PinsonVelocityTimeOffsetMPConfig' if offset else 'PinsonVelocityMPConfig', group='config/vel_measurement_processor', label='vel',
+             channel=GNSS_V, state_block_labels=['pinson15', 'vel_time_offset'] if offset else ['pinson15'])
+    if offset:
+        offset_block(o, 'vel_time_offset')
+    else:
+        m['aux_channels'] = ['INERTIAL_PVA']
+    o['mp_configs'].append(m)
+    return c
+
+
 def wheel(cfg, calibrated=True):
     """A wheel speed (the log's body velocity cut down to its forward axis, 2 % too long) and the constraints with it."""
     c = advanced(copy.deepcopy(cfg))
@@ -180,6 +234,11 @@ def full(cfg):
     return c
 
 
+def ground_vehicle(cfg):
+    """What a road vehicle with a receiver and an IMU can have without another sensor."""
+    return velocity(zero_motion(constraints(cfg), confirmed=True), 250, offset=True)
+
+
 ROWS = [('imu_only', lambda b: b, 'the IMU alone'),
         ('constraints', constraints, 'no sideways / vertical motion, every second from the IMU clock; misalignment estimated'),
         ('wheel', wheel, 'wheel speed with a 2 % scale error and the constraints; scale and misalignment estimated'),
@@ -190,7 +249,13 @@ ROWS = [('imu_only', lambda b: b, 'the IMU alone'),
         ('constraints_zero_motion', lambda b: zero_motion(constraints(b)), 'the constraints and the zero-motion updates'),
         ('zero_motion_confirmed', lambda b: zero_motion(b, confirmed=True),
          "zero velocity and zero rate where the receiver's velocity confirms the standstill (0.05 m/s north and east, 0.2 m/s down); the IMU alone (0.2 m/s) in an outage"),
-        ('constraints_zero_motion_confirmed', lambda b: zero_motion(constraints(b), confirmed=True), 'the constraints and the confirmed zero-motion updates')]
+        ('constraints_zero_motion_confirmed', lambda b: zero_motion(constraints(b), confirmed=True), 'the constraints and the confirmed zero-motion updates'),
+        ('receiver_velocity', lambda b: velocity(b, 150), "the receiver's velocity as a measurement, at the 150 ms configs/pos_vel_ins.json gives it"),
+        ('receiver_velocity_250ms', lambda b: velocity(b, 250), "the same at 250 ms"),
+        ('receiver_velocity_offset', lambda b: velocity(b, 150, offset=True), 'the same at 150 ms with its time offset as a filter state'),
+        ('position_offset', position_offset, 'the time offset of the fixes as a filter state'),
+        ('ground_vehicle', ground_vehicle, "the constraints, the confirmed zero-motion updates and the receiver's velocity (250 ms) with its time offset as "
+                                           'a state: configs/pos_ins_ground_vehicle.json without the alignment')]
 
 
 def with_outages(cfg, duration, starts=None):
@@ -211,6 +276,9 @@ def run(runner, log, truth, cfg, name, duration, workdir, starts=None):
     p = subprocess.run([runner, path, out, log, '--quiet', '--no-record-input'], capture_output=True, text=True)
     if p.returncode != 0:
         return dict(exit=p.returncode, error=(p.stdout + p.stderr)[-300:])
+    offsets = {}  # what the time-offset processors reported last, by processor label: (offset s, sigma s, reports)
+    for m in OFFSET_REPORT.finditer(p.stdout + p.stderr):
+        offsets[m.group(1)] = ((1.0 if m.group(3) == 'older' else -1.0) * float(m.group(2)), float(m.group(4)), offsets.get(m.group(1), (0, 0, 0))[2] + 1)
     sol, sig = ra.read_pva(out, SOL)
     os.remove(out)
     t, tt = sol[:, 0], truth[:, 0]
@@ -227,6 +295,8 @@ def run(runner, log, truth, cfg, name, duration, workdir, starts=None):
         ends.append((float(h[k]), float(hs[k]), float(v[k])))
         clean &= ~((t >= tt[0] + o) & (t <= tt[0] + o + duration + 30))
     r = dict(exit=0, epochs=int(len(t)), h_rms=float(np.sqrt(np.mean(h[clean] ** 2))), v_rms=float(np.sqrt(np.mean(v[clean] ** 2))))
+    if offsets:
+        r['offsets'] = {k: dict(offset=o[0], sigma=o[1], reports=o[2]) for k, o in offsets.items()}
     if ends:
         r.update(end_h=[round(e[0], 1) for e in ends], end_h_mean=float(np.mean([e[0] for e in ends])), end_h_max=float(max(e[0] for e in ends)),
                  end_sigma_mean=float(np.mean([e[1] for e in ends])), end_ratio_rms=float(np.sqrt(np.mean([(e[0] / e[1]) ** 2 for e in ends]))),
@@ -288,6 +358,15 @@ def main():
             st = by[(name, 'standing')]
             cells.append('failed' if st.get('exit') else '%.1f, %.1f' % (st['end_h_mean'], st['end_sigma_mean']))
             f.write('| %s | %s | %s | %s |\n' % (name, 'failed' if c.get('exit') else '%.2f / %.2f' % (c['h_rms'], c['v_rms']), ' | '.join(cells), note))
+        found = [(name, by[(name, 0.0)].get('offsets')) for name, _, _ in ROWS if by[(name, 0.0)].get('offsets')]
+        if found:
+            f.write('\n## Time offsets found\n\nWhere a time offset is a filter state: what the processor reported last in the run without an outage, on top '
+                    'of the time bias the configuration applies (positive: the measurements are older than their stamps).\n\n')
+            f.write('| aiding | channel | configured time bias, s | offset found, s | sigma | age of the measurements, s |\n|---|---|---|---|---|---|\n')
+            for name, offsets in found:
+                for label, o in sorted(offsets.items()):
+                    bias = 0.15 if label == 'pos' else (0.25 if name == 'ground_vehicle' else 0.15)
+                    f.write('| %s | %s | %.2f | %+.3f | %.3f | %.3f |\n' % (name, 'fixes' if label == 'pos' else 'velocity', bias, o['offset'], o['sigma'], bias + o['offset']))
         f.write('\nThe wheel speed and the second receiver do not exist in the recording: the first is the log\'s simulated body velocity (truth plus '
                 '0.05 m/s) cut down to its forward axis and scaled by 1.02, the second is the truth position with 3 m of noise once a second. '
                 'The constraints assume a vehicle that neither slides sideways nor leaves the ground. The outage while standing is the one stop of the '

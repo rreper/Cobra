@@ -21,9 +21,9 @@ confirming each standstill. The rows ending in "offset" estimate the receiver's 
 (InMotionAlignmentConfig.time_offset_prior_sigma), at several configured time biases.
 
 --write-configs also writes configs/pos_ins_align_in_motion.json (pos_ins without the heading from the
-configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints and the zero-velocity /
-zero-rate updates at standstill, confirmed by the receiver's velocity), no start time; both estimate the receiver's
-time offset.
+configuration file) and configs/pos_ins_ground_vehicle.json (the same with the constraints, the zero-velocity /
+zero-rate updates at standstill confirmed by the receiver's velocity, and that velocity as a filter measurement
+with its time offset as a state), no start time; both estimate the receiver's time offset in the alignment.
 """
 import argparse, copy, json, math, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import run_acceptance as ra  # noqa: E402
-from run_aiding_matrix import GNSS_P, GNSS_V, IMU, TRUTH, SOL, base, orch, listen, constraints, zero_motion  # noqa: E402
+from run_aiding_matrix import GNSS_P, GNSS_V, IMU, TRUTH, SOL, base, orch, listen, constraints, zero_motion, ground_vehicle as full_set  # noqa: E402
 
 LEVER = [-0.5, 0.38, -0.05]  # antenna relative to the IMU, as in the example configs
 AFTER = [10.0, 30.0, 60.0, 120.0]
@@ -97,8 +97,9 @@ ROWS = [('velocity_150ms', dict(source='velocity', velocity_bias_ms=150), "the r
         ('position_offset', dict(source='position', time_offset_prior_sigma=OFFSET_PRIOR),
          'differences of the position fixes (150 ms time bias as configured), the offset of the fixes estimated', plain),
         ('velocity_250ms_offset_ground_vehicle', dict(source='velocity', velocity_bias_ms=250, time_offset_prior_sigma=OFFSET_PRIOR),
-         '250 ms and the offset estimated; afterwards the constraints and the confirmed zero-motion updates: configs/pos_ins_ground_vehicle.json',
-         ground_vehicle_confirmed)]
+         '250 ms and the offset estimated; afterwards the constraints and the confirmed zero-motion updates', ground_vehicle_confirmed),
+        ('ground_vehicle', dict(source='velocity', velocity_bias_ms=250, time_offset_prior_sigma=OFFSET_PRIOR),
+         "the same and the receiver's velocity as a filter measurement with its time offset as a state: configs/pos_ins_ground_vehicle.json", full_set)]
 
 
 def dcm(q):
@@ -167,7 +168,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=min(12, os.cpu_count() or 2))
     a = ap.parse_args()
     if a.write_configs:
-        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', ground_vehicle_confirmed)):
+        for name, then in (('pos_ins_align_in_motion', plain), ('pos_ins_ground_vehicle', full_set)):
             cfg = aligned(then(base()), time_offset_prior_sigma=OFFSET_PRIOR, **ROWS[1][1])
             cfg['app']['name'] = name
             json.dump(cfg, open(os.path.join(ROOT, 'configs', name + '.json'), 'w'), indent=2)

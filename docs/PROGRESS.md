@@ -2,6 +2,32 @@
 
 Newest first. Each entry: what changed, what was verified, what is next.
 
+## 2026-11-16 — v0.2.17: the receiver's time offsets as filter states
+
+- Asked to resume, and took the first open item: the alignment finds the velocity's offset once and only reports
+  it. Two measurement processors (DESIGN.md §7.30) make the offsets states: `pinson_velocity_time_offset`
+  (velocity error less the offset times the vehicle's acceleration) and `pinson_position_time_offset` (the FOGM
+  position model less the offset times the velocity), each with a one-state block. They report what they find at
+  INFO. The processors of the Python original are untouched.
+- The receiver's velocity is worth using once its age is right. On the recording, as a measurement at the
+  150 ms of `pos_vel_ins.json`: 2.16 m horizontally (the fixes alone: 1.55 m). With its offset a state: 1.49 m
+  horizontally, 0.95 m vertically (1.57 m), 60 s outages 16.9 (38.3) m instead of 24.9 (53.6) m. With the
+  constraints and the confirmed zero-motion updates: 1.43 / 1.14 m, 60 s outages 3.8 (6.5) m instead of
+  6.1 (12.3) m; 120 s outages the same mean, worst case 20.9 m against 16.5 m.
+  `configs/pos_ins_ground_vehicle.json` now has the velocity with its offset state.
+- Offsets found by the filter: velocity 0.31 s old, fixes 0.09 s; the alignment of §7.29 said 0.28 and 0.07 s.
+- Found on the way: the acceleration behind the velocity's offset column has to have the applied accelerometer
+  bias taken out (5 milli-g on the vertical axis here; left in, the vertical RMS was 2.72 m instead of 0.94 m).
+- The fixes' offset state finds the offset (0.275 s for 0.3 s on a simulated drive) and the velocity error goes
+  at once, but what the solution was behind by before sits in the receiver's bias states for minutes: parked
+  after 100 s it is worse than without the state (1.9 m against 1.1 m), after ten minutes better (0.5 against
+  1.3 m). Pinned by a test. Against the recording's reference it looks 0.12 m worse, which that reference
+  cannot settle (§7.29). Not in any example.
+- The drive simulator of the alignment tests moved to `tests/sim_drive.hpp`; new suite `time_offset`.
+- 25 suites / 307 tests (12 new). The 18 rows of the alignment matrix and the 40 runs of the aiding matrix of
+  v0.2.16 come out identical.
+- Left: handing the alignment's offset to the state; the two-minute outage's worst case with the velocity.
+
 ## 2026-11-16 — v0.2.16: the receiver's time offset, found by the alignment
 
 - Asked for: the receiver time-offset estimate. A receiver's velocity is older than its time stamp, and the

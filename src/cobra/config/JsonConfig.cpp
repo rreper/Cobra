@@ -330,6 +330,8 @@ const std::vector<MpKind>& mp_kinds() {
       {"Direction3dToPointsMPConfig", mp::kDirection3DToPoints, MpKind::LeverArmOrientation},
       {"PinsonOdometryMPConfig", mp::kPinsonOdometry, MpKind::LeverArmOrientation},
       {"PinsonZeroRateMPConfig", mp::kPinsonZeroRate, MpKind::Plain},
+      {"PinsonPositionTimeOffsetMPConfig", mp::kPinsonPositionTimeOffset, MpKind::LeverArm},
+      {"PinsonVelocityTimeOffsetMPConfig", mp::kPinsonVelocityTimeOffset, MpKind::Plain},
   };
   return k;
 }
@@ -340,6 +342,7 @@ LeverArmMPConfig mp_factory<LeverArmMPConfig>(const char* id) {
   const std::string s = id;
   if (s == mp::kPinsonPosition) return mp::PinsonPositionMPConfig();
   if (s == mp::kPinsonWithNedFogmPosition) return mp::PinsonWithNedFogmPositionMPConfig();
+  if (s == mp::kPinsonPositionTimeOffset) return mp::PinsonPositionTimeOffsetMPConfig();
   if (s == mp::kPinsonAltitude) return mp::AltitudeMPConfig();
   if (s == mp::kPinsonWithLeverArmPosition) return mp::PinsonWithLeverArmPositionMPConfig();
   if (s == mp::kPinsonPosVel) return mp::PosVelMPConfig();
@@ -389,8 +392,10 @@ std::shared_ptr<BaseConfig> mp_from(const MpKind& k, const json& jc) {
       return c;
     }
     default: {
-      auto c = std::make_shared<PlainMPConfig>(std::string(k.identifier) == mp::kPinsonZeroRate ? mp::PinsonZeroRateMPConfig()
-                                                                                                : mp::PinsonVelocityMPConfig());
+      const std::string id = k.identifier;
+      auto c = std::make_shared<PlainMPConfig>(id == mp::kPinsonZeroRate             ? mp::PinsonZeroRateMPConfig()
+                                               : id == mp::kPinsonVelocityTimeOffset ? mp::PinsonVelocityTimeOffsetMPConfig()
+                                                                                     : mp::PinsonVelocityMPConfig());
       mp_base_from(jc, *c);
       return c;
     }

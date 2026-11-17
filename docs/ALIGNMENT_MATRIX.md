@@ -1,6 +1,6 @@
 # Alignment matrix: the filter switched on anywhere in the drive
 
-Generated 2026-11-16 11:21 by `tools/run_alignment_matrix.py` in 285 s. `configs/pos_ins.json` with the `vn100_driving` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
+Generated 2026-11-16 13:42 by `tools/run_alignment_matrix.py` in 315 s. `configs/pos_ins.json` with the `vn100_driving` tuning and initialization `in_motion_align`, run over the full example log once per switch-on time (every 40 s, 64 of them): everything before that time is ignored, so the filter comes up as in a vehicle switched on there, standing or under way. Against the truth channel.
 
 ## At the hand-over
 
@@ -24,6 +24,7 @@ Generated 2026-11-16 11:21 by `tools/run_alignment_matrix.py` in 285 s. `configs
 | velocity_350ms_offset | 64 / 64 | 19, 42, 137 | 1.20 (2.80) | 2.45 | 0.50 (1.14) | 0.30 (1.09) | 47, 1.30 | 0.88 |
 | position_offset | 64 / 64 | 37, 98, 166 | 1.35 (2.65) | 2.60 | 0.51 (0.94) | 0.42 (1.78) | 38, 1.49 | 1.13 |
 | velocity_250ms_offset_ground_vehicle | 64 / 64 | 19, 42, 137 | 1.21 (2.83) | 2.48 | 0.48 (1.04) | 0.29 (1.10) | 47, 1.31 | 0.88 |
+| ground_vehicle | 64 / 64 | 19, 42, 137 | 1.21 (2.83) | 2.48 | 0.48 (1.04) | 0.29 (1.10) | 47, 1.31 | 0.88 |
 
 - `velocity_150ms`: the receiver's velocity, 150 ms time bias as the example configs give it
 - `velocity_250ms`: the receiver's velocity, 250 ms
@@ -42,7 +43,8 @@ Generated 2026-11-16 11:21 by `tools/run_alignment_matrix.py` in 285 s. `configs
 - `velocity_250ms_offset`: 250 ms and the offset estimated: configs/pos_ins_align_in_motion.json
 - `velocity_350ms_offset`: 350 ms and the offset estimated
 - `position_offset`: differences of the position fixes (150 ms time bias as configured), the offset of the fixes estimated
-- `velocity_250ms_offset_ground_vehicle`: 250 ms and the offset estimated; afterwards the constraints and the confirmed zero-motion updates: configs/pos_ins_ground_vehicle.json
+- `velocity_250ms_offset_ground_vehicle`: 250 ms and the offset estimated; afterwards the constraints and the confirmed zero-motion updates
+- `ground_vehicle`: the same and the receiver's velocity as a filter measurement with its time offset as a state: configs/pos_ins_ground_vehicle.json
 
 The longest times are switch-on times at which the car stands: nothing shows a heading until it moves.
 
@@ -58,6 +60,7 @@ Where it is estimated (`time_offset_prior_sigma`): how much older than its time 
 | velocity_350ms_offset | 0.35 | -0.062 (0.026) | -0.138, +0.007 | 0.050 | 0.288 |
 | position_offset | 0.15 | -0.077 (0.035) | -0.153, -0.008 | 0.069 | 0.073 |
 | velocity_250ms_offset_ground_vehicle | 0.25 | +0.034 (0.023) | -0.033, +0.090 | 0.050 | 0.284 |
+| ground_vehicle | 0.25 | +0.034 (0.023) | -0.033, +0.090 | 0.050 | 0.284 |
 
 ## Afterwards
 
@@ -83,3 +86,4 @@ Heading error (deg) and horizontal position error (m), RMS over the switch-on ti
 | velocity_350ms_offset | 2.10 (4.33), 0.95 / 1.53 (2.68), 1.51 | 3.18 (8.78), 0.75 / 1.66 (3.20), 1.56 | 2.29 (10.42), 0.94 / 1.71 (3.53), 1.56 | 0.91 (2.06), 0.72 / 1.66 (3.15), 1.60 |
 | position_offset | 2.07 (6.36), 0.74 / 1.71 (3.01), 1.49 | 2.59 (9.47), 0.82 / 1.84 (3.00), 1.57 | 1.63 (7.07), 0.76 / 1.63 (2.47), 1.60 | 0.89 (3.00), 0.66 / 1.55 (2.73), 1.56 |
 | velocity_250ms_offset_ground_vehicle | 1.10 (2.33), 0.95 / 1.54 (2.75), 1.51 | 0.71 (1.53), 0.75 / 1.63 (3.19), 1.57 | 0.78 (2.45), 0.93 / 1.60 (2.64), 1.57 | 0.55 (1.29), 0.72 / 1.60 (2.80), 1.60 |
+| ground_vehicle | 0.98 (2.29), 0.95 / 1.55 (2.86), 1.51 | 0.70 (1.44), 0.75 / 1.62 (3.20), 1.57 | 0.78 (2.61), 0.93 / 1.71 (3.44), 1.57 | 0.53 (1.18), 0.72 / 1.74 (3.55), 1.60 |

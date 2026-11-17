@@ -154,7 +154,8 @@ TEST_F(StateModelingTest, EnoughLabelsAndInvalidIndex) {
   EXPECT_EQ(provider->new_virtual_block(provider->virtual_block_identifiers().size() + 1, "source", "target",
                                         "config/vsb"),
             nullptr);
-  EXPECT_EQ(provider->processor_identifiers().size(), 11u);  // the nine of the Python original, pinson_odometry, pinson_zero_rate
+  // the nine of the Python original, pinson_odometry, pinson_zero_rate and the two with a time-offset state
+  EXPECT_EQ(provider->processor_identifiers().size(), 13u);
   EXPECT_EQ(provider->block_identifiers().size(), 4u);
   EXPECT_EQ(provider->virtual_block_identifiers().size(), 2u);
 }
@@ -773,8 +774,8 @@ Message angular_rate(std::int64_t tov, const Vector3& rate, double sigma,
 }  // namespace
 
 TEST_F(StateModelingTest, ZeroRateIsTheEleventhProcessor) {
-  ASSERT_EQ(provider->processor_identifiers().size(), 11u);
-  EXPECT_EQ(provider->processor_identifiers().back(), "pinson_zero_rate");
+  ASSERT_GE(provider->processor_identifiers().size(), 11u);
+  EXPECT_EQ(provider->processor_identifiers()[10], "pinson_zero_rate");
   EXPECT_TRUE(processor(10, "zaru", {"pinson"}));
   EXPECT_TRUE(processor(10, "zaru", {"pinson"}, std::nullopt));  // it has no configuration of its own
   const auto c = cobra::mp::PinsonZeroRateMPConfig();
@@ -826,4 +827,130 @@ TEST_F(StateModelingTest, ZeroRateSeesTheGyroBiasStates) {
   auto two = processor(10, "zaru", {"pinson", "fogm"});
   two->receive_aux_data({rate_aux, error_aux});
   EXPECT_FALSE(two->generate_model(m, fixed(xp)));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The receiver's time offsets as states (DESIGN.md §7.30): pinson_position_time_offset, pinson_velocity_time_offset
+
+TEST_F(StateModelingTest, TimeOffsetProcessorsAreTheTwelfthAndThirteenth) {
+  ASSERT_EQ(provider->processor_identifiers().size(), 13u);
+  EXPECT_EQ(provider->processor_identifiers()[11], "pinson_position_time_offset");
+  EXPECT_EQ(provider->processor_identifiers()[12], "pinson_velocity_time_offset");
+  const auto p = cobra::mp::PinsonPositionTimeOffsetMPConfig();
+  EXPECT_EQ(p.identifier, "pinson_position_time_offset");
+  ASSERT_TRUE(p.aux_channels);
+  EXPECT_EQ(*p.aux_channels, (std::vector<std::string>{"INERTIAL_PVA"}));
+  const auto v = cobra::mp::PinsonVelocityTimeOffsetMPConfig();
+  EXPECT_EQ(v.identifier, "pinson_velocity_time_offset");
+  ASSERT_TRUE(v.aux_channels);
+  EXPECT_EQ(*v.aux_channels, (std::vector<std::string>{"INERTIAL_PVA", "INERTIAL_FORCES_AND_RATES", "INERTIAL_SENSOR_ERRORS"}));
+}
+
+TEST_F(StateModelingTest, PositionTimeOffsetIsTheFogmModelLessTheOffsetTimesTheVelocity) {
+  auto with = processor(11, "pos", {"pinson", "fogm", "offset"});
+  auto without = processor(2, "pos", {"pinson", "fogm"});
+  ASSERT_TRUE(with);
+  ASSERT_TRUE(without);
+  with->receive_aux_data({pva_aux});  // the inertial's velocity there is (2, 3, 4) m/s NED
+  without->receive_aux_data({pva_aux});
+  EstimateWithCovariance xp = gxp(19);
+  xp.estimate(18) = 0.25;  // s
+  auto m = with->generate_model(pos_meas, fixed(xp));
+  const EstimateWithCovariance x18{EstimateWithCovarianceType::EWC_GENERIC, Vector(xp.estimate.head(18)), Matrix::Identity(18, 18)};
+  auto ref = without->generate_model(pos_meas, fixed(x18));
+  ASSERT_TRUE(m);
+  ASSERT_TRUE(ref);
+  // the same measurement, the same model in the first eighteen states, one more column: minus the velocity
+  EXPECT_ALLCLOSE(m->z, ref->z);
+  EXPECT_EQ(m->R, ref->R);
+  ASSERT_EQ(m->H.cols(), 19);
+  EXPECT_ALLCLOSE(Matrix(m->H.leftCols(18)), ref->H);
+  EXPECT_ALLCLOSE(Vector(m->H.col(18)), vec({-2.0, -3.0, -4.0}));
+  // a fix that is 0.25 s old is 0.25 s of travel behind
+  EXPECT_ALLCLOSE(m->h(xp.estimate), Vector(ref->h(x18.estimate) - 0.25 * Vector3(2, 3, 4)));
+  // the Jacobian is that of the measurement function
+  for (int i = 0; i < 19; ++i) {
+    Vector dx = Vector::Zero(19);
+    dx(i) = 1e-6;
+    const Vector col = (m->h(xp.estimate + dx) - m->h(xp.estimate - dx)) / 2e-6;
+    EXPECT_TRUE(allclose(col, Vector(m->H.col(i)), 1e-6, 1e-7)) << "state " << i << ": " << col.transpose() << " against " << m->H.col(i).transpose();
+  }
+
+  // refused: the wrong number of blocks or of states, an inertial solution without a velocity
+  EXPECT_FALSE(with->generate_model(pos_meas, fixed(gxp(18))));
+  auto two = processor(11, "pos", {"pinson", "fogm"});
+  two->receive_aux_data({pva_aux});
+  EXPECT_FALSE(two->generate_model(pos_meas, fixed(gxp(18))));
+  const double nan = std::nan("");
+  auto still = processor(11, "pos", {"pinson", "fogm", "offset"});
+  still->receive_aux_data({Message(make_pva(kSec, 39 * kDeg, -84 * kDeg, 1000, nan, nan, nan, vec({1, 0, 0, 0})), "pva_aux")});
+  EXPECT_FALSE(still->generate_model(pos_meas, fixed(xp)));
+  EXPECT_TRUE(med.has_error());
+}
+
+TEST_F(StateModelingTest, VelocityTimeOffsetSeesTheAccelerationOfTheVehicle) {
+  auto vel = processor(12, "vel", {"pinson", "offset"}, std::nullopt);
+  ASSERT_TRUE(vel);
+  const Message meas(make_velocity(kSec, 2.2, 3.3, 4.4, Vector3(1, 4, 0.5), ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED), "gps_velocity");
+  // The inertial's specific force over the second around the measurement, in NED, as the accelerometers gave it,
+  // and the biases the inertial is applying (the attitude of pva_aux is the identity).
+  const Vector3 force(1.0, -0.5, -9.6), bias(0.1, 0.0, 0.2);
+  const Message force_msg(make_imu(kSec, force, Vector3::Zero()), "Orchestration forces and rates");
+  const Message bias_msg(make_imu(kSec, bias, Vector3(1e-3, 2e-3, 3e-3)), cobra::kAuxSourceSensorErrors);
+  EstimateWithCovariance xp = zeros(16);
+  xp.estimate(4) = 0.3;    // m/s, east velocity error
+  xp.estimate(15) = 0.2;   // s
+
+  // nothing without the aux data, and nothing with only part of it
+  EXPECT_FALSE(vel->generate_model(meas, fixed(xp)));
+  vel->receive_aux_data({pva_aux, force_msg});
+  EXPECT_FALSE(vel->generate_model(meas, fixed(xp)));
+  EXPECT_TRUE(med.has_error());
+
+  vel->receive_aux_data({bias_msg, force_msg, pva_aux});  // in any order
+  auto m = vel->generate_model(meas, fixed(xp));
+  ASSERT_TRUE(m);
+  const Vector3 g = nav::calculate_gravity_schwartz(1000.0, 39 * kDeg);
+  const Vector3 a = force - bias + g;  // the vehicle's acceleration: 0.9 north, -0.5 east, about zero down
+  EXPECT_NEAR(a(2), 0.0, 0.05);
+  Matrix H = Matrix::Zero(3, 16);
+  H.block<3, 3>(0, 3) = Matrix3::Identity();
+  H.col(15) = -a;
+  EXPECT_ALLCLOSE(m->H, H);
+  EXPECT_ALLCLOSE(m->z, vec({2.2 - 2, 3.3 - 3, 4.4 - 4}));
+  EXPECT_EQ(m->R, Matrix(Vector3(1, 4, 0.5).asDiagonal()));
+  // a velocity that is 0.2 s old lacks 0.2 s of that acceleration
+  EXPECT_ALLCLOSE(m->h(xp.estimate), Vector(Vector3(0, 0.3, 0) - 0.2 * a));
+
+  // a force that is centred elsewhere says nothing about the offset; the velocity is used all the same
+  auto late = processor(12, "vel", {"pinson", "offset"}, std::nullopt);
+  late->receive_aux_data({pva_aux, bias_msg, Message(make_imu(kSec + 400'000'000, force, Vector3::Zero()), "Orchestration forces and rates")});
+  auto ml = late->generate_model(meas, fixed(xp));
+  ASSERT_TRUE(ml);
+  EXPECT_EQ(Vector(ml->H.col(15)), Vector::Zero(3));
+  EXPECT_EQ(Matrix(ml->H.block<3, 3>(0, 3)), Matrix(Matrix3::Identity()));
+
+  // refused: another frame, another message type, the wrong number of blocks or of states
+  EXPECT_FALSE(vel->generate_model(Message(make_velocity(kSec, 2.2, 3.3, 4.4, Vector3(1, 4, 0.5), ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_SENSOR), "v"), fixed(xp)));
+  EXPECT_FALSE(vel->generate_model(pos_meas, fixed(xp)));
+  EXPECT_FALSE(vel->generate_model(meas, fixed(zeros(15))));
+  auto one = processor(12, "vel", {"pinson"}, std::nullopt);
+  one->receive_aux_data({pva_aux, force_msg, bias_msg});
+  EXPECT_FALSE(one->generate_model(meas, fixed(zeros(15))));
+}
+
+TEST_F(StateModelingTest, ATimeOffsetIsReportedWhenItIsKnownAndWhenItHasMoved) {
+  cobra::TimeOffsetReport report;
+  EXPECT_FALSE(report.consider("P", "pos", 0.2, 0.3));    // not known yet
+  EXPECT_FALSE(report.consider("P", "pos", 0.2, 0.051));
+  const auto first = report.consider("P", "pos", 0.21, 0.05);
+  ASSERT_TRUE(first);
+  EXPECT_EQ(*first, "P \"pos\": the measurements are 0.210 s older than their time stamps (sigma 0.050 s)");
+  EXPECT_FALSE(report.consider("P", "pos", 0.225, 0.01));  // has not moved by more than 0.02 s
+  const auto second = report.consider("P", "pos", -0.04, 0.01);
+  ASSERT_TRUE(second);
+  EXPECT_NE(second->find("0.040 s newer than their time stamps"), std::string::npos) << *second;
+  EXPECT_FALSE(report.consider("P", "pos", std::nan(""), 0.01));
+  ASSERT_TRUE(report.reported());
+  EXPECT_DOUBLE_EQ(*report.reported(), -0.04);
 }

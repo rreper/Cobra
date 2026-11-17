@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-16T10:09:47-0700",
+ "generated": "2026-11-16T13:37:22-0700",
  "outage_starts_s": [
   300.0,
   700.0,
@@ -514,6 +514,319 @@
    "end_v_mean": 1.3721563852773595
   },
   {
+   "row": "receiver_velocity",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 2.162777311079771,
+   "v_rms": 0.9804805281924789
+  },
+  {
+   "row": "receiver_velocity",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 2.3219722979254462,
+   "v_rms": 1.0519117446953927,
+   "end_h": [
+    31.2,
+    26.0,
+    22.4,
+    12.8,
+    16.9,
+    11.9
+   ],
+   "end_h_mean": 20.185245766557088,
+   "end_h_max": 31.15666563230894,
+   "end_sigma_mean": 23.072582071427032,
+   "end_ratio_rms": 0.927554432096439,
+   "end_v_mean": 2.1679037830602823
+  },
+  {
+   "row": "receiver_velocity",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 2.0426660131131524,
+   "v_rms": 1.1707674148452947,
+   "end_h": [
+    157.1,
+    117.1,
+    59.9,
+    145.7,
+    73.9,
+    30.7
+   ],
+   "end_h_mean": 97.40960516263969,
+   "end_h_max": 157.09726825730118,
+   "end_sigma_mean": 122.52367647570016,
+   "end_ratio_rms": 0.8875480258275903,
+   "end_v_mean": 7.895249280233624
+  },
+  {
+   "row": "receiver_velocity_250ms",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6398037702327009,
+   "v_rms": 1.1246890688673485
+  },
+  {
+   "row": "receiver_velocity_250ms",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.7673949223683028,
+   "v_rms": 1.1118214386756555,
+   "end_h": [
+    33.1,
+    26.8,
+    2.6,
+    14.4,
+    4.1,
+    8.5
+   ],
+   "end_h_mean": 14.900900601073113,
+   "end_h_max": 33.063742487809115,
+   "end_sigma_mean": 22.525867380611913,
+   "end_ratio_rms": 0.8408801109381225,
+   "end_v_mean": 2.015295376208035
+  },
+  {
+   "row": "receiver_velocity_250ms",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5264497923012281,
+   "v_rms": 1.1787994483979436,
+   "end_h": [
+    176.8,
+    114.8,
+    46.7,
+    158.5,
+    16.8,
+    34.1
+   ],
+   "end_h_mean": 91.28836816102124,
+   "end_h_max": 176.80161522954901,
+   "end_sigma_mean": 120.93490287148772,
+   "end_ratio_rms": 0.9169916149969809,
+   "end_v_mean": 8.020062384409266
+  },
+  {
+   "row": "receiver_velocity_offset",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.4899736481618653,
+   "v_rms": 0.9536652826845113,
+   "offsets": {
+    "vel": {
+     "offset": 0.163,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   }
+  },
+  {
+   "row": "receiver_velocity_offset",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5869690198285975,
+   "v_rms": 1.0523756930661032,
+   "offsets": {
+    "vel": {
+     "offset": 0.163,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    38.3,
+    28.2,
+    9.4,
+    14.8,
+    6.1,
+    4.5
+   ],
+   "end_h_mean": 16.88675824462353,
+   "end_h_max": 38.265788013788374,
+   "end_sigma_mean": 23.075682009980785,
+   "end_ratio_rms": 0.9108566918929505,
+   "end_v_mean": 2.36212024916235
+  },
+  {
+   "row": "receiver_velocity_offset",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.3567823530827179,
+   "v_rms": 1.1564354188467718,
+   "offsets": {
+    "vel": {
+     "offset": 0.163,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    203.0,
+    114.6,
+    74.4,
+    160.3,
+    24.8,
+    78.5
+   ],
+   "end_h_mean": 109.2757733649949,
+   "end_h_max": 203.00224031217888,
+   "end_sigma_mean": 122.48527198967629,
+   "end_ratio_rms": 1.0178504958335297,
+   "end_v_mean": 8.37097501590758
+  },
+  {
+   "row": "position_offset",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6694163541679274,
+   "v_rms": 1.572209939607549,
+   "offsets": {
+    "pos": {
+     "offset": -0.058,
+     "sigma": 0.034,
+     "reports": 3
+    }
+   }
+  },
+  {
+   "row": "position_offset",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6634344054622265,
+   "v_rms": 1.5833228979337504,
+   "offsets": {
+    "pos": {
+     "offset": -0.058,
+     "sigma": 0.034,
+     "reports": 3
+    }
+   },
+   "end_h": [
+    50.7,
+    4.9,
+    26.2,
+    17.0,
+    19.9,
+    20.3
+   ],
+   "end_h_mean": 23.15981841113226,
+   "end_h_max": 50.690071438777586,
+   "end_sigma_mean": 28.868066664671655,
+   "end_ratio_rms": 0.9134793827529056,
+   "end_v_mean": 3.3644270375188086
+  },
+  {
+   "row": "position_offset",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6646965187203895,
+   "v_rms": 1.5611829821459535,
+   "offsets": {
+    "pos": {
+     "offset": -0.058,
+     "sigma": 0.034,
+     "reports": 3
+    }
+   },
+   "end_h": [
+    262.8,
+    71.5,
+    63.5,
+    160.2,
+    91.1,
+    96.3
+   ],
+   "end_h_mean": 124.23996946284785,
+   "end_h_max": 262.78319461493084,
+   "end_sigma_mean": 138.783912979806,
+   "end_ratio_rms": 1.0244368259792993,
+   "end_v_mean": 9.775847385700777
+  },
+  {
+   "row": "ground_vehicle",
+   "outage_s": 0.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.4349452371134863,
+   "v_rms": 1.1427875497393074,
+   "offsets": {
+    "vel": {
+     "offset": 0.058,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   }
+  },
+  {
+   "row": "ground_vehicle",
+   "outage_s": 60.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.5455408851719121,
+   "v_rms": 1.1578460810594433,
+   "offsets": {
+    "vel": {
+     "offset": 0.058,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    6.5,
+    3.0,
+    1.8,
+    2.8,
+    4.5,
+    3.9
+   ],
+   "end_h_mean": 3.7592573358772547,
+   "end_h_max": 6.546242143165167,
+   "end_sigma_mean": 5.760382308386011,
+   "end_ratio_rms": 0.7256614706674502,
+   "end_v_mean": 0.7364575550190153
+  },
+  {
+   "row": "ground_vehicle",
+   "outage_s": 120.0,
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.3313735357628669,
+   "v_rms": 1.178390758429522,
+   "offsets": {
+    "vel": {
+     "offset": 0.058,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    8.4,
+    20.9,
+    9.4,
+    6.1,
+    2.5,
+    11.1
+   ],
+   "end_h_mean": 9.732211950332362,
+   "end_h_max": 20.86414822280017,
+   "end_sigma_mean": 12.510533942811469,
+   "end_ratio_rms": 0.7651273728405447,
+   "end_v_mean": 1.0088090691198204
+  },
+  {
    "row": "imu_only",
    "outage_s": "standing",
    "exit": 0,
@@ -672,6 +985,107 @@
    "end_sigma_mean": 2.5864047575515303,
    "end_ratio_rms": 0.7391168854780928,
    "end_v_mean": 1.164061507436628
+  },
+  {
+   "row": "receiver_velocity",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 2.1918833400824997,
+   "v_rms": 1.0053781561996387,
+   "end_h": [
+    5.0
+   ],
+   "end_h_mean": 4.963897869536184,
+   "end_h_max": 4.963897869536184,
+   "end_sigma_mean": 9.950037439164753,
+   "end_ratio_rms": 0.4988823308340108,
+   "end_v_mean": 0.8641422952318294
+  },
+  {
+   "row": "receiver_velocity_250ms",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6623338599355355,
+   "v_rms": 1.1431432417329106,
+   "end_h": [
+    5.8
+   ],
+   "end_h_mean": 5.848153344044776,
+   "end_h_max": 5.848153344044776,
+   "end_sigma_mean": 9.529255156475713,
+   "end_ratio_rms": 0.6137051897566828,
+   "end_v_mean": 0.8957080915762106
+  },
+  {
+   "row": "receiver_velocity_offset",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.509584268573006,
+   "v_rms": 0.9743596040496834,
+   "offsets": {
+    "vel": {
+     "offset": 0.163,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    6.1
+   ],
+   "end_h_mean": 6.063968080391742,
+   "end_h_max": 6.063968080391742,
+   "end_sigma_mean": 9.954243281230665,
+   "end_ratio_rms": 0.6091842352121055,
+   "end_v_mean": 1.0165036158417706
+  },
+  {
+   "row": "position_offset",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.6730777228458253,
+   "v_rms": 1.5885777217454304,
+   "offsets": {
+    "pos": {
+     "offset": -0.058,
+     "sigma": 0.034,
+     "reports": 3
+    }
+   },
+   "end_h": [
+    7.4
+   ],
+   "end_h_mean": 7.423726637413304,
+   "end_h_max": 7.423726637413304,
+   "end_sigma_mean": 13.461617192519524,
+   "end_ratio_rms": 0.5514736105806507,
+   "end_v_mean": 1.077939406197288
+  },
+  {
+   "row": "ground_vehicle",
+   "outage_s": "standing",
+   "exit": 0,
+   "epochs": 2570,
+   "h_rms": 1.4398532688201393,
+   "v_rms": 1.1595711045264792,
+   "offsets": {
+    "vel": {
+     "offset": 0.058,
+     "sigma": 0.006,
+     "reports": 4
+    }
+   },
+   "end_h": [
+    1.9
+   ],
+   "end_h_mean": 1.873142209116567,
+   "end_h_max": 1.873142209116567,
+   "end_sigma_mean": 2.164529025161798,
+   "end_ratio_rms": 0.8653809615588547,
+   "end_v_mean": 0.3521176692660788
   }
  ]
 }

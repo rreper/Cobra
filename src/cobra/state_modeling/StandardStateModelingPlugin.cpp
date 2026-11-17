@@ -18,7 +18,7 @@ StandardStateModelProvider::StandardStateModelProvider(api::Mediator* mediator)
                      mp::kPinsonAltitude,     mp::kPinsonWithLeverArmPosition, mp::kPinsonBodyVelocity,
                      mp::kPinsonPosVel,       mp::kPosition,           mp::kDirection3DToPoints,
                      mp::kPinsonOdometry,   // C++ additions, after the nine of the Python original
-                     mp::kPinsonZeroRate},
+                     mp::kPinsonZeroRate,   mp::kPinsonPositionTimeOffset, mp::kPinsonVelocityTimeOffset},
       block_ids_{PinsonStateBlockConfig::kIdentifier, FogmStateBlockConfig::kIdentifier,
                  ClockBiasStateBlockConfig::kIdentifier, ConstantStateBlockConfig::kIdentifier},
       vsb_ids_{PinsonErrorToStandardVSBConfig::kIdentifier, StateExtractorConfig::kIdentifier} {}
@@ -45,6 +45,9 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
   }
   if (id == mp::kPinsonZeroRate) {
     return std::make_unique<PinsonZeroRateMeasurementProcessor>(label, state_block_labels, mediator_);
+  }
+  if (id == mp::kPinsonVelocityTimeOffset) {
+    return std::make_unique<PinsonVelocityTimeOffsetMeasurementProcessor>(label, state_block_labels, mediator_);
   }
   if (!config_group) {
     err("A config group is required for processor " + id);
@@ -79,6 +82,9 @@ std::unique_ptr<api::StandardMeasurementProcessor> StandardStateModelProvider::n
                                                                 mediator_, v3(c->lever_arm));
   if (id == mp::kPinsonWithLeverArmPosition)
     return std::make_unique<PinsonPositionMeasurementProcessor>(Kind::WithLeverArm, label, state_block_labels,
+                                                                mediator_, v3(c->lever_arm));
+  if (id == mp::kPinsonPositionTimeOffset)
+    return std::make_unique<PinsonPositionMeasurementProcessor>(Kind::WithNedFogmAndTimeOffset, label, state_block_labels,
                                                                 mediator_, v3(c->lever_arm));
   if (id == mp::kPinsonAltitude) {
     std::shared_ptr<const nav::Geoid> geoid;

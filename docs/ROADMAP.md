@@ -99,10 +99,10 @@ virtual per-step methods on the standard orchestration, `app::register_orchestra
 degradation ramps plus a synthesised second position source. Next in Cobra: keep those hooks stable across tags
 (consumers pin tags), a second recorded dataset, and the ROS 2 / UI items when an environment exists.
 
-## After v0.2.16 (16 November 2026)
+## After v0.2.17 (16 November 2026)
 
 Since the paragraph above the work has been on what a road vehicle with a receiver and an IMU needs, each piece
-opt-in and measured on the example drive (`docs/DESIGN.md` §7.22 to §7.29, `docs/AIDING_MATRIX.md`,
+opt-in and measured on the example drive (`docs/DESIGN.md` §7.22 to §7.30, `docs/AIDING_MATRIX.md`,
 `docs/ALIGNMENT_MATRIX.md`):
 
 | Tag | What it added |
@@ -114,7 +114,9 @@ opt-in and measured on the example drive (`docs/DESIGN.md` §7.22 to §7.29, `do
 | v0.2.14 | IMU preset `vn100_driving`: the accelerometer noise of a driving car |
 | v0.2.15 | a standstill confirmed by the receiver's velocity, so that creeping is not taken for standing |
 | v0.2.16 | the receiver's time offset, found by the alignment in motion |
+| v0.2.17 | the receiver's time offsets as filter states, which makes its velocity worth using as a measurement |
 
-`configs/pos_ins_ground_vehicle.json` puts them together. Unit tests: 24 suites, 295 tests. The default mode
+`configs/pos_ins_ground_vehicle.json` puts them together. Unit tests: 25 suites, 307 tests. The default mode
 still reproduces the Python reference and the outputs of v0.2.8 byte for byte. What is next is listed, with the
-reasons, in `docs/DESIGN.md` §9.6: the receiver's time offsets as filter states first.
+reasons, in `docs/DESIGN.md` §9.6: an accelerometer bias that may step when the vehicle starts and stops, and
+the hand-over of what the alignment knows (the time offset it found among it) first.

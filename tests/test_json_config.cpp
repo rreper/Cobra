@@ -652,6 +652,60 @@ TEST(JsonConfig, ZeroMotionConfirmationKeys) {
   EXPECT_THROW(jsoncfg::app_config_from_json(generator({{"confirmation_channels", {kVel}}, {"confirmed_vertical_velocity_sigma", 0.0}})), std::runtime_error);
 }
 
+TEST(JsonConfig, TimeOffsetProcessorTypes) {
+  using namespace cobra;
+  auto src = [](const char* rel) {
+    const char* s = std::getenv("PNTOS_TEST_SRCDIR");
+    return std::string(s ? s : "..") + "/" + rel;
+  };
+  std::ifstream in(src("configs/pos_ins.json"));
+  jsoncfg::json j;
+  in >> j;
+  auto block = [](const char* label) {
+    return jsoncfg::json{{"type", "FogmStateBlockConfig"}, {"group", std::string("config/") + label + "_block"}, {"label", label},
+                         {"estimate_with_covariance", {{"type", "EWC_GENERIC"}, {"estimate", {0.0}}, {"covariance_diag", {0.09}}}},
+                         {"fogm_model", {{"group", std::string("config/") + label}, {"sigma", {0.3}}, {"tau", {1.0e6}}}}};
+  };
+  for (auto& c : j["configs"]) {
+    if (c["type"] != "StandardOrchestrationConfig") continue;
+    for (auto& mp : c["mp_configs"])
+      if (mp["label"] == "pos") {
+        mp["type"] = "PinsonPositionTimeOffsetMPConfig";
+        mp["state_block_labels"] = {"pinson15", "pos_sensor_error", "pos_time_offset"};
+      }
+    c["mp_configs"].push_back({{"type", "PinsonVelocityTimeOffsetMPConfig"}, {"group", "config/vel_measurement_processor"}, {"label", "vel"},
+                               {"channel", "/sensor/ublox-ZED-F9T/velocity"}, {"state_block_labels", {"pinson15", "vel_time_offset"}}});
+    c["additional_sb_configs"].push_back(block("pos_time_offset"));
+    c["additional_sb_configs"].push_back(block("vel_time_offset"));
+  }
+  const auto app = jsoncfg::app_config_from_json(j);
+  const StandardOrchestrationConfig* orch = nullptr;
+  for (const auto& c : app.configs)
+    if (auto* o = dynamic_cast<const StandardOrchestrationConfig*>(c.get())) orch = o;
+  ASSERT_NE(orch, nullptr);
+  ASSERT_TRUE(orch->mp_configs.has_value());
+  const MeasurementProcessorConfig *pos = nullptr, *vel = nullptr;
+  for (const auto& mp : *orch->mp_configs) {
+    if (mp->label == "pos") pos = mp.get();
+    if (mp->label == "vel") vel = mp.get();
+  }
+  ASSERT_NE(pos, nullptr);
+  ASSERT_NE(vel, nullptr);
+  EXPECT_EQ(pos->identifier, "pinson_position_time_offset");
+  EXPECT_EQ(pos->state_block_labels.size(), 3u);
+  EXPECT_NE(dynamic_cast<const LeverArmMPConfig*>(pos), nullptr);  // it keeps its lever arm
+  EXPECT_EQ(vel->identifier, "pinson_velocity_time_offset");
+  // the aux channels come with the type: the inertial's solution, its specific force and the biases it applies
+  ASSERT_TRUE(vel->aux_channels.has_value());
+  EXPECT_EQ(*vel->aux_channels, (std::vector<std::string>{"INERTIAL_PVA", "INERTIAL_FORCES_AND_RATES", "INERTIAL_SENSOR_ERRORS"}));
+  // text -> config -> text -> config is stable, the type names survive, and the plugins build
+  const auto text = jsoncfg::app_config_to_json(app);
+  EXPECT_EQ(jsoncfg::app_config_to_json(jsoncfg::app_config_from_json(text)).dump(), text.dump());
+  EXPECT_NE(text.dump().find("\"PinsonPositionTimeOffsetMPConfig\""), std::string::npos);
+  EXPECT_NE(text.dump().find("\"PinsonVelocityTimeOffsetMPConfig\""), std::string::npos);
+  EXPECT_NO_THROW(app::build_plugins(app));
+}
+
 TEST(JsonConfig, InitializationImuReplayKey) {
   using namespace cobra;
   auto src = [](const char* rel) {

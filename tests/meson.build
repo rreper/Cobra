@@ -15,6 +15,7 @@ test_sources = {
   'inertial_live': files('test_inertial_live.cpp'),
   'initialization': files('test_initialization.cpp'),
   'alignment_in_motion': files('test_alignment_in_motion.cpp'),
+  'time_offset': files('test_time_offset.cpp'),
   'preprocessors': files('test_preprocessors.cpp'),
   'lcm_transport': files('test_lcm_transport.cpp'),
   'tutorial': files('test_tutorial.cpp'),

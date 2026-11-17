@@ -334,6 +334,11 @@ std::vector<std::string> pva_aux() { return {kAuxInertialPva}; }
 LeverArmMPConfig PinsonPositionMPConfig() { return LeverArmMPConfig(kPinsonPosition, pva_aux()); }
 PlainMPConfig PinsonVelocityMPConfig() { return PlainMPConfig(kPinsonVelocity, pva_aux()); }
 LeverArmMPConfig PinsonWithNedFogmPositionMPConfig() { return LeverArmMPConfig(kPinsonWithNedFogmPosition, pva_aux()); }
+LeverArmMPConfig PinsonPositionTimeOffsetMPConfig() { return LeverArmMPConfig(kPinsonPositionTimeOffset, pva_aux()); }
+PlainMPConfig PinsonVelocityTimeOffsetMPConfig() {
+  return PlainMPConfig(kPinsonVelocityTimeOffset,
+                       std::vector<std::string>{kAuxInertialPva, kAuxInertialForcesAndRates, kAuxInertialSensorErrors});
+}
 LeverArmMPConfig AltitudeMPConfig() { return LeverArmMPConfig(kPinsonAltitude, pva_aux()); }
 LeverArmMPConfig PinsonWithLeverArmPositionMPConfig() {
   return LeverArmMPConfig(kPinsonWithLeverArmPosition, pva_aux());

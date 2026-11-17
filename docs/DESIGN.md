@@ -986,7 +986,8 @@ until it moves.
   2.4° after 60 s, 1.0° after 120 s, against 0.7 to 0.9° for the run that was given its heading. The filter's
   sigma grows with it. With the ground-vehicle constraints of §7.23 in the filter the heading is held: 1.2°,
   1.3°, 1.2° and 0.6°. The horizontal position is within 0.2 m of the given run throughout. The receiver's
-  velocity as a filter measurement does not help (it makes the position worse, 2.1 m against 1.5 m).
+  velocity as a filter measurement does not help (it makes the position worse, 2.1 m against 1.5 m). That was
+  measured with the velocity at 150 ms; with its time offset as a filter state it does help (§7.30).
 - The remaining worst cases with the constraints (4 to 6° half a minute to a minute after the hand-over, three
   of the 64, with a filter sigma of 5 to 8° that says so) are switch-on times shortly before a stop: a standing
   vehicle shows the constraints nothing. The zero-rate updates of §7.25 settle the bias there: with them the
@@ -1423,7 +1424,7 @@ y_i = C0 (x(t_i − τ) + G_i δb + Θ_i b_a) + c,       x(t_i − τ − δτ) 
   comes before and after, and the covariance of the heading contains the offset's share.
 - The offset is reported in the alignment's INFO line ("the receiver's velocity is 0.284 s older than its time
   stamps (sigma 0.050 s)") and in `Diagnostics`. The filter that takes over does not use it: every channel keeps
-  the `TimeBiasConfig` it was given. The line is what to put there.
+  the `TimeBiasConfig` it was given. The line is what to put there; §7.30 makes the offset a state of the filter.
 
 **Simulated drives** (twelve per figure, six pulling away and six under way, 0.05 m/s of velocity noise):
 
@@ -1482,8 +1483,7 @@ that is handed over has seen more data.
 Limits. One alignment sees fifteen to forty seconds: 0.02 s on this drive, more on a gentler one, nothing on a
 motorway. The offset is taken as constant over the window. It is the velocity's (or, without a velocity
 channel, the fixes'); the other channel's is not estimated, and nothing is estimated once the filter runs: an
-offset as a filter state, observable at every bend for as long as the vehicle drives, is the next step
-(§9.6). An offset beyond ±1 s is not found.
+offset as a filter state, observable at every bend for as long as the vehicle drives, is §7.30. An offset beyond ±1 s is not found.
 
 Tests: `InMotionAlignment.AnOldVelocityTurnsTheHeadingAndTheSigmaDoesNotSaySo` (the default, pinned),
 `TheTimeOffsetIsEstimatedAlong`, `TheOffsetHasToBeKnownBeforeTheHandOver`, `AnOffsetThatIsNotThereIsNotInvented`,
@@ -1494,6 +1494,121 @@ and is newer than its stamp), `TheOffsetOfPositionFixesIsFoundTheSameWay`,
 (the example configuration through the whole filter with a velocity 0.25 s old and no time bias: 0.235 s
 found). Without the keys the alignment is unchanged: the eleven rows and 704 runs of the alignment matrix of
 v0.2.15 come out identical to the last digit.
+
+### 7.30 The receiver's time offsets as filter states (`pinson_position_time_offset`, `pinson_velocity_time_offset`)
+
+The alignment of §7.29 finds how old the receiver's velocity is once, from a quarter of a minute of data, and
+reports it. The filter that takes over went on with the time biases of the configuration, and the age of the
+fixes was not found at all when there was a velocity channel. Two measurement processors, the twelfth and
+thirteenth, make each offset a state that the filter estimates for as long as the vehicle drives.
+
+**The models.** Both take one more state block of a single state τ, in seconds, positive when the measurement
+is older than its time stamp (after whatever `TimeBiasConfig` the channel has):
+
+```
+pinson_position_time_offset   blocks: pinson15, sensor error (3, NED), time offset (1)
+    a fix stamped t shows where the antenna was at t − τ:      z = δp + C l − b − τ v        H column: −v
+pinson_velocity_time_offset   blocks: pinson15, time offset (1)
+    a velocity stamped t is the vehicle's at t − τ:            z = δv − τ a                  H column: −a
+```
+
+- `v` is the inertial's velocity at the fix. Without the offset state the model is that of
+  `pinson_with_ned_fogm_position`, column for column (`StateModelingTest.PositionTimeOffsetIsTheFogmModelLess...`).
+- `a` is the vehicle's acceleration over the second around the measurement: the inertial's specific force in
+  NED (aux `INERTIAL_FORCES_AND_RATES`), less the accelerometer bias the inertial is applying (aux
+  `INERTIAL_SENSOR_ERRORS`, turned with the attitude), plus gravity. The bias has to come out. The first
+  version left it in; the example unit's vertical accelerometer is 5 milli-g off, an acceleration that is
+  always there, and τ times it is a vertical velocity the receiver is always wrong by: with an offset of 0.32 s
+  to find, the vertical RMS was 2.72 m where it is 0.94 m now. A force that is not centred on the measurement
+  leaves the column at zero for that message.
+- Both are first-order in τ, which is enough below half a second (half the acceleration times τ² is 0.1 m at
+  2 m/s² and 0.3 s).
+- What shows the fixes' offset is a velocity that changes; what shows the velocity's is an acceleration that
+  changes. A standing vehicle shows neither, and the states stay where they were.
+- Each processor says at INFO what it has found, once its sigma is below 0.05 s and again whenever the estimate
+  has moved by more than 0.02 s: `... "vel": the measurements are 0.313 s older than their time stamps (sigma
+  0.006 s)`. That is the figure for the channel's `TimeBiasConfig`.
+- The state block is an ordinary `FogmStateBlockConfig` of one state. The examples start it at zero with a
+  sigma of 0.3 s and give it a time constant of 10⁶ s, which is a constant that may drift by 0.01 s in ten
+  minutes.
+
+**Simulated drives** (`tests/test_time_offset.cpp`: the alignment example through the whole filter, a road that
+winds at 10 m/s, three minutes unless noted). They are simulated because the question is one of a fraction of
+a second, and on the recording the reference has a time base of its own (§7.29).
+
+| the receiver's | taken | along-track error (mean) | velocity error RMS | heading RMS | offset found |
+|---|---|---|---|---|---|
+| fixes, as stamped | | −0.1 m | 0.07 m/s | 0.16° | |
+| fixes, 0.3 s old | as stamped | −3.2 m | 0.16 m/s | 0.21° | |
+| fixes, 0.3 s old | offset a state | −1.9 m, −0.4 m after ten minutes | 0.07 m/s | 0.15° | 0.275 s |
+| velocity as a measurement, as stamped | | −0.1 m | 0.05 m/s | 0.15° | |
+| velocity, 0.25 s old | as stamped | −0.6 m | 0.21 m/s | 0.48° | |
+| velocity, 0.25 s old | offset a state | −0.1 m | 0.05 m/s | 0.15° | 0.246 s |
+| fixes 0.1 s and velocity 0.3 s old | as stamped | −1.6 m | 0.26 m/s | 0.57° | |
+| fixes 0.1 s and velocity 0.3 s old | both offsets states | −0.8 m | 0.05 m/s | 0.15° | 0.105 s, 0.292 s |
+
+The velocity's offset is found to 0.01 s and the filter is then as good as with a fresh velocity: there is no
+other state for it to hide in. The fixes' offset is found as well, and the velocity error it caused is gone at
+once, but the position follows slowly, and that is the limit of this processor
+(`TimeOffset.WhatTheSolutionWasBehindByLingersInTheBiasStates`). The filter was three metres behind before it
+knew the offset. Once it knows, those three metres have to go somewhere, and most of them go into the
+receiver's bias states, which exist to take up just such an offset and let go with their own time constant of
+300 s. Parked after 100 s of driving, the filter with the offset state is further from the truth in the next
+minute than the one without (1.9 m against 1.1 m); parked after ten minutes it is nearer (0.5 m against
+1.3 m, the filter without the state having to catch up three metres every time the car stops).
+
+**The recorded drive** (`docs/AIDING_MATRIX.md`; horizontal / vertical RMS with the receiver present, error at
+the end of an outage, mean (worst)):
+
+| the filter has | h / v RMS | 60 s outage | 120 s outage | standing, 40 s | offset found |
+|---|---|---|---|---|---|
+| the fixes | 1.55 / 1.57 m | 24.9 (53.6) m | 128.2 (278.8) m | 11.7 m | |
+| the fixes, their offset a state | 1.67 / 1.57 | 23.2 (50.7) | 124.2 (262.8) | 7.4 | −0.058 s: 0.09 s old |
+| and the velocity at 150 ms (as `pos_vel_ins.json`) | 2.16 / 0.98 | 20.2 (31.2) | 97.4 (157.1) | 5.0 | |
+| and the velocity at 250 ms | 1.64 / 1.12 | 14.9 (33.1) | 91.3 (176.8) | 5.8 | |
+| and the velocity at 150 ms, its offset a state | 1.49 / 0.95 | 16.9 (38.3) | 109.3 (203.0) | 6.1 | +0.163 s: 0.31 s old |
+| constraints and confirmed zero-motion updates (§7.28) | 1.55 / 1.71 | 6.1 (12.3) | 9.6 (16.5) | 1.9 | |
+| those and the velocity at 250 ms, its offset a state | 1.43 / 1.14 | 3.8 (6.5) | 9.7 (20.9) | 1.9 | +0.058 s: 0.31 s old |
+
+- *The receiver's velocity is worth using once its age is right.* §7.24 found that it made the position worse,
+  2.1 m against 1.5 m; that was the velocity at 150 ms, the first velocity row here. With the offset a state
+  the horizontal error is below that of the fixes alone, the vertical error falls by more than a third (the filter now
+  follows the receiver's vertical velocity and leaves the receiver's height error, 1.6 m against the
+  reference, to the bias states), and a 60 s outage ends a third nearer.
+- *The set a road vehicle can have without another sensor* (last row; `configs/pos_ins_ground_vehicle.json` is
+  this with the alignment): 1.43 m horizontally, and 3.8 m (6.5 m at worst) after a minute without the
+  receiver where the set of §7.28 had 6.1 m (12.3 m). After two minutes the mean is the same and the worst
+  case is worse, 20.9 m against 16.5 m. After an alignment in motion the heading is 1.0°, 0.7°, 0.8° and 0.5°
+  RMS at 10, 30, 60 and 120 s (1.1°, 0.7°, 0.8°, 0.6° without the velocity); the position against the
+  reference is 0.1 m worse from a minute on (1.7 m against 1.6 m).
+- *The offsets.* The filter puts the velocity at 0.31 s (0.313 and 0.308 s from two configured biases), the
+  alignment of §7.29 at 0.28 s; the fixes at 0.09 s, the alignment at 0.07 s. Two methods that share nothing but
+  the data agree to 0.03 s.
+- *The fixes' offset state is not in any example.* With it the horizontal RMS against the reference rises from
+  1.55 m to 1.67 m. That is what moving the fixes by 0.06 s does against a reference that is itself 0.07 s from
+  the IMU's time base (§7.29), and says nothing about which is right; on the simulated drives, where there is
+  one clock, the state is right. It also has the transient described above. It is there for an installation
+  whose fixes are a quarter of a second old or more, where three metres along the road are not in doubt.
+
+To use them: the processor type `PinsonVelocityTimeOffsetMPConfig` in place of `PinsonVelocityMPConfig` with a
+second state block label, or `PinsonPositionTimeOffsetMPConfig` in place of `PinsonWithNedFogmPositionMPConfig`
+with a third, and for each a one-state `FogmStateBlockConfig` among the `additional_sb_configs`. The aux
+channels come with the types. Nothing else is configured.
+
+Limits. The offset state starts at zero; what the alignment found (§7.29) is not handed to it, so the first
+minute after a hand-over still runs on the configured time bias. The velocity processor has no lever arm, as
+`pinson_velocity` has none. At a steady velocity the fixes' offset is a constant that the receiver's bias
+states can take as well; it is told apart by turns and by changes of speed. An offset is taken as constant: a
+receiver that changes its filter with the dynamics would need a faster state.
+
+Tests: `TimeOffset.FixesOlderThanStampedPutTheSolutionBehind` and `AnOldVelocityHurtsAFilterThatUsesIt` (the
+defaults, pinned), `TheFilterFindsHowOldTheFixesAre`, `TheFilterFindsHowOldTheVelocityIs`,
+`BothOffsetsAtOnceAndEachItsOwn`, `WhatTheSolutionWasBehindByLingersInTheBiasStates` (the limit, pinned),
+`AStandingVehicleShowsNothingAndNothingIsClaimed`; `StateModelingTest.TimeOffsetProcessorsAreTheTwelfthAndThirteenth`,
+`PositionTimeOffsetIsTheFogmModelLessTheOffsetTimesTheVelocity`,
+`VelocityTimeOffsetSeesTheAccelerationOfTheVehicle`, `ATimeOffsetIsReportedWhenItIsKnownAndWhenItHasMoved`;
+`JsonConfig.TimeOffsetProcessorTypes`. With the two offset columns set to zero the four tests of the new
+behaviour fail and the three pinned ones pass.
 
 ## 8. Deviations from the Python original
 
@@ -1530,6 +1645,7 @@ Every deviation is deliberate and listed here; anything not listed is intended t
 | 27 | IMU preset `vn100_driving` (§7.27) | — | C++ addition; no shipped default configuration names it, the four vehicle examples do |
 | 28 | `ZeroMotionGeneratorConfig::confirmation_channels` and the five keys with it: a receiver's velocity confirms or contradicts each standstill of deviation 25 (§7.28) | — | C++ addition to a C++ addition; off unless channels are named, the keys are written only then. `configs/pos_ins_ground_vehicle.json` names them |
 | 29 | `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`: the time offset of the receiver's velocity (or of its fixes) is one more unknown of the alignment in motion and is reported in its log line (§7.29) | — | C++ addition; off at 0, the keys are written only then. The two alignment example configurations set 0.3 s |
+| 30 | Twelfth and thirteenth measurement processors `pinson_position_time_offset` and `pinson_velocity_time_offset` (`PinsonPositionTimeOffsetMPConfig`, `PinsonVelocityTimeOffsetMPConfig`): the time offset of the fixes or of the velocity as one more state (§7.30) | — | C++ additions; the processors of the Python original and their tests are untouched. `configs/pos_ins_ground_vehicle.json` uses the second |
 
 ## 9. Roadmap: what remains and how to do it
 
@@ -1636,13 +1752,15 @@ the full state and covariance diagonal.
 
 ### 9.6 Later (Tier 2/3)
 
-Open after §7.29, in the order of what a vehicle installation misses first: the receiver's time offsets as
-filter states (§7.29 finds the velocity's once, in the alignment, and only reports it; the filter that takes
-over keeps the configured time biases, and the fixes' offset is not estimated at all when there is a velocity
-channel); an accelerometer bias that is allowed to step
-when the vehicle starts and stops (§7.28: 2 mm/s² on the vertical axis of the example unit, which is what
-keeps the vertical zero velocity at 0.2 m/s); creeping in an outage, where the IMU is alone (§7.28);
-measurement weighting that adapts to a receiver whose reported covariance is optimistic; tightly coupled GNSS.
+Open after §7.30, in the order of what a vehicle installation misses first: an accelerometer bias that is
+allowed to step when the vehicle starts and stops (§7.28: 2 mm/s² on the vertical axis of the example unit,
+which is what keeps the vertical zero velocity at 0.2 m/s); the hand-over of what the alignment knows that the
+initial-solution interface does not carry (the time offset it found, §7.29, for the state of §7.30; the
+correlation of heading and gyro bias; and the fact that a position taken from an old fix is behind by the
+offset times the velocity, which is what leaves the transient of §7.30 in the receiver's bias states); creeping
+in an outage, where the IMU is alone (§7.28); why the two-minute outage is worse in the worst case with the
+receiver's velocity in the filter (§7.30); measurement weighting that adapts to a receiver whose reported
+covariance is optimistic; tightly coupled GNSS.
 Two leads not followed: a gyro bias sigma four times larger halves the outage error with constraints and
 zero-motion updates and worsens the rows without constraints (§7.27); `imu_gap_policy` "hold" does not close
 the start-up hole of §7.26 completely.

@@ -7,6 +7,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 
 #include <pntos/api/state_modeling.hpp>
 #include <pntos/cobra/utils/aspn.hpp>
@@ -14,6 +16,7 @@
 
 #include <aspn23/eigen/MeasurementAltitude.hpp>
 #include <aspn23/eigen/MeasurementDirection3DToPoints.hpp>
+#include <aspn23/eigen/MeasurementImu.hpp>
 #include <aspn23/eigen/MeasurementVelocity.hpp>
 
 namespace pntos::cobra {
@@ -44,12 +47,30 @@ class PinsonProcessorBase : public api::StandardMeasurementProcessor {
   std::shared_ptr<const utils::PVA> inertial_pva_;
 };
 
+/// Says at INFO what a time-offset state has come to: once the filter knows it to 0.05 s, and again whenever it
+/// has moved by more than 0.02 s since. The figure is what belongs in the channel's TimeBiasConfig.
+class TimeOffsetReport {
+ public:
+  /// Returns the line to log, if there is something to say about `offset` (s) with this `sigma`.
+  std::optional<std::string> consider(const std::string& name, const std::string& label, double offset, double sigma);
+  std::optional<double> reported() const { return reported_; }
+
+ private:
+  std::optional<double> reported_;
+};
+
 /// Geodetic position -> Pinson position/tilt states, with a known lever arm.
 /// Variants: kind 0 = pinson_position (1 block), 1 = pinson_with_ned_fogm_position (pinson + 3 FOGM),
 /// 2 = pinson_with_lever_arm_position (pinson + 3 FOGM sensor error + 3 lever-arm error).
+///
+/// C++ addition, kind 3 = pinson_position_time_offset: kind 1 with a third block of one state, the time offset tau
+/// of the fixes in seconds. A fix stamped t shows where the antenna was at t - tau, which is tau times the velocity
+/// behind where it is at t:  z = ... - tau * v_ned,  H column -v_ned (the inertial's velocity). Seen whenever the
+/// velocity changes; at a steady velocity it is a constant offset that the FOGM states can take as well, and at
+/// rest it is not seen at all (DESIGN.md §7.30).
 class PinsonPositionMeasurementProcessor final : public PinsonProcessorBase {
  public:
-  enum class Kind { Plain, WithNedFogm, WithLeverArm };
+  enum class Kind { Plain, WithNedFogm, WithLeverArm, WithNedFogmAndTimeOffset };
   PinsonPositionMeasurementProcessor(Kind kind, std::string label, std::vector<std::string> state_block_labels,
                                      api::Mediator* mediator, const api::Vector3& l_ps_p);
   std::optional<api::StandardMeasurementModel> generate_model(const api::Message& message,
@@ -62,6 +83,33 @@ class PinsonPositionMeasurementProcessor final : public PinsonProcessorBase {
  private:
   Kind kind_;
   api::Vector3 l_ps_p_;
+  TimeOffsetReport report_;
+};
+
+/// C++ addition (pinson_velocity_time_offset): NED velocity -> Pinson velocity error states and a second block of
+/// one state, the time offset tau of the velocity in seconds. A velocity stamped t is the vehicle's at t - tau:
+///   z = dv - tau * a_ned,   a_ned = specific force (NED) - C * accelerometer bias + gravity,   H column -a_ned.
+/// Aux data: the inertial PVA at the measurement time, the inertial's specific force over the second around it
+/// (INERTIAL_FORCES_AND_RATES) and the biases the inertial is applying (INERTIAL_SENSOR_ERRORS). The force is as
+/// the accelerometers gave it: a bias of a few milli-g left in would be an acceleration that is always there, and
+/// the offset times it a velocity the receiver is always wrong by. A force that is not centred on the measurement
+/// (the IMU has not got that far) leaves the column at zero for that message.
+class PinsonVelocityTimeOffsetMeasurementProcessor final : public PinsonProcessorBase {
+ public:
+  PinsonVelocityTimeOffsetMeasurementProcessor(std::string label, std::vector<std::string> state_block_labels,
+                                               api::Mediator* mediator);
+  void receive_aux_data(const api::AuxData& aux) override;
+  std::optional<api::StandardMeasurementModel> generate_model(const api::Message& message,
+                                                              const api::GenXandP& gen_x_and_p) override;
+  std::unique_ptr<api::StandardMeasurementProcessor> clone() const override {
+    return std::make_unique<PinsonVelocityTimeOffsetMeasurementProcessor>(*this);
+  }
+  static constexpr int kStates = 16;  ///< 15 Pinson states and the offset
+
+ private:
+  std::shared_ptr<const aspn23_eigen::MeasurementImu> force_aux_;
+  std::optional<api::Vector3> accel_bias_;  ///< what the inertial is applying, sensor (platform) frame
+  TimeOffsetReport report_;
 };
 
 /// NED velocity -> Pinson velocity error states.

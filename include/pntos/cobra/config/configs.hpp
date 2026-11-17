@@ -192,11 +192,20 @@ inline constexpr const char* kPinsonOdometry = "pinson_odometry";
 /// C++ addition: an angular rate the vehicle is known to have (zero when it stands) against the gyro, see
 /// PinsonZeroRateMeasurementProcessor.
 inline constexpr const char* kPinsonZeroRate = "pinson_zero_rate";
+/// C++ additions: pinson_with_ned_fogm_position and pinson_velocity with one more state block of a single state,
+/// the time offset of the measurements in seconds (positive: older than their time stamps). See
+/// PinsonPositionMeasurementProcessor::Kind::WithNedFogmAndTimeOffset and
+/// PinsonVelocityTimeOffsetMeasurementProcessor; DESIGN.md §7.30.
+inline constexpr const char* kPinsonPositionTimeOffset = "pinson_position_time_offset";
+inline constexpr const char* kPinsonVelocityTimeOffset = "pinson_velocity_time_offset";
 
 // Factory helpers mirroring the Python *MPConfig dataclasses (identifier + fixed aux_channels).
 LeverArmMPConfig PinsonPositionMPConfig();
 PlainMPConfig PinsonVelocityMPConfig();
 LeverArmMPConfig PinsonWithNedFogmPositionMPConfig();
+LeverArmMPConfig PinsonPositionTimeOffsetMPConfig();  ///< aux: INERTIAL_PVA; blocks: pinson, FOGM (3), time offset (1)
+/// aux: INERTIAL_PVA, INERTIAL_FORCES_AND_RATES, INERTIAL_SENSOR_ERRORS; blocks: pinson, time offset (1)
+PlainMPConfig PinsonVelocityTimeOffsetMPConfig();
 LeverArmMPConfig AltitudeMPConfig();
 LeverArmMPConfig PinsonWithLeverArmPositionMPConfig();
 LeverArmOrientationMPConfig PinsonBodyVelocityMPConfig();

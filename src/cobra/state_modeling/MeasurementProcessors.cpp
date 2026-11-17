@@ -5,6 +5,7 @@
 #include <aspn23/eigen/MeasurementAngularVelocity.hpp>
 
 #include <cmath>
+#include <cstdio>
 
 namespace pntos::cobra {
 
@@ -100,6 +101,7 @@ const char* kind_name(PinsonPositionMeasurementProcessor::Kind k) {
     case PinsonPositionMeasurementProcessor::Kind::WithNedFogm: return "PinsonWithNedFogmPositionMeasurementProcessor";
     case PinsonPositionMeasurementProcessor::Kind::WithLeverArm:
       return "PinsonWithLeverArmPositionMeasurementProcessor";
+    case PinsonPositionMeasurementProcessor::Kind::WithNedFogmAndTimeOffset: return "PinsonPositionTimeOffsetMeasurementProcessor";
   }
   return "PinsonPositionMeasurementProcessor";
 }
@@ -108,10 +110,23 @@ std::size_t kind_blocks(PinsonPositionMeasurementProcessor::Kind k) {
     case PinsonPositionMeasurementProcessor::Kind::Plain: return 1;
     case PinsonPositionMeasurementProcessor::Kind::WithNedFogm: return 2;
     case PinsonPositionMeasurementProcessor::Kind::WithLeverArm: return 3;
+    case PinsonPositionMeasurementProcessor::Kind::WithNedFogmAndTimeOffset: return 3;
   }
   return 1;
 }
+constexpr double kOffsetReportSigma = 0.05;  // s: a time offset is said once it is known this well ...
+constexpr double kOffsetReportStep = 0.02;   // s: ... and again when it has moved by more than this
 }  // namespace
+
+std::optional<std::string> TimeOffsetReport::consider(const std::string& name, const std::string& label, double offset, double sigma) {
+  if (!std::isfinite(offset) || !(sigma <= kOffsetReportSigma)) return std::nullopt;
+  if (reported_ && std::abs(offset - *reported_) <= kOffsetReportStep) return std::nullopt;
+  reported_ = offset;
+  char buf[160];
+  std::snprintf(buf, sizeof buf, ": the measurements are %.3f s %s than their time stamps (sigma %.3f s)", std::abs(offset),
+                offset >= 0 ? "older" : "newer", sigma);
+  return name + " \"" + label + "\"" + buf;
+}
 
 PinsonPositionMeasurementProcessor::PinsonPositionMeasurementProcessor(Kind kind, std::string label,
                                                                        std::vector<std::string> labels,
@@ -181,6 +196,30 @@ std::optional<api::StandardMeasurementModel> PinsonPositionMeasurementProcessor:
       };
       break;
     }
+    case Kind::WithNedFogmAndTimeOffset: {
+      // x = [15 Pinson, 3 sensor error (NED, m), 1 time offset (s)]
+      if (n != 19) {
+        log(LoggingLevel::ERROR, name_ + " expected 15 Pinson states, 3 sensor-error states and 1 time-offset state but was given " +
+                                     std::to_string(n) + " states. Cannot process message.");
+        return std::nullopt;
+      }
+      if (!utils::has_velocity(*inertial_pva_)) {
+        log(LoggingLevel::ERROR, name_ + " cannot process message at time " + secs(time) + " as the inertial PVA has no velocity.");
+        return std::nullopt;
+      }
+      const Vector3 v = utils::velocity(*inertial_pva_);
+      H.block<3, 3>(0, 6) = nav::skew(C_platform_to_nav * l);
+      H.block<3, 3>(0, 15) = -Matrix3::Identity();
+      H.col(18) = -v;
+      h = [C_platform_to_nav, l, v](const Vector& x) {
+        Vector3 r = x.head<3>() + (Matrix3::Identity() - nav::skew(x.segment<3>(6))) * C_platform_to_nav * l -
+                    x.segment<3>(15) - x(18) * v;
+        return Vector(r);
+      };
+      if (auto line = report_.consider(name_, label_, ewc->estimate(18), std::sqrt(std::max(ewc->covariance(18, 18), 0.0))))
+        log(LoggingLevel::INFO, *line);
+      break;
+    }
   }
   api::StandardMeasurementModel model;
   model.z = z;
@@ -222,6 +261,94 @@ std::optional<api::StandardMeasurementModel> PinsonVelocityMeasurementProcessor:
   model.h = [H](const Vector& x) { return Vector(H * x); };
   model.H = H;
   model.R = vel->get_covariance();
+  return model;
+}
+
+// ============================================== PinsonVelocityTimeOffsetMeasurementProcessor
+
+PinsonVelocityTimeOffsetMeasurementProcessor::PinsonVelocityTimeOffsetMeasurementProcessor(std::string label,
+                                                                                           std::vector<std::string> labels,
+                                                                                           api::Mediator* mediator)
+    : PinsonProcessorBase("PinsonVelocityTimeOffsetMeasurementProcessor", std::move(label), std::move(labels), mediator, 2) {}
+
+void PinsonVelocityTimeOffsetMeasurementProcessor::receive_aux_data(const api::AuxData& aux) {
+  // The inertial PVA and the inertial's specific force, in either order.
+  bool pva_seen = false;
+  for (const auto& a : aux) {
+    if (!a) continue;
+    if (auto pva = a->as<PVA>()) {
+      pva_seen = true;
+      if (!utils::quaternion(*pva)) {
+        log(LoggingLevel::ERROR, name_ + " received PVA aux data with no quaternion at time " + secs(pva->get_time_of_validity()) + ".");
+        continue;
+      }
+      inertial_pva_ = pva;
+    } else if (auto imu = a->as<aspn23_eigen::MeasurementImu>()) {
+      if (a->source_identifier == kAuxSourceSensorErrors)
+        accel_bias_ = Vector3(imu->get_meas_accel());
+      else
+        force_aux_ = imu;
+    }
+  }
+  if (!pva_seen)
+    log(LoggingLevel::ERROR, name_ + " expected aux data of type MeasurementPositionVelocityAttitude (and MeasurementImu), but received none.");
+}
+
+std::optional<api::StandardMeasurementModel> PinsonVelocityTimeOffsetMeasurementProcessor::generate_model(
+    const api::Message& message, const api::GenXandP& gen_x_and_p) {
+  auto vel = message.as<aspn23_eigen::MeasurementVelocity>();
+  if (!vel) {
+    log(LoggingLevel::ERROR, name_ + " expected message of type MeasurementVelocity, but got another type. Cannot process message.");
+    return std::nullopt;
+  }
+  const api::Timestamp time(vel->get_time_of_validity());
+  if (!check_common(time)) return std::nullopt;
+  if (vel->get_reference_frame() != ASPN23_MEASUREMENT_VELOCITY_REFERENCE_FRAME_NED) {
+    log(LoggingLevel::ERROR, name_ + " expected MeasurementVelocity with a NED reference frame at time " + secs(time) +
+                                 ". Cannot process message.");
+    return std::nullopt;
+  }
+  if (!utils::has_velocity(*inertial_pva_) || !utils::has_position(*inertial_pva_)) {
+    log(LoggingLevel::ERROR, name_ + " cannot process message at time " + secs(time) + " as the inertial PVA is missing fields.");
+    return std::nullopt;
+  }
+  auto ewc = gen_x_and_p(state_block_labels_);
+  if (!ewc) return std::nullopt;
+  if (ewc->estimate.size() != kStates) {
+    log(LoggingLevel::ERROR, name_ + " expected 15 Pinson states and 1 time-offset state but was given " +
+                                 std::to_string(ewc->estimate.size()) + " states. Cannot process message.");
+    return std::nullopt;
+  }
+  // The vehicle's acceleration over the second around the measurement: what a velocity that is tau seconds old lacks
+  // per second of tau. Without a force centred there, this message says nothing about the offset.
+  Vector3 a = Vector3::Zero();
+  if (!force_aux_ || !accel_bias_) {
+    log(LoggingLevel::ERROR, name_ + " cannot process message at time " + secs(time) +
+                                 " as it has not received the inertial's specific force and sensor errors as aux data (aux channels " +
+                                 kAuxInertialForcesAndRates + " and " + kAuxInertialSensorErrors + ").");
+    return std::nullopt;
+  }
+  const std::int64_t away = force_aux_->get_time_of_validity().get_elapsed_nsec() - time.elapsed_nsec;
+  const Vector3 f(force_aux_->get_meas_accel());
+  if (std::llabs(away) <= 250'000'000 && f.allFinite() && accel_bias_->allFinite()) {
+    const Vector3 llh = utils::position(*inertial_pva_);
+    const Matrix3 C_platform_to_nav = nav::quat_to_dcm(*utils::quaternion(*inertial_pva_));
+    a = f - C_platform_to_nav * *accel_bias_ + nav::calculate_gravity_schwartz(llh(2), llh(0));
+  } else {
+    log(LoggingLevel::DEBUG, name_ + " leaves the time offset out of the message at time " + secs(time) +
+                                 ": the inertial's specific force is centred " + std::to_string(away * 1e-9) + " s away from it.");
+  }
+  const Vector3 meas_vel(vel->get_x(), vel->get_y(), vel->get_z());
+  Matrix H = Matrix::Zero(3, kStates);
+  H.block<3, 3>(0, 3) = Matrix3::Identity();
+  H.col(15) = -a;
+  api::StandardMeasurementModel model;
+  model.z = meas_vel - utils::velocity(*inertial_pva_);
+  model.h = [H](const Vector& x) { return Vector(H * x); };
+  model.H = H;
+  model.R = vel->get_covariance();
+  if (auto line = report_.consider(name_, label_, ewc->estimate(15), std::sqrt(std::max(ewc->covariance(15, 15), 0.0))))
+    log(LoggingLevel::INFO, *line);
   return model;
 }
 

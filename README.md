@@ -42,7 +42,7 @@ Cobra/                  the Python original, as a submodule, used for golden-vec
 python3 -m venv .venv && .venv/bin/pip install meson ninja
 .venv/bin/meson setup build
 .venv/bin/meson compile -C build
-.venv/bin/meson test -C build          # 24 suites, 295 tests
+.venv/bin/meson test -C build          # 25 suites, 307 tests
 ```
 
 All dependencies are fetched as meson subprojects on first `setup`; nothing needs to be installed system-wide.
@@ -98,6 +98,11 @@ against limits derived once from the retuned filter, the `--legacy-q` mode again
   With `time_offset_prior_sigma` it also finds how much older than its time stamps the receiver's velocity is
   (0.28 s for the example u-blox), so the heading no longer depends on that figure being configured right
   (DESIGN.md §7.29).
+- Time offsets as filter states: `pinson_velocity_time_offset` and `pinson_position_time_offset` estimate how old
+  the receiver's velocity and fixes are while the vehicle drives. With its offset found the receiver's velocity
+  becomes a measurement worth using: with the constraints and the zero-motion updates the example drive is
+  followed to 1.4 m, and a minute without the receiver ends 3.8 m off (`configs/pos_ins_ground_vehicle.json`,
+  DESIGN.md §7.30).
 - Standing still: `zero_motion_generator` sees from the IMU that the vehicle stands and says so once a second;
   `pinson_zero_rate` and `pinson_velocity` turn that into the gyro bias and a bounded velocity. A standing
   vehicle's heading holds (0.15° in a minute instead of 8.9°) and a 120 s GNSS outage ends 34 m off instead of
