@@ -57,8 +57,11 @@ jobs:
         with:
           path: subprojects/packagecache
           key: subprojects-${{ hashFiles('subprojects/*.wrap') }}
+      # Optimised like the default build. Without inlining, Eigen makes the suites that run the filter over
+      # simulated drives five times slower (time_offset: 434 s against 89 s on a workstation), which is past
+      # the test timeout on the hosted runners.
       - name: Configure with ASan + UBSan
-        run: meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false -Dbuildtype=debug
+        run: meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false -Dbuildtype=debugoptimized
       - name: Build
         run: meson compile -C build-asan
       - name: Unit tests under sanitizers

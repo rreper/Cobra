@@ -27,6 +27,9 @@ Newest first. Each entry: what changed, what was verified, what is next.
 - 25 suites / 307 tests (12 new). The 18 rows of the alignment matrix and the 40 runs of the aiding matrix of
   v0.2.16 come out identical.
 - Left: handing the alignment's offset to the state; the two-minute outage's worst case with the velocity.
+- After the tag: CI's sanitizer job ran out of time on the new suite (481 s; the limit of a suite there is
+  480 s). No finding: built as CI built it, without optimisation, `time_offset` passes in 434 s on a
+  workstation. The job is now built optimised like every other build of the project (89 s for that suite).
 
 ## 2026-11-16 — v0.2.16: the receiver's time offset, found by the alignment
 
