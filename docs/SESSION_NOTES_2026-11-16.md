@@ -1,12 +1,16 @@
-# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.16
+# Session notes, 16 November 2026: integrity v0.2, Cobra v0.2.10 to v0.2.17
 
-Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Everything below is released; nothing is
-left on a branch or uncommitted. In order: the integrity layer's v0.2 (section 3), Cobra v0.2.10 (fusion core,
+Continues `docs/SESSION_NOTES_2026-11-15.md` (inertial review, v0.2.9). Everything below is released or
+committed and pushed; nothing is left on a branch or uncommitted, here or in the two repositories of 5.14.
+In order: the integrity layer's v0.2 (section 3), Cobra v0.2.10 (fusion core,
 section 4), v0.2.11 (alignment in motion, 5.7; sections 5.1 to 5.6 are its prototype stage, kept as written),
 v0.2.12 (zero-velocity and zero-rate updates, 5.8), v0.2.13 (the start-up gap of the `pva_message`
 initialization, 5.9), v0.2.14 (the IMU model for a driving car, 5.10), v0.2.15 (a standstill confirmed by the
-receiver's velocity, 5.11) and v0.2.16 (the receiver's time offset found by the alignment, 5.12). Section 6
-is what is open, section 7 how to pick it up.
+receiver's velocity, 5.11) and v0.2.16 (the receiver's time offset found by the alignment, 5.12). After the
+stopping point the work was resumed with the first open item, the time offsets as filter states, released as
+v0.2.17 (5.13). Last, the Cobra pins of cobra-integrity and pnt-edge were moved to v0.2.17 (5.14), and the CI run of the
+v0.2.17 push failed in its sanitizer job, on time and not on a finding, which a change to the workflow
+answers (5.15). Section 6 is what is open, section 7 how to pick it up.
 
 ## 1. What was asked
 
@@ -27,20 +31,30 @@ In order, after the v0.2.9 notes were committed:
 11. "commit and push" (the time-offset work: committed on its branch and pushed; no merge and no tag were asked for)
 12. "please release it"
 13. "update docs and get me to a good stopping point" (this revision of the notes, the roadmap, the gates kept outside `/tmp`)
+14. "please resume" (taken as: the next open item, the time offsets as filter states)
+15. "what notable improvements have been made to the INS" (answered from these notes and the matrices; no change)
+16. "commit, merge, tag v0.2.17 and push"
+17. "what is next for development after CI passes" (answered: the pins, a second recording, then section 6)
+18. "bump the pins in pnt-edge and cobra-integrity to v0.2.17" (done in their working trees; a commit was not
+    asked for)
+19. "commit and push the CI change and both pin bumps" (each fast-forwarded into its `main` and pushed; taken
+    that way because the CI change only helps on `main`, and the earlier pin commits are on `main` as well)
 
 ## 2. State at the end
 
 | Item | State |
 |---|---|
-| cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine |
-| Cobra (this repository) | v0.2.16 = `34c9a6b` (tag), `main` a notes commit or two beyond it, working tree clean. Tags of the day: v0.2.10 `03f2947`, v0.2.11 `67870dd`, v0.2.12 `84deb76`, v0.2.13 `6c7d695`, v0.2.14 `239846b`, v0.2.15 `cca2b41`, v0.2.16 `34c9a6b`. The `release` workflow is green for every one of them, `ci` for every push up to v0.2.15's; `ci` for the v0.2.16 push was still running when this was written |
-| Tests and gates at v0.2.16 | 24 suites / 295 tests, also under ASan + UBSan; parity dump byte-identical to v0.2.8 (`add099b17da4…`); acceptance 24 / 24; the 24 acceptance logs hold the same 61,772 messages |
+| cobra-integrity | v0.2 on `main` = `origin/main` = `fa50922`, no tag. CI result not read: the repository is private and `gh` is not logged in on this machine. Since then `main` = `origin/main` = `088beb2`, "Cobra v0.2.17": the wrap names Cobra v0.2.17, progress log, roadmap and README say so (section 5.14); its CI cannot be read either |
+| pnt-edge | `main` = `origin/main` = `ba59743`, "Cobra v0.2.17" (v0.2.0 is `73d0c60`): the wrap names Cobra v0.2.17, `meson.build` asks for at least that, a roadmap section (section 5.14). The repository is public; its `ci` run for that push was queued when this was written |
+| Cobra (this repository) | v0.2.17 = `ffb212b` (tag). `main` is two commits beyond it: `2b10099` (the CI change of section 5.15) and these notes. Working tree clean, no work branch left. Tags of the day: v0.2.10 `03f2947`, v0.2.11 `67870dd`, v0.2.12 `84deb76`, v0.2.13 `6c7d695`, v0.2.14 `239846b`, v0.2.15 `cca2b41`, v0.2.16 `34c9a6b`, v0.2.17 `ffb212b`. The `release` workflow is green for every one of them, `ci` for every push up to the closing notes of v0.2.16 (`b887f7a`). **`ci` for the v0.2.17 push failed**: `build-test` passed, the `sanitizers` job ran into the time limit of its unit-test step (section 5.15); the run for the push with the changed workflow had not finished when this was written |
+| Tests and gates at v0.2.17 | 25 suites / 307 tests, also under ASan + UBSan; parity dump byte-identical to v0.2.8 (`add099b17da4…`); acceptance 24 / 24; the 24 acceptance logs hold the same 61,772 messages |
 | Branch `align-in-motion` | merged into `main` (fast-forward) as v0.2.11; all gates passed on the released tree; `ci` (on `2044a47`) and the `release` workflow for the tag are both green |
 | Branch `zero-rate` | merged into `main` (fast-forward) as v0.2.12 = `84deb76`; all gates passed on the released tree; `ci` (on `c510049`) and the `release` workflow are green |
 | Branch `pva-gap` | merged into `main` (fast-forward) as v0.2.13 = `6c7d695` (notes `dba02cc`); all gates passed on the released tree; `ci` and `release` workflows green |
 | Branch `imu-model` | merged into `main` (fast-forward) as v0.2.14 = `239846b`: preset `vn100_driving`, both matrices and the four vehicle examples regenerated with it (section 5.10). All gates passed on the released tree |
 | Branch `confirmed-standstill` | merged into `main` (fast-forward) as v0.2.15 = `cca2b41`: `ZeroMotionGeneratorConfig::confirmation_channels`, two new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the confirmation (section 5.11). All gates passed on the released tree |
 | Branch `time-offset` | merged into `main` (fast-forward) as v0.2.16 = `34c9a6b` (the work is `26eb184`, the version commit on top): `InMotionAlignmentConfig::time_offset_prior_sigma` and `time_offset_sigma`, seven new alignment rows, both alignment example configurations with the estimate (section 5.12). All gates passed on the released tree. The branch also exists on `origin`, where it was pushed before the release |
+| Branch `offset-states` | merged into `main` (fast-forward) as v0.2.17 = `ffb212b`: processors `pinson_position_time_offset` and `pinson_velocity_time_offset`, new test suite `time_offset`, five new aiding rows, one new alignment row, `pos_ins_ground_vehicle.json` with the velocity and its offset state (section 5.13). All gates passed on the released tree. The branch was never pushed and is deleted |
 | Prototype and experiment scripts | Python, in `/home/rreper/orin/work/prototypes/align-in-motion/` (outside every repository; its `README.md` lists them) |
 | Gates | `/home/rreper/orin/work/prototypes/gates/cobra_gates.sh` with its baseline (section 7); no longer in `/tmp` |
 | pnt-edge | untouched; pins Cobra v0.2.8. cobra-integrity pins v0.2.7 |
@@ -420,6 +434,79 @@ Full account: `docs/DESIGN.md` §7.29.
 - Gates on this tree: 24 suites / 295 tests, also under ASan + UBSan with no report; parity dump byte-identical;
   acceptance 24 / 24; 61,772 messages identical. v0.2.15's `ci` and `release` workflows are green.
 
+### 5.13 The receiver's time offsets as filter states (released as v0.2.17)
+
+Full account: `docs/DESIGN.md` §7.30.
+
+- Two new measurement processors (twelfth and thirteenth), each with a one-state FOGM block for the offset:
+  the position model gets the column −v, the velocity model the column −a. New ones rather than a third label
+  on the old ones, because `StateModelingTest.WrongNumberBlocks` (ported from Python) says that a third label
+  is an error there.
+- Tests on simulated drives through the whole filter (`tests/test_time_offset.cpp`; the simulator moved to
+  `tests/sim_drive.hpp`). A mutation check, the two columns set to zero, fails the four tests of the new
+  behaviour and passes the three pinned ones.
+- First run on the recording: the velocity with its offset state made the vertical worse (1.57 m, and 2.72 m
+  with no time bias configured). Cause: the specific force of the aux data still holds the accelerometer bias
+  (5 milli-g vertical). With the applied bias taken out (aux `INERTIAL_SENSOR_ERRORS`): 0.95 m.
+- Recording (`docs/AIDING_MATRIX.md`): the velocity at 150 ms as a measurement 2.16 / 0.98 m; with its offset
+  a state 1.49 / 0.95 m and 60 s outages 16.9 (38.3) m against 24.9 (53.6) m. The whole ground-vehicle set:
+  1.43 / 1.14 m, 60 s outages 3.8 (6.5) m against 6.1 (12.3) m, 120 s the same mean and a worse worst case
+  (20.9 against 16.5 m). After an alignment the heading is the same to 0.1°, the position 0.1 m worse against
+  the reference from a minute on. The ground-vehicle example uses it.
+- Offsets found by the filter: velocity 0.313 and 0.308 s (alignment: 0.28 s); fixes 0.092 s (alignment:
+  0.073 s).
+- The fixes' offset state: found on simulated drives (0.275 s for 0.3 s), velocity error gone at once, but
+  the three metres the solution was behind go mostly into the receiver's FOGM bias states (the filter cannot
+  tell a constant fix bias from a position error; the split follows the covariances) and leave with their
+  300 s. Parked after 100 s: 1.9 m with the state, 1.1 m without; after 600 s: 0.5 against 1.3 m. Pinned by
+  `TimeOffset.WhatTheSolutionWasBehindByLingersInTheBiasStates`. On the recording 1.67 m against 1.55 m
+  horizontally, which the reference cannot settle. Not in any example.
+- 25 suites / 307 tests. The 18 alignment rows and 40 aiding runs of v0.2.16 come out identical.
+- Gates on the released tree (they had passed on the working tree before the version was set, and were run
+  again after): 25 suites / 307 tests, also under ASan + UBSan with no report; parity dump byte-identical;
+  parity check passes; acceptance 24 / 24; the 24 acceptance logs hold the same 61,772 messages.
+
+### 5.14 The Cobra pins of cobra-integrity and pnt-edge at v0.2.17 (`088beb2`, `ba59743`)
+
+Asked for after the release. Both consume Cobra through `subprojects/pntos-cpp.wrap`; cobra-integrity named
+v0.2.7, pnt-edge v0.2.8. Each now has the wrap at v0.2.17, in a commit "Cobra v0.2.17" on its `main`
+(cobra-integrity `088beb2`, pnt-edge `ba59743`), pushed. Neither needed a source change, and neither behaves
+differently, which was measured in both:
+
+- cobra-integrity: 30 tests; `tools/make_scenarios.py` writes the same configurations; the Monte Carlo with 20
+  seeds equal in every figure to the committed `docs/monte_carlo.json` (which the v0.2.7 build reproduced just
+  before the move); the recorded-log matrix equal in every figure to the committed
+  `docs/protected_matrix.json`; `tools/ci_integrity_check.py` and `tools/tune_installation.py` PASS. Changed:
+  the wrap, `docs/PROGRESS.md`, `docs/ROADMAP.md` (item 0c), one stale line of `README.md`.
+- pnt-edge: 28 tests in the plain build and in the one with the integrity plugin; the 60 s replay gives the same
+  350 NMEA sentences byte for byte as on v0.2.8, the protected replay the same 200 (two runs on v0.2.8 agreed
+  with each other first). Changed: the wrap, the minimum version in `meson.build` (0.2.17, so that a stale
+  subproject checkout stops the build with one message), a section at the end of `docs/ROADMAP.md`.
+- Not done, because it was not asked for: any filter configuration in either that uses what v0.2.9 to v0.2.17
+  added; tags.
+
+### 5.15 CI after v0.2.17: the sanitizer job ran out of time; the job is built optimised now (`2b10099`)
+
+- The `release` workflow for the tag is green. In `ci` on `ffb212b` the job `build-test` passed (unit suites,
+  the three short acceptances, the C example). The job `sanitizers` failed: its step "Unit tests under
+  sanitizers" ended after 481 s, which is the limit of one suite there (120 s times the multiplier 4). On the
+  green runs before, that step took 140 s. The job's log cannot be read from this machine (`gh` is not logged
+  in), so that it was the new suite `time_offset` is an inference, from the following.
+- Reproduced here with CI's configuration (`-Dbuildtype=debug`, ASan + UBSan): `time_offset` passes and takes
+  434 s, `filter` 164 s, `alignment_in_motion` 173 s. No sanitizer report. The suite runs twenty filters over
+  ninety minutes of simulated driving; one 180 s run costs 12 to 19 s unoptimised, three quarters of it in the
+  filter and a quarter in the simulator.
+- Why the gates did not see it: their sanitizer build is optimised (the project default, and what
+  `docs/TESTING.md` describes), where the same suite takes 89 s. CI's was the only unoptimised one.
+- The change: the sanitizer job configured with `-Dbuildtype=debugoptimized`. With CI's test command on that
+  build: 25 suites pass, no report, slowest suite 89 s. I prepared it and left it uncommitted, because it
+  changes how the CI job is built; Rich had it committed and pushed (`2b10099`, gates passed on that tree).
+  The alternative would have been to leave the job as it was and cut the suite: its ten-minute runs are half
+  of its time, and without them it would still take about 210 s unoptimised, more than any other suite.
+- The tag v0.2.17 stays where it is, on a commit whose `ci` run is red in that one job.
+- `/home/rreper/orin/work/prototypes/gates/cobra_gates.sh` now prints the slowest suite of its sanitizer run
+  and says so above 200 s.
+
 ## 6. What is open
 
 Decisions that are Rich's:
@@ -431,18 +518,20 @@ Decisions that are Rich's:
 - `origin/time-offset` still exists on GitHub. It was pushed before the release and is contained in `main`;
   delete it or keep it.
 - cobra-integrity: should an excluded lone receiver's fix be offered as an unassured last resort?
-- Bump the `pntos-cpp` pins (cobra-integrity v0.2.7, pnt-edge v0.2.8) to v0.2.16 and surface the new integrity
-  status keys in pnt-edge. No behaviour changes by the bump itself: every option added today is off by default.
+- pnt-edge: a filter configuration for the bench that uses what v0.2.9 to v0.2.17 added, and the new
+  integrity status keys. Until then the appliance's filter does what it did on v0.2.8.
 
 Work, in the order I would take it (DESIGN.md §9.6 has the same list with the reasons):
 
-1. The receiver's time offsets as filter states. The alignment finds the velocity's offset once and only
-   reports it; the filter keeps the configured time biases, and the fixes' offset is not estimated when there
-   is a velocity channel.
+1. Done and released as v0.2.17 (§5.13): the receiver's time offsets as filter states.
 2. An accelerometer bias that may step when the vehicle starts and stops: 2 mm/s² on the vertical axis of the
    VN-100 (§5.11), which is what keeps the vertical zero velocity at 0.2 m/s.
-3. Creeping in an outage, where the IMU decides alone and takes it for standing.
-4. Measurement weighting that adapts to a receiver whose reported covariance is optimistic; receiver signal
+3. What the alignment knows and the initial-solution interface does not carry: the offset it found (for the
+   state of §5.13), the heading / gyro-bias correlation, and that a position taken from an old fix is behind
+   by the offset times the velocity (the transient of §5.13).
+4. Creeping in an outage, where the IMU decides alone and takes it for standing.
+5. Why the two-minute outage is worse in the worst case with the receiver's velocity in the filter.
+6. Measurement weighting that adapts to a receiver whose reported covariance is optimistic; receiver signal
    indicators into the integrity monitor; tightly coupled GNSS.
 
 Leads not followed: a gyro bias sigma four times larger halves the outage error with constraints and
@@ -478,7 +567,8 @@ the alignment. The items of `SESSION_NOTES_2026-11-15.md` §6 and §7 are unchan
 
 - Design: `docs/DESIGN.md`. The sections of this session: §7.23 aiding beside the receiver, §7.24 alignment in
   motion, §7.25 standing still, §7.26 an initial solution older than the IMU, §7.27 the IMU model in a driving
-  car, §7.28 a standstill confirmed by the receiver, §7.29 the receiver's time offset; §8 deviations 21 to 29;
+  car, §7.28 a standstill confirmed by the receiver, §7.29 the receiver's time offset, §7.30 the time offsets
+  as filter states; §8 deviations 21 to 30;
   §9.6 open items.
 - Progress log: `docs/PROGRESS.md`. Measurements: `docs/AIDING_MATRIX.md`, `docs/ALIGNMENT_MATRIX.md`,
   `docs/TEST_MATRIX.md`. What to configure for which vehicle: `docs/GETTING_STARTED.md`.
